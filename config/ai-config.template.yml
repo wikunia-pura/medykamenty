@@ -1,0 +1,8 @@
+# Cutis — AI configuration template.
+# In CI, GitHub Actions writes the real ai-config.yml from secrets before packaging.
+# For local development with AI features, copy this file to config/ai-config.yml and
+# fill in your Anthropic API key. The runtime file is gitignored.
+ai:
+  anthropic_api_key: ""
+  model: "claude-sonnet-4-6"
+  default_provider: "anthropic"

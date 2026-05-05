@@ -1,0 +1,17 @@
+node_modules/
+dist/
+release/
+*.log
+.DS_Store
+.vscode/
+*.tmp
+.env
+.env.local
+.env.*.local
+coverage/
+test-output/
+config/ai-config.yml
+
+# Local test data — contains real client info (prices, suppliers).
+# Never commit to public repo. Share via private channel if needed.
+test_data/
