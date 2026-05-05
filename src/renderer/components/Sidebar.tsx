@@ -1,5 +1,6 @@
 import React from 'react';
 import { useT } from '../i18n';
+import Logo from './Logo';
 import type { ViewKey } from '../views/types';
 
 interface NavItem {
@@ -35,7 +36,9 @@ const Sidebar: React.FC<Props> = ({ current, onSelect, appVersion }) => {
   let prevGroup: string | undefined;
   return (
     <div className="sidebar">
-      <div className="sidebar-brand">{t.appName}</div>
+      <div className="sidebar-brand">
+        <Logo size={26} />
+      </div>
       <div className="sidebar-nav">
         {items.map((item) => {
           const showDivider = prevGroup !== undefined && item.group !== prevGroup;
