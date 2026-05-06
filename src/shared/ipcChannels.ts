@@ -61,6 +61,9 @@ export const IPC = {
   LLM_REWRITE_EMAIL: 'llm:rewrite-email',
   LLM_MATCH_SUGGEST: 'llm:match-suggest',
 
+  // Demo
+  DEMO_SEED: 'demo:seed',
+
   // App
   APP_GET_VERSION: 'app:get-version',
   APP_OPEN_EXTERNAL: 'app:open-external',

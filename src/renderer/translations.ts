@@ -117,6 +117,12 @@ export interface T {
   version: string;
   selectProduct: string;
   selectSupplier: string;
+  // Demo
+  loadDemoTitle: string;
+  loadDemoBody: string;
+  loadDemoButton: string;
+  loadDemoConfirm: string;
+  loadDemoSuccess: string;
 }
 
 const pl: T = {
@@ -225,6 +231,13 @@ const pl: T = {
   version: 'wersja',
   selectProduct: 'Wybierz produkt',
   selectSupplier: 'Wybierz dostawcę',
+  loadDemoTitle: 'Dane demo',
+  loadDemoBody:
+    'Wczytuje fikcyjną firmę: 4 dostawców, 7 surowców (z jednym fabrycznym i jednym pustym), 3 komponenty, jeden produkt z recepturą, gotowy plan na 1000 sztuk i stany magazynowe. Po wczytaniu od razu można obliczyć zapotrzebowanie i wygenerować maile.',
+  loadDemoButton: 'Wczytaj dane demo',
+  loadDemoConfirm:
+    'To zastąpi WSZYSTKIE obecne dane (dostawcy, surowce, komponenty, produkty, plany, stany). Ustawienia zostają. Kontynuować?',
+  loadDemoSuccess: 'Wczytano dane demo. Przejdź do „Plan produkcji" i kliknij „Oblicz zapotrzebowanie".',
 };
 
 const en: T = {
@@ -333,6 +346,13 @@ const en: T = {
   version: 'version',
   selectProduct: 'Select product',
   selectSupplier: 'Select supplier',
+  loadDemoTitle: 'Demo data',
+  loadDemoBody:
+    'Loads a fictional company: 4 suppliers, 7 raw materials (one factory-supplied and one out of stock), 3 components, one product with a recipe, a ready plan for 1000 units, and stock snapshots. After loading you can compute shortages and generate emails right away.',
+  loadDemoButton: 'Load demo data',
+  loadDemoConfirm:
+    'This will REPLACE all current data (suppliers, raw materials, components, products, plans, stock). Settings are preserved. Continue?',
+  loadDemoSuccess: 'Demo data loaded. Go to "Production plan" and click "Compute shortages".',
 };
 
 export const translations: Record<Lang, T> = { pl, en };

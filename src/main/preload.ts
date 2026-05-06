@@ -56,6 +56,8 @@ const CH = {
   LLM_REWRITE_EMAIL: 'llm:rewrite-email',
   LLM_MATCH_SUGGEST: 'llm:match-suggest',
 
+  DEMO_SEED: 'demo:seed',
+
   APP_GET_VERSION: 'app:get-version',
   APP_OPEN_EXTERNAL: 'app:open-external',
   APP_CHECK_UPDATES: 'app:check-updates',
@@ -138,6 +140,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ) => ipcRenderer.invoke(CH.LLM_REWRITE_EMAIL, draftBody, language, ctx),
   suggestMatchWithAI: (sourceName: string, candidates: { id: string; name: string }[]) =>
     ipcRenderer.invoke(CH.LLM_MATCH_SUGGEST, sourceName, candidates),
+
+  // Demo
+  seedDemo: () => ipcRenderer.invoke(CH.DEMO_SEED),
 
   // App
   getAppVersion: () => ipcRenderer.invoke(CH.APP_GET_VERSION),

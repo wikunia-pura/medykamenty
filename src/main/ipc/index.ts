@@ -14,6 +14,7 @@ import { generateEmails } from '../services/rfqGenerator';
 import { maxProducible } from '../services/reverseCalculator';
 import { isAiAvailable, getModel } from '../aiConfig';
 import { rewriteEmail, suggestMatch } from '../services/llmClient';
+import { seedDemo } from '../services/demoSeed';
 
 export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWindow | null): void {
   // ---- Suppliers ----
@@ -218,6 +219,9 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     async (_e, sourceName: string, candidates: { id: string; name: string }[]) =>
       suggestMatch(sourceName, candidates),
   );
+
+  // ---- Demo ----
+  ipcMain.handle(IPC.DEMO_SEED, () => seedDemo(db));
 
   // ---- App ----
   ipcMain.handle(IPC.APP_GET_VERSION, () => app.getVersion());

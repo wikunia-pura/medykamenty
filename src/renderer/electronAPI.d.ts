@@ -100,6 +100,16 @@ export interface ElectronAPI {
     candidates: { id: string; name: string }[],
   ): Promise<{ id: string; confidence: number } | null>;
 
+  // Demo
+  seedDemo(): Promise<{
+    suppliers: number;
+    rawMaterials: number;
+    components: number;
+    products: number;
+    plans: number;
+    stockSnapshots: number;
+  }>;
+
   // App
   getAppVersion(): Promise<string>;
   openExternal(url: string): Promise<void>;

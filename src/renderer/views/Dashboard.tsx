@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import type { ViewKey } from './types';
 import type { StockSnapshot } from '../../shared/types';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface Props {
   onNavigate: (key: ViewKey) => void;
@@ -20,27 +21,50 @@ const Dashboard: React.FC<Props> = ({ onNavigate, aiAvailable }) => {
   const t = useT();
   const [counts, setCounts] = useState<Counts | null>(null);
   const [latestSnapshot, setLatestSnapshot] = useState<StockSnapshot | undefined>();
+  const [confirmDemo, setConfirmDemo] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoMessage, setDemoMessage] = useState<string | null>(null);
+
+  const reload = async () => {
+    const [products, rawMaterials, components, suppliers, plans, snapshots] = await Promise.all([
+      window.electronAPI.listProducts(),
+      window.electronAPI.listRawMaterials(),
+      window.electronAPI.listComponents(),
+      window.electronAPI.listSuppliers(),
+      window.electronAPI.listPlans(),
+      window.electronAPI.listStockSnapshots(),
+    ]);
+    setCounts({
+      products: products.length,
+      rawMaterials: rawMaterials.length,
+      components: components.length,
+      suppliers: suppliers.length,
+      plans: plans.length,
+    });
+    setLatestSnapshot(snapshots[0]);
+  };
+
+  const runDemo = async () => {
+    setConfirmDemo(false);
+    setDemoBusy(true);
+    setDemoMessage(null);
+    try {
+      await window.electronAPI.seedDemo();
+      await reload();
+      setDemoMessage(t.loadDemoSuccess);
+    } catch (err) {
+      setDemoMessage((err as Error).message);
+    } finally {
+      setDemoBusy(false);
+    }
+  };
 
   useEffect(() => {
-    void (async () => {
-      const [products, rawMaterials, components, suppliers, plans, snapshots] = await Promise.all([
-        window.electronAPI.listProducts(),
-        window.electronAPI.listRawMaterials(),
-        window.electronAPI.listComponents(),
-        window.electronAPI.listSuppliers(),
-        window.electronAPI.listPlans(),
-        window.electronAPI.listStockSnapshots(),
-      ]);
-      setCounts({
-        products: products.length,
-        rawMaterials: rawMaterials.length,
-        components: components.length,
-        suppliers: suppliers.length,
-        plans: plans.length,
-      });
-      setLatestSnapshot(snapshots[0]);
-    })();
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const isEmpty = counts !== null && counts.products === 0 && counts.suppliers === 0;
 
   const tile = (label: string, value: number, target: ViewKey) => (
     <div
@@ -64,6 +88,25 @@ const Dashboard: React.FC<Props> = ({ onNavigate, aiAvailable }) => {
         {counts && tile(t.components, counts.components, 'components')}
         {counts && tile(t.suppliers, counts.suppliers, 'suppliers')}
         {counts && tile(t.productionPlan, counts.plans, 'productionPlan')}
+      </div>
+
+      <h2>{t.loadDemoTitle}</h2>
+      <div className="card" style={isEmpty ? { borderColor: 'var(--primary)' } : undefined}>
+        <div className="hint" style={{ marginBottom: 12 }}>{t.loadDemoBody}</div>
+        <div className="btn-row">
+          <button
+            className={`btn ${isEmpty ? 'primary' : ''}`}
+            disabled={demoBusy}
+            onClick={() => setConfirmDemo(true)}
+          >
+            {demoBusy ? t.loading : t.loadDemoButton}
+          </button>
+        </div>
+        {demoMessage && (
+          <div className="hint" style={{ marginTop: 12 }}>
+            {demoMessage}
+          </div>
+        )}
       </div>
 
       <h2>{t.stockImport}</h2>
@@ -103,6 +146,15 @@ const Dashboard: React.FC<Props> = ({ onNavigate, aiAvailable }) => {
           {aiAvailable ? <span className="tag success">available</span> : <span className="tag">unavailable</span>}
         </div>
       </div>
+
+      {confirmDemo && (
+        <ConfirmDialog
+          message={t.loadDemoConfirm}
+          onConfirm={runDemo}
+          onCancel={() => setConfirmDemo(false)}
+          danger
+        />
+      )}
     </div>
   );
 };
