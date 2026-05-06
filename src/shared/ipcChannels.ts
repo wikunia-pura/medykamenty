@@ -34,6 +34,10 @@ export const IPC = {
   STOCK_LIST_SNAPSHOTS: 'stock:list-snapshots',
   STOCK_GET_CURRENT: 'stock:get-current',
   STOCK_RESOLVE_MATCH: 'stock:resolve-match',
+  STOCK_UPDATE_ROW: 'stock:update-row',
+  STOCK_DELETE_ROW: 'stock:delete-row',
+  STOCK_DELETE_SNAPSHOT: 'stock:delete-snapshot',
+  STOCK_DELETE_KIND: 'stock:delete-kind',
 
   // Plan
   PLAN_LIST: 'plan:list',
@@ -41,9 +45,15 @@ export const IPC = {
   PLAN_CREATE: 'plan:create',
   PLAN_UPDATE: 'plan:update',
   PLAN_DELETE: 'plan:delete',
+  PLAN_DUPLICATE: 'plan:duplicate',
   PLAN_COMPUTE_SHORTAGES: 'plan:compute-shortages',
   PLAN_COMPUTE_COST: 'plan:compute-cost',
   PLAN_GENERATE_EMAILS: 'plan:generate-emails',
+
+  // Shortage report history
+  SHORTAGE_REPORT_LIST: 'shortageReport:list',
+  SHORTAGE_REPORT_GET: 'shortageReport:get',
+  SHORTAGE_REPORT_DELETE: 'shortageReport:delete',
 
   // Reverse
   REVERSE_MAX_PRODUCIBLE: 'reverse:max-producible',
@@ -55,6 +65,10 @@ export const IPC = {
   // Backup
   BACKUP_EXPORT: 'backup:export',
   BACKUP_IMPORT: 'backup:import',
+
+  // Generic file save/open (per-view export/import)
+  FILE_SAVE_TEXT: 'file:save-text',
+  FILE_OPEN_TEXT: 'file:open-text',
 
   // LLM
   LLM_IS_AVAILABLE: 'llm:is-available',

@@ -1,18 +1,35 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
 import type { ProductionPlan, RFQEmail, Lang } from '../../shared/types';
+import type { ViewKey } from './types';
 import AIToggleButton from '../components/AIToggleButton';
+import SearchInput, { matchesQuery } from '../components/SearchInput';
+import NoPlansEmptyState from '../components/NoPlansEmptyState';
+import { IconCopy, IconCheck, IconMail, IconSparkles } from '../components/Icons';
 
 interface Props {
   defaultLanguage: Lang;
   aiAvailable: boolean;
   useAiByDefault: boolean;
+  selectedPlanId: string;
+  onSelectPlan: (id: string) => void;
+  autoGenerate?: boolean;
+  onAutoGenerateConsumed?: () => void;
+  onNavigate?: (key: ViewKey) => void;
 }
 
-const EmailGenerator: React.FC<Props> = ({ defaultLanguage, aiAvailable, useAiByDefault }) => {
+const EmailGenerator: React.FC<Props> = ({
+  defaultLanguage,
+  aiAvailable,
+  useAiByDefault,
+  selectedPlanId,
+  onSelectPlan,
+  autoGenerate,
+  onAutoGenerateConsumed,
+  onNavigate,
+}) => {
   const t = useT();
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
-  const [planId, setPlanId] = useState<string>('');
   const [language, setLanguage] = useState<Lang>(defaultLanguage);
   const [useAi, setUseAi] = useState(useAiByDefault);
   const [emails, setEmails] = useState<RFQEmail[]>([]);
@@ -20,21 +37,29 @@ const EmailGenerator: React.FC<Props> = ({ defaultLanguage, aiAvailable, useAiBy
   const [error, setError] = useState<string | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [refining, setRefining] = useState<number | null>(null);
+  const [query, setQuery] = useState('');
+
+  const filteredEmails = useMemo(() => {
+    if (!query.trim()) return emails.map((e, idx) => ({ e, idx }));
+    return emails
+      .map((e, idx) => ({ e, idx }))
+      .filter(({ e }) => matchesQuery(e, query));
+  }, [emails, query]);
 
   useEffect(() => {
     void (async () => {
       const ps = await window.electronAPI.listPlans();
       setPlans(ps);
-      if (ps[0]) setPlanId(ps[0].id);
+      if (!selectedPlanId && ps[0]) onSelectPlan(ps[0].id);
     })();
   }, []);
 
   const generate = async () => {
-    if (!planId) return;
+    if (!selectedPlanId) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await window.electronAPI.generateEmails(planId, {
+      const result = await window.electronAPI.generateEmails(selectedPlanId, {
         language,
         useAI: useAi && aiAvailable,
       });
@@ -45,6 +70,14 @@ const EmailGenerator: React.FC<Props> = ({ defaultLanguage, aiAvailable, useAiBy
       setBusy(false);
     }
   };
+
+  // Auto-generate when navigated here from the shortage report (wizard step 2 → 3).
+  useEffect(() => {
+    if (!autoGenerate || !selectedPlanId) return;
+    onAutoGenerateConsumed?.();
+    void generate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoGenerate, selectedPlanId]);
 
   const copy = async (idx: number) => {
     try {
@@ -85,13 +118,25 @@ const EmailGenerator: React.FC<Props> = ({ defaultLanguage, aiAvailable, useAiBy
       e.subject,
     )}&body=${encodeURIComponent(e.body)}`;
 
+  if (plans.length === 0) {
+    return (
+      <div className="main">
+        <h1>{t.emailGenerator}</h1>
+        <NoPlansEmptyState onAddPlan={() => onNavigate?.('productionPlan')} />
+      </div>
+    );
+  }
+
   return (
     <div className="main">
-      <h1>{t.emailGenerator}</h1>
+      <div className="page-header">
+        <h1>{t.emailGenerator}</h1>
+        {emails.length > 0 && <span className="page-header-count">({emails.length})</span>}
+      </div>
 
       <div className="card">
         <div className="row">
-          <select value={planId} onChange={(e) => setPlanId(e.target.value)}>
+          <select value={selectedPlanId} onChange={(e) => onSelectPlan(e.target.value)}>
             <option value="">—</option>
             {plans.map((p) => (
               <option key={p.id} value={p.id}>
@@ -106,16 +151,24 @@ const EmailGenerator: React.FC<Props> = ({ defaultLanguage, aiAvailable, useAiBy
           </select>
           <AIToggleButton enabled={useAi} onChange={setUseAi} available={aiAvailable} />
           <div className="spacer" />
-          <button className="btn primary" disabled={!planId || busy} onClick={generate}>
+          <button className="btn primary" disabled={!selectedPlanId || busy} onClick={generate}>
             {busy ? t.loading : t.generateEmails}
           </button>
         </div>
         {error && <div className="error-text" style={{ marginTop: 8 }}>{error}</div>}
+        {emails.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <SearchInput value={query} onChange={setQuery} />
+          </div>
+        )}
       </div>
 
       {emails.length === 0 && <div className="card hint">{t.noData}</div>}
+      {emails.length > 0 && filteredEmails.length === 0 && (
+        <div className="card hint">—</div>
+      )}
 
-      {emails.map((e, idx) => (
+      {filteredEmails.map(({ e, idx }) => (
         <div key={idx} className="card">
           <div className="card-header">
             <div className="card-title">
@@ -129,19 +182,29 @@ const EmailGenerator: React.FC<Props> = ({ defaultLanguage, aiAvailable, useAiBy
             </div>
             <div className="btn-row">
               <button
-                className="btn btn-sm"
+                className="btn btn-sm soft-warn"
                 onClick={() => refineOne(idx)}
                 disabled={!aiAvailable || refining === idx}
                 title={aiAvailable ? t.refineWithAI : t.aiUnavailable}
               >
-                {refining === idx ? t.loading : `AI: ${t.refineWithAI}`}
+                <IconSparkles size={13} />{' '}
+                {refining === idx ? t.loading : t.refineWithAI}
               </button>
-              <button className="btn btn-sm" onClick={() => copy(idx)}>
+              <button
+                className={`btn btn-sm ${copiedIdx === idx ? 'soft-success' : 'soft-edit'}`}
+                onClick={() => copy(idx)}
+                title={t.copy}
+              >
+                {copiedIdx === idx ? <IconCheck size={13} /> : <IconCopy size={13} />}{' '}
                 {copiedIdx === idx ? t.copied : t.copy}
               </button>
               {e.to && (
-                <a className="btn btn-sm" href={mailtoHref(e)}>
-                  mailto:
+                <a
+                  className="btn btn-sm soft-success"
+                  href={mailtoHref(e)}
+                  title={t.openInMailClient}
+                >
+                  <IconMail size={13} /> {t.openInMailClient}
                 </a>
               )}
             </div>

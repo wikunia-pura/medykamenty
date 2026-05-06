@@ -8,3 +8,4 @@ export const DEFAULT_AI_MODEL = 'claude-sonnet-4-6';
 
 export const STOCK_SNAPSHOT_RETENTION = 10;
 export const FUZZY_MATCH_THRESHOLD = 0.85;
+export const SHORTAGE_REPORT_RETENTION = 50;

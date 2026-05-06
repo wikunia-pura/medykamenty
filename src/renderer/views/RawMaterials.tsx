@@ -1,8 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
 import type { RawMaterial, Supplier, Unit } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import SupplierMultiPicker from '../components/SupplierMultiPicker';
+import SearchInput, { matchesQuery } from '../components/SearchInput';
+import { IconEdit, IconTrash, IconPlus, IconStar, IconClose } from '../components/Icons';
+import ExportImportButtons from '../components/ExportImportButtons';
+import {
+  exportRawMaterialsCsv,
+  importRawMaterialsCsv,
+  saveFile,
+  openFile,
+  formatStats,
+} from '../utils/exportImport';
 
 const UNITS: Unit[] = ['kg', 'g', 'l', 'ml'];
 
@@ -13,6 +23,9 @@ const RawMaterials: React.FC = () => {
   const [editing, setEditing] = useState<Partial<RawMaterial> | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<RawMaterial | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
 
   const reload = async () => {
     const [rms, ss] = await Promise.all([
@@ -28,6 +41,17 @@ const RawMaterials: React.FC = () => {
   }, []);
 
   const supplierName = (id?: string) => suppliers.find((s) => s.id === id)?.name ?? '—';
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return items;
+    return items.filter((rm) => {
+      // Include resolved supplier names in the search corpus.
+      const supplierNames = (rm.supplierIds ?? [])
+        .map((id) => suppliers.find((s) => s.id === id)?.name ?? '')
+        .join(' ');
+      return matchesQuery({ ...rm, supplierNames }, query);
+    });
+  }, [items, suppliers, query]);
 
   const onAdd = () =>
     setEditing({
@@ -67,6 +91,41 @@ const RawMaterials: React.FC = () => {
     }
   };
 
+  const onExport = async () => {
+    setError(null);
+    setInfo(null);
+    if (items.length === 0) {
+      setInfo(t.exportEmpty);
+      return;
+    }
+    setBusy(true);
+    try {
+      const { content, filename } = exportRawMaterialsCsv(items, suppliers);
+      await saveFile(filename, content, 'csv');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onImport = async () => {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      const r = await openFile('csv');
+      if (!r.ok || !r.content) return;
+      try {
+        const stats = await importRawMaterialsCsv(r.content, [...items], suppliers);
+        setInfo(formatStats(stats));
+        await reload();
+      } catch (err) {
+        setError(`${t.importInvalidFile}: ${(err as Error).message}`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onDelete = async (rm: RawMaterial) => {
     setConfirmDelete(null);
     const result = await window.electronAPI.deleteRawMaterial(rm.id);
@@ -77,83 +136,141 @@ const RawMaterials: React.FC = () => {
     }
   };
 
+  const renderSupplierChips = (rm: RawMaterial) => {
+    const ids = rm.supplierIds ?? [];
+    if (ids.length === 0) return <span className="hint">—</span>;
+    // Order: preferred first, then the rest in their stored order.
+    const ordered = [
+      ...(rm.preferredSupplierId && ids.includes(rm.preferredSupplierId)
+        ? [rm.preferredSupplierId]
+        : []),
+      ...ids.filter((id) => id !== rm.preferredSupplierId),
+    ];
+    return (
+      <span className="supplier-chips">
+        {ordered.map((id) => {
+          const isPreferred = id === rm.preferredSupplierId;
+          return (
+            <span
+              key={id}
+              className={`supplier-chip ${isPreferred ? 'preferred' : ''}`}
+              title={isPreferred ? t.preferredSupplier : undefined}
+            >
+              {isPreferred && (
+                <span className="supplier-chip-star">
+                  <IconStar size={11} />
+                </span>
+              )}
+              {supplierName(id)}
+            </span>
+          );
+        })}
+      </span>
+    );
+  };
+
   return (
     <div className="main">
-      <h1>{t.rawMaterials}</h1>
+      <div className="page-header">
+        <h1>{t.rawMaterials}</h1>
+        <span className="page-header-count">({items.length})</span>
+      </div>
 
       <div className="card">
-        <div className="card-header">
-          <div className="card-title">{items.length}</div>
-          <button className="btn primary" onClick={onAdd}>
-            + {t.add}
-          </button>
+        <div className="toolbar">
+          <div className="toolbar-actions">
+            <button className="btn primary" onClick={onAdd}>
+              <IconPlus size={14} /> {t.add}
+            </button>
+            <ExportImportButtons
+              format="csv"
+              onExport={onExport}
+              onImport={onImport}
+              busy={busy}
+            />
+          </div>
+          <div className="toolbar-search">
+            <SearchInput value={query} onChange={setQuery} block />
+          </div>
         </div>
         {error && <div className="error-text" style={{ marginBottom: 8 }}>{error}</div>}
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{t.name}</th>
-              <th>{t.symbol}</th>
-              <th>{t.unit}</th>
-              <th>{t.preferredSupplier}</th>
-              <th className="num">{t.moq}</th>
-              <th className="num">{t.leadTime}</th>
-              <th>{t.factorySupplied}</th>
-              <th className="actions">{t.actionsHeader}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.length === 0 && (
+        {info && <div className="hint" style={{ marginBottom: 8 }}>{info}</div>}
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
               <tr>
-                <td colSpan={8} className="hint">
-                  {t.noData}
-                </td>
+                <th className="col-w-lg">{t.name}</th>
+                <th className="col-w-md">{t.symbol}</th>
+                <th className="col-w-sm">{t.unit}</th>
+                <th className="col-w-xl">{t.suppliers}</th>
+                <th className="num col-w-sm">{t.moq}</th>
+                <th className="num col-w-sm">{t.leadTime}</th>
+                <th className="col-w-sm">{t.factorySupplied}</th>
+                <th className="actions">{t.actionsHeader}</th>
               </tr>
-            )}
-            {items.map((rm) => (
-              <tr key={rm.id}>
-                <td>{rm.name}</td>
-                <td>{rm.mpFirmaSymbol ?? ''}</td>
-                <td>{rm.unit}</td>
-                <td>{supplierName(rm.preferredSupplierId)}</td>
-                <td className="num">{rm.moq ?? ''}</td>
-                <td className="num">{rm.leadTimeDays ?? ''}</td>
-                <td>{rm.factorySupplied ? <span className="tag warn">factory</span> : ''}</td>
-                <td className="actions">
-                  <button className="btn btn-sm" onClick={() => setEditing(rm)}>
-                    {t.edit}
-                  </button>{' '}
-                  <button className="btn btn-sm" onClick={() => setConfirmDelete(rm)}>
-                    {t.delete}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="hint">
+                    {query ? '—' : t.noData}
+                  </td>
+                </tr>
+              )}
+              {filtered.map((rm) => (
+                <tr key={rm.id}>
+                  <td className="col-name col-wrap">{rm.name}</td>
+                  <td>{rm.mpFirmaSymbol ?? ''}</td>
+                  <td>{rm.unit}</td>
+                  <td className="col-wrap">{renderSupplierChips(rm)}</td>
+                  <td className="num">{rm.moq ?? ''}</td>
+                  <td className="num">{rm.leadTimeDays ?? ''}</td>
+                  <td>{rm.factorySupplied ? <span className="tag warn">factory</span> : ''}</td>
+                  <td className="actions">
+                    <div className="btn-row">
+                      <button
+                        className="btn btn-sm soft-edit"
+                        onClick={() => setEditing(rm)}
+                        title={t.edit}
+                      >
+                        <IconEdit size={13} /> {t.edit}
+                      </button>
+                      <button
+                        className="btn btn-sm soft-danger"
+                        onClick={() => setConfirmDelete(rm)}
+                        title={t.delete}
+                      >
+                        <IconTrash size={13} /> {t.delete}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {editing && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100,
-          }}
-          onClick={() => setEditing(null)}
-        >
-          <div
-            className="card"
-            style={{ minWidth: 560, maxHeight: '85vh', overflowY: 'auto' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 style={{ marginTop: 0 }}>
-              {editing.id ? t.edit : t.add} — {t.rawMaterials.toLowerCase()}
-            </h2>
+        <div className="modal-overlay" onClick={() => setEditing(null)}>
+          <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-header-text">
+                <h2 className="modal-title">
+                  {editing.id ? `${t.edit}: ${editing.name ?? ''}` : `${t.add} — ${t.rawMaterials.toLowerCase()}`}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setEditing(null)}
+                title={t.close}
+                aria-label={t.close}
+              >
+                <IconClose size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
             <div className="form-row">
               <label>{t.name}</label>
               <input
@@ -273,11 +390,12 @@ const RawMaterials: React.FC = () => {
                 onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
               />
             </div>
-            <div className="btn-row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+            </div>
+            <div className="modal-footer">
               <button className="btn" onClick={() => setEditing(null)}>
                 {t.cancel}
               </button>
-              <button className="btn primary" onClick={onSave}>
+              <button className="btn primary-filled" onClick={onSave}>
                 {t.save}
               </button>
             </div>

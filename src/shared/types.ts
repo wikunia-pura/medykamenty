@@ -162,6 +162,7 @@ export interface StoreSchema {
   products: Product[];
   stockSnapshots: StockSnapshot[];
   productionPlans: ProductionPlan[];
+  shortageReports?: ShortageReportEntry[];
   settings: AppSettings;
 }
 
@@ -203,6 +204,14 @@ export interface ShortageReport {
   componentLines: ShortageLine[];
   groups: ShortageGroup[];
   warnings: string[];
+}
+
+export interface ShortageReportEntry {
+  id: UUID;
+  planId: UUID;
+  planName: string;
+  computedAt: ISODate;
+  report: ShortageReport;
 }
 
 export interface CostBreakdownLine {

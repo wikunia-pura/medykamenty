@@ -1,8 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import type { ProductionPlan, CostReport } from '../../shared/types';
+import type { ViewKey } from './types';
+import NoPlansEmptyState from '../components/NoPlansEmptyState';
 
-const CostCalculatorView: React.FC = () => {
+interface Props {
+  onNavigate?: (key: ViewKey) => void;
+}
+
+const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
   const t = useT();
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [planId, setPlanId] = useState<string>('');
@@ -34,6 +40,15 @@ const CostCalculatorView: React.FC = () => {
 
   const fmt = (n: number) =>
     n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  if (plans.length === 0) {
+    return (
+      <div className="main">
+        <h1>{t.costCalculator}</h1>
+        <NoPlansEmptyState onAddPlan={() => onNavigate?.('productionPlan')} />
+      </div>
+    );
+  }
 
   return (
     <div className="main">

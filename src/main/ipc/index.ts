@@ -134,16 +134,41 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   );
 
   ipcMain.handle(IPC.STOCK_LIST_SNAPSHOTS, () => db.listStockSnapshots());
-  ipcMain.handle(IPC.STOCK_GET_CURRENT, () => ({
-    raw: db.getCurrentSnapshot('raw')?.rows ?? [],
-    components: db.getCurrentSnapshot('component')?.rows ?? [],
-  }));
+  ipcMain.handle(IPC.STOCK_GET_CURRENT, () => {
+    const rawSnap = db.getCurrentSnapshot('raw');
+    const compSnap = db.getCurrentSnapshot('component');
+    return {
+      raw: rawSnap?.rows ?? [],
+      components: compSnap?.rows ?? [],
+      rawSnapshot: rawSnap
+        ? { id: rawSnap.id, importedAt: rawSnap.importedAt, sourceFile: rawSnap.sourceFile }
+        : null,
+      componentSnapshot: compSnap
+        ? { id: compSnap.id, importedAt: compSnap.importedAt, sourceFile: compSnap.sourceFile }
+        : null,
+    };
+  });
   ipcMain.handle(
     IPC.STOCK_RESOLVE_MATCH,
     (_e, snapshotId: string, rowKey: string, targetKind: 'raw' | 'component', targetId: string) => {
       db.updateSnapshotRowMatch(snapshotId, rowKey, targetKind, targetId);
       return { ok: true };
     },
+  );
+  ipcMain.handle(
+    IPC.STOCK_UPDATE_ROW,
+    (_e, snapshotId: string, rowKey: string, patch: Record<string, unknown>) =>
+      db.updateSnapshotRow(snapshotId, rowKey, patch),
+  );
+  ipcMain.handle(
+    IPC.STOCK_DELETE_ROW,
+    (_e, snapshotId: string, rowKey: string) => db.deleteSnapshotRow(snapshotId, rowKey),
+  );
+  ipcMain.handle(IPC.STOCK_DELETE_SNAPSHOT, (_e, snapshotId: string) =>
+    db.deleteSnapshot(snapshotId),
+  );
+  ipcMain.handle(IPC.STOCK_DELETE_KIND, (_e, kind: StockKind) =>
+    db.deleteSnapshotsByKind(kind),
   );
 
   // ---- Plan ----
@@ -152,11 +177,18 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.PLAN_CREATE, (_e, input) => db.createPlan(input));
   ipcMain.handle(IPC.PLAN_UPDATE, (_e, id: string, patch) => db.updatePlan(id, patch));
   ipcMain.handle(IPC.PLAN_DELETE, (_e, id: string) => db.deletePlan(id));
+  ipcMain.handle(IPC.PLAN_DUPLICATE, (_e, id: string) => db.duplicatePlan(id));
   ipcMain.handle(IPC.PLAN_COMPUTE_SHORTAGES, (_e, planId: string) => {
     const report = computeShortages(planId, db);
     db.updatePlan(planId, { status: 'computed', computedAt: report.computedAt });
+    db.addShortageReport(planId, report);
     return report;
   });
+
+  // ---- Shortage report history ----
+  ipcMain.handle(IPC.SHORTAGE_REPORT_LIST, () => db.listShortageReports());
+  ipcMain.handle(IPC.SHORTAGE_REPORT_GET, (_e, id: string) => db.getShortageReport(id));
+  ipcMain.handle(IPC.SHORTAGE_REPORT_DELETE, (_e, id: string) => db.deleteShortageReport(id));
   ipcMain.handle(IPC.PLAN_COMPUTE_COST, (_e, planId: string) => computeCost(planId, db));
   ipcMain.handle(
     IPC.PLAN_GENERATE_EMAILS,
@@ -204,6 +236,48 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     return { ok: true, applied: out.applied };
   });
 
+  // ---- Generic file save/open (per-view CSV/JSON export/import) ----
+  ipcMain.handle(
+    IPC.FILE_SAVE_TEXT,
+    async (
+      _e,
+      args: {
+        defaultName: string;
+        content: string;
+        title?: string;
+        filters?: { name: string; extensions: string[] }[];
+      },
+    ) => {
+      const win = getMainWindow();
+      const result = await dialog.showSaveDialog(win!, {
+        title: args.title ?? 'Eksport',
+        defaultPath: args.defaultName,
+        filters: args.filters ?? [{ name: 'Text', extensions: ['txt'] }],
+      });
+      if (result.canceled || !result.filePath) return { ok: false };
+      fs.writeFileSync(result.filePath, args.content, 'utf-8');
+      return { ok: true, path: result.filePath };
+    },
+  );
+
+  ipcMain.handle(
+    IPC.FILE_OPEN_TEXT,
+    async (
+      _e,
+      args: { title?: string; filters?: { name: string; extensions: string[] }[] },
+    ) => {
+      const win = getMainWindow();
+      const result = await dialog.showOpenDialog(win!, {
+        title: args?.title ?? 'Import',
+        filters: args?.filters ?? [{ name: 'Text', extensions: ['txt'] }],
+        properties: ['openFile'],
+      });
+      if (result.canceled || result.filePaths.length === 0) return { ok: false };
+      const content = fs.readFileSync(result.filePaths[0], 'utf-8');
+      return { ok: true, path: result.filePaths[0], content };
+    },
+  );
+
   // ---- LLM ----
   ipcMain.handle(IPC.LLM_IS_AVAILABLE, () => ({
     available: isAiAvailable(),
@@ -234,6 +308,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
         products: [],
         stockSnapshots: [],
         productionPlans: [],
+        shortageReports: [],
         settings: db.getSettings(),
       },
       'replace',

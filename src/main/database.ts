@@ -6,9 +6,12 @@ import type {
   PackagingComponent,
   Product,
   StockSnapshot,
+  StockRow,
   ProductionPlan,
   AppSettings,
   StockKind,
+  ShortageReport,
+  ShortageReportEntry,
 } from '../shared/types';
 import {
   STORE_SCHEMA_VERSION,
@@ -16,6 +19,7 @@ import {
   DEFAULT_CURRENCY,
   DEFAULT_LANGUAGE,
   STOCK_SNAPSHOT_RETENTION,
+  SHORTAGE_REPORT_RETENTION,
 } from '../shared/constants';
 import { newId, nowIso } from './utils/id';
 
@@ -38,6 +42,7 @@ const DEFAULTS: StoreSchema = {
   products: [],
   stockSnapshots: [],
   productionPlans: [],
+  shortageReports: [],
   settings: DEFAULT_SETTINGS,
 };
 
@@ -283,6 +288,43 @@ export default class Database {
     row.matchConfidence = 1;
     this.store.set('stockSnapshots', all);
   }
+  updateSnapshotRow(
+    snapshotId: string,
+    rowKey: string,
+    patch: Partial<StockRow>,
+  ): StockRow | undefined {
+    const all = this.store.get('stockSnapshots', []);
+    const idx = all.findIndex((s) => s.id === snapshotId);
+    if (idx === -1) return undefined;
+    const rowIdx = all[idx].rows.findIndex((r) => r.rowKey === rowKey);
+    if (rowIdx === -1) return undefined;
+    const { rowKey: _ignoredKey, ...safePatch } = patch;
+    const updated: StockRow = { ...all[idx].rows[rowIdx], ...safePatch };
+    all[idx].rows[rowIdx] = updated;
+    this.store.set('stockSnapshots', all);
+    return updated;
+  }
+  deleteSnapshotRow(snapshotId: string, rowKey: string): { ok: boolean } {
+    const all = this.store.get('stockSnapshots', []);
+    const idx = all.findIndex((s) => s.id === snapshotId);
+    if (idx === -1) return { ok: false };
+    all[idx].rows = all[idx].rows.filter((r) => r.rowKey !== rowKey);
+    this.store.set('stockSnapshots', all);
+    return { ok: true };
+  }
+  deleteSnapshot(snapshotId: string): { ok: boolean } {
+    const all = this.store.get('stockSnapshots', []);
+    const next = all.filter((s) => s.id !== snapshotId);
+    if (next.length === all.length) return { ok: false };
+    this.store.set('stockSnapshots', next);
+    return { ok: true };
+  }
+  deleteSnapshotsByKind(kind: StockKind): { ok: boolean; deleted: number } {
+    const all = this.store.get('stockSnapshots', []);
+    const next = all.filter((s) => s.kind !== kind);
+    this.store.set('stockSnapshots', next);
+    return { ok: true, deleted: all.length - next.length };
+  }
 
   // ---- Production plans ----
   listPlans(): ProductionPlan[] {
@@ -318,6 +360,46 @@ export default class Database {
     );
     return { ok: true };
   }
+  duplicatePlan(id: string): ProductionPlan {
+    const original = this.getPlan(id);
+    if (!original) throw new Error(`Plan ${id} not found`);
+    const { id: _id, createdAt: _ca, updatedAt: _ua, computedAt: _cm, ...rest } = original;
+    return this.createPlan({
+      ...rest,
+      name: `${original.name} (kopia)`,
+      status: 'draft',
+    });
+  }
+
+  // ---- Shortage report history ----
+  listShortageReports(): ShortageReportEntry[] {
+    return [...(this.store.get('shortageReports', []) ?? [])].sort(
+      (a, b) => b.computedAt.localeCompare(a.computedAt),
+    );
+  }
+  getShortageReport(id: string): ShortageReportEntry | undefined {
+    return (this.store.get('shortageReports', []) ?? []).find((r) => r.id === id);
+  }
+  addShortageReport(planId: string, report: ShortageReport): ShortageReportEntry {
+    const plan = this.getPlan(planId);
+    const entry: ShortageReportEntry = {
+      id: newId(),
+      planId,
+      planName: plan?.name ?? '?',
+      computedAt: report.computedAt,
+      report,
+    };
+    const all = [entry, ...(this.store.get('shortageReports', []) ?? [])];
+    // Retain only the most recent N entries to keep the store bounded.
+    const trimmed = all.slice(0, SHORTAGE_REPORT_RETENTION);
+    this.store.set('shortageReports', trimmed);
+    return entry;
+  }
+  deleteShortageReport(id: string): { ok: boolean } {
+    const all = this.store.get('shortageReports', []) ?? [];
+    this.store.set('shortageReports', all.filter((r) => r.id !== id));
+    return { ok: true };
+  }
 
   // ---- Settings ----
   getSettings(): AppSettings {
@@ -344,6 +426,7 @@ export default class Database {
       products: this.store.get('products', []),
       stockSnapshots: this.store.get('stockSnapshots', []),
       productionPlans: this.store.get('productionPlans', []),
+      shortageReports: this.store.get('shortageReports', []) ?? [],
       settings: this.getSettings(),
     };
   }
@@ -356,6 +439,7 @@ export default class Database {
       this.store.set('products', data.products ?? []);
       this.store.set('stockSnapshots', data.stockSnapshots ?? []);
       this.store.set('productionPlans', data.productionPlans ?? []);
+      this.store.set('shortageReports', data.shortageReports ?? []);
       this.store.set('settings', { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) });
       applied =
         (data.suppliers?.length ?? 0) +

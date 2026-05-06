@@ -9,6 +9,7 @@ import type {
   AppSettings,
   ImportSummary,
   ShortageReport,
+  ShortageReportEntry,
   CostReport,
   RFQEmail,
   MaxProducibleResult,
@@ -54,13 +55,28 @@ export interface ElectronAPI {
   selectStockFiles(): Promise<{ rawPath?: string; componentPath?: string }>;
   importStock(args: { rawPath?: string; componentPath?: string }): Promise<ImportSummary>;
   listStockSnapshots(): Promise<StockSnapshot[]>;
-  getCurrentStock(): Promise<{ raw: StockRow[]; components: StockRow[] }>;
+  getCurrentStock(): Promise<{
+    raw: StockRow[];
+    components: StockRow[];
+    rawSnapshot: { id: string; importedAt: string; sourceFile: string } | null;
+    componentSnapshot: { id: string; importedAt: string; sourceFile: string } | null;
+  }>;
   resolveStockMatch(
     snapshotId: string,
     rowKey: string,
     targetKind: 'raw' | 'component',
     targetId: string,
   ): Promise<{ ok: boolean }>;
+  updateStockRow(
+    snapshotId: string,
+    rowKey: string,
+    patch: Partial<StockRow>,
+  ): Promise<StockRow | undefined>;
+  deleteStockRow(snapshotId: string, rowKey: string): Promise<{ ok: boolean }>;
+  deleteStockSnapshot(snapshotId: string): Promise<{ ok: boolean }>;
+  deleteStockSnapshotsByKind(
+    kind: 'raw' | 'component',
+  ): Promise<{ ok: boolean; deleted: number }>;
 
   // Plans
   listPlans(): Promise<ProductionPlan[]>;
@@ -70,12 +86,18 @@ export interface ElectronAPI {
   ): Promise<ProductionPlan>;
   updatePlan(id: string, patch: Partial<ProductionPlan>): Promise<ProductionPlan>;
   deletePlan(id: string): Promise<{ ok: boolean }>;
+  duplicatePlan(id: string): Promise<ProductionPlan>;
   computeShortages(planId: string): Promise<ShortageReport>;
   computeCost(planId: string): Promise<CostReport>;
   generateEmails(
     planId: string,
     opts: { language: Lang; useAI: boolean; sendToAllAlternatives?: boolean },
   ): Promise<RFQEmail[]>;
+
+  // Shortage report history
+  listShortageReports(): Promise<ShortageReportEntry[]>;
+  getShortageReport(id: string): Promise<ShortageReportEntry | undefined>;
+  deleteShortageReport(id: string): Promise<{ ok: boolean }>;
 
   // Reverse
   maxProducible(productId: string): Promise<MaxProducibleResult>;
@@ -87,6 +109,18 @@ export interface ElectronAPI {
   // Backup
   exportBackup(): Promise<{ ok: boolean; path?: string }>;
   importBackup(mode: 'merge' | 'replace'): Promise<{ ok: boolean; applied?: number }>;
+
+  // Generic file save/open (per-view CSV/JSON)
+  saveTextFile(args: {
+    defaultName: string;
+    content: string;
+    title?: string;
+    filters?: { name: string; extensions: string[] }[];
+  }): Promise<{ ok: boolean; path?: string }>;
+  openTextFile(args?: {
+    title?: string;
+    filters?: { name: string; extensions: string[] }[];
+  }): Promise<{ ok: boolean; path?: string; content?: string }>;
 
   // LLM
   isAiAvailable(): Promise<{ available: boolean; model?: string }>;

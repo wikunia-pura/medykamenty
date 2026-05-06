@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useT } from '../i18n';
 import type { AppSettings, Lang } from '../../shared/types';
+import Toggle from '../components/Toggle';
 
 interface Props {
   settings: AppSettings;
@@ -69,11 +70,14 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
         </div>
         <div className="form-row">
           <label>{t.settingsDarkMode}</label>
-          <input
-            type="checkbox"
-            checked={settings.darkMode}
-            onChange={(e) => update({ darkMode: e.target.checked })}
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 6 }}>
+            <Toggle
+              checked={settings.darkMode}
+              onChange={(v) => update({ darkMode: v })}
+              ariaLabel={t.settingsDarkMode}
+            />
+            <span className="hint">{settings.darkMode ? t.settingsDarkMode : t.settingsLightMode}</span>
+          </div>
         </div>
         <div className="form-row">
           <label>{t.settingsWasteFactor}</label>
@@ -117,12 +121,14 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
         </div>
         <div className="form-row">
           <label>{t.settingsLLMDefault}</label>
-          <input
-            type="checkbox"
-            checked={settings.llm.useByDefault}
-            disabled={!aiAvailable}
-            onChange={(e) => update({ llm: { useByDefault: e.target.checked } })}
-          />
+          <div style={{ paddingTop: 6 }}>
+            <Toggle
+              checked={settings.llm.useByDefault}
+              disabled={!aiAvailable}
+              onChange={(v) => update({ llm: { useByDefault: v } })}
+              ariaLabel={t.settingsLLMDefault}
+            />
+          </div>
         </div>
         <div className="hint">
           Klucz API jest wstrzykiwany do paczki w trakcie buildu (GitHub Actions). Aby zmienić klucz —

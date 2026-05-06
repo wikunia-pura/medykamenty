@@ -6,6 +6,7 @@ import type {
   RecipePackaging,
 } from '../../shared/types';
 import { useT } from '../i18n';
+import { IconPlus, IconClose } from './Icons';
 
 interface Props {
   rawMaterials: RawMaterial[];
@@ -72,11 +73,11 @@ const RecipeEditor: React.FC<Props> = ({
         </span>
         <div className="spacer" />
         <button
-          className="btn btn-sm"
+          className="btn btn-sm soft-edit"
           onClick={addIngredient}
           disabled={ingredients.length >= rawMaterials.length}
         >
-          + {t.add}
+          <IconPlus size={13} /> {t.add}
         </button>
       </div>
       {overflow && <div className="error-text">{t.recipeSumError}</div>}
@@ -118,7 +119,7 @@ const RecipeEditor: React.FC<Props> = ({
                   className="input"
                   type="number"
                   step="0.01"
-                  style={{ width: 100, textAlign: 'right' }}
+                  style={{ width: 100 }}
                   value={ing.percentage}
                   onChange={(e) =>
                     updateIngredient(idx, { percentage: Number(e.target.value) || 0 })
@@ -126,8 +127,12 @@ const RecipeEditor: React.FC<Props> = ({
                 />
               </td>
               <td className="actions">
-                <button className="btn btn-sm" onClick={() => removeIngredient(idx)}>
-                  ×
+                <button
+                  className="btn btn-sm soft-danger btn-icon-only"
+                  onClick={() => removeIngredient(idx)}
+                  title={t.delete}
+                >
+                  <IconClose size={12} />
                 </button>
               </td>
             </tr>
@@ -139,11 +144,11 @@ const RecipeEditor: React.FC<Props> = ({
         <strong>{t.packaging}</strong>
         <div className="spacer" />
         <button
-          className="btn btn-sm"
+          className="btn btn-sm soft-edit"
           onClick={addPackaging}
           disabled={packaging.length >= components.length}
         >
-          + {t.add}
+          <IconPlus size={13} /> {t.add}
         </button>
       </div>
       <table className="table">
@@ -180,7 +185,7 @@ const RecipeEditor: React.FC<Props> = ({
                 <input
                   className="input"
                   type="number"
-                  style={{ width: 100, textAlign: 'right' }}
+                  style={{ width: 100 }}
                   value={pkg.qtyPerUnit}
                   onChange={(e) =>
                     updatePackaging(idx, { qtyPerUnit: Number(e.target.value) || 0 })
@@ -188,8 +193,12 @@ const RecipeEditor: React.FC<Props> = ({
                 />
               </td>
               <td className="actions">
-                <button className="btn btn-sm" onClick={() => removePackaging(idx)}>
-                  ×
+                <button
+                  className="btn btn-sm soft-danger btn-icon-only"
+                  onClick={() => removePackaging(idx)}
+                  title={t.delete}
+                >
+                  <IconClose size={12} />
                 </button>
               </td>
             </tr>

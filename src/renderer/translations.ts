@@ -33,6 +33,7 @@ export interface T {
   copy: string;
   copied: string;
   copyFailed: string;
+  duplicate: string;
   error: string;
   warning: string;
   // Common fields
@@ -49,6 +50,7 @@ export interface T {
   leadTime: string;
   shelfLife: string;
   factorySupplied: string;
+  supplier: string;
   preferredSupplier: string;
   alternativeSuppliers: string;
   preferredEmailLanguage: string;
@@ -73,6 +75,23 @@ export interface T {
   rowsUnmatched: string;
   noStockYet: string;
   resolveAmbiguity: string;
+  stockWarehouse: string;
+  stockNetUnit: string;
+  stockVatUnit: string;
+  stockGrossUnit: string;
+  stockNetTotal: string;
+  stockVatTotal: string;
+  stockGrossTotal: string;
+  stockManufacturer: string;
+  stockMpFirmaId: string;
+  stockEditRow: string;
+  stockDeleteRow: string;
+  stockDeleteSnapshot: string;
+  stockDeleteSnapshotConfirm: string;
+  stockSnapshotImported: string;
+  stockSourceFile: string;
+  stockUnmatchedOnly: string;
+  stockAllMatched: string;
   // Production plan
   planName: string;
   planItems: string;
@@ -80,6 +99,13 @@ export interface T {
   computeShortages: string;
   computeCost: string;
   generateEmails: string;
+  planStatusDraft: string;
+  planStatusComputed: string;
+  planStatusArchived: string;
+  planStatusDraftTooltip: string;
+  planStatusComputedTooltip: string;
+  planStatusArchivedTooltip: string;
+  duplicatePlan: string;
   // Shortage report
   required: string;
   available: string;
@@ -92,6 +118,7 @@ export interface T {
   emailLanguage: string;
   refineWithAI: string;
   aiUnavailable: string;
+  openInMailClient: string;
   // Cost
   unitCost: string;
   totalPlanCost: string;
@@ -99,6 +126,7 @@ export interface T {
   // Settings
   settingsLanguage: string;
   settingsDarkMode: string;
+  settingsLightMode: string;
   settingsWasteFactor: string;
   settingsDefaultCurrency: string;
   settingsDefaultEmailLanguage: string;
@@ -168,6 +196,27 @@ export interface T {
   zoomReset: string;
   updateAvailable: string;
   upToDate: string;
+  // Per-view export/import
+  exportCsv: string;
+  importCsv: string;
+  exportJson: string;
+  importJson: string;
+  exportLabel: string;
+  importLabel: string;
+  exportEmpty: string;
+  importInvalidFile: string;
+  // Workflow / wizard
+  nextStep: string;
+  goToShortageReport: string;
+  goToEmailGenerator: string;
+  selectPlanFirst: string;
+  noPlansYet: string;
+  addPlanCta: string;
+  // Shortage report history
+  olderReportsTitle: string;
+  olderReportsHint: string;
+  computedAtLabel: string;
+  deleteReportConfirm: string;
 }
 
 const pl: T = {
@@ -201,6 +250,7 @@ const pl: T = {
   copy: 'Kopiuj',
   copied: 'Skopiowano',
   copyFailed: 'Nie udało się skopiować',
+  duplicate: 'Duplikuj',
   error: 'Błąd',
   warning: 'Ostrzeżenie',
   name: 'Nazwa',
@@ -212,10 +262,11 @@ const pl: T = {
   quantity: 'Ilość',
   price: 'Cena (netto, ostatnia)',
   currency: 'Waluta',
-  moq: 'MOQ',
+  moq: 'Min. zamówienie',
   leadTime: 'Czas dostawy (dni)',
   shelfLife: 'Termin ważności (mies.)',
   factorySupplied: 'Dostarczane przez fabrykę',
+  supplier: 'Dostawca',
   preferredSupplier: 'Preferowany dostawca',
   alternativeSuppliers: 'Alternatywni dostawcy',
   preferredEmailLanguage: 'Domyślny język maili',
@@ -238,12 +289,36 @@ const pl: T = {
   rowsUnmatched: 'Niedopasowane',
   noStockYet: 'Brak zaimportowanych stanów. Zaimportuj pliki xlsx z MP Firma.',
   resolveAmbiguity: 'Rozstrzygnij',
+  stockWarehouse: 'Magazyn',
+  stockNetUnit: 'Cena netto',
+  stockVatUnit: 'VAT',
+  stockGrossUnit: 'Cena brutto',
+  stockNetTotal: 'Wartość netto',
+  stockVatTotal: 'VAT (suma)',
+  stockGrossTotal: 'Wartość brutto',
+  stockManufacturer: 'Symbol producenta',
+  stockMpFirmaId: 'ID',
+  stockEditRow: 'Edytuj wiersz',
+  stockDeleteRow: 'Usuń wiersz',
+  stockDeleteSnapshot: 'Usuń import',
+  stockDeleteSnapshotConfirm: 'Usunąć cały zaimportowany stan ({kind})? Tej operacji nie można cofnąć.',
+  stockSnapshotImported: 'Zaimportowano',
+  stockSourceFile: 'Plik źródłowy',
+  stockUnmatchedOnly: 'Tylko niedopasowane',
+  stockAllMatched: 'Wszystkie pozycje zostały dopasowane.',
   planName: 'Nazwa planu',
   planItems: 'Pozycje planu',
   bulkMass: 'Masa luzem (kg, do saszetek)',
   computeShortages: 'Oblicz zapotrzebowanie',
   computeCost: 'Oblicz koszt',
   generateEmails: 'Wygeneruj maile',
+  planStatusDraft: 'Szkic',
+  planStatusComputed: 'Policzony',
+  planStatusArchived: 'Zarchiwizowany',
+  planStatusDraftTooltip: 'Plan utworzony, ale jeszcze nie policzono zapotrzebowania surowców i komponentów.',
+  planStatusComputedTooltip: 'Zapotrzebowanie zostało policzone — można wygenerować raport braków, koszt i maile RFQ.',
+  planStatusArchivedTooltip: 'Plan zarchiwizowany — pozostawiony do historii.',
+  duplicatePlan: 'Duplikuj plan',
   required: 'Potrzeba',
   available: 'Stan',
   shortage: 'Brak',
@@ -254,11 +329,13 @@ const pl: T = {
   emailLanguage: 'Język maila',
   refineWithAI: 'Popraw z AI',
   aiUnavailable: 'AI niedostępne — brak klucza w buildzie',
+  openInMailClient: 'Otwórz w mailu',
   unitCost: 'Koszt jednostkowy',
   totalPlanCost: 'Łączny koszt planu',
   missingPrices: 'Brak cen dla',
   settingsLanguage: 'Język aplikacji',
   settingsDarkMode: 'Ciemny motyw',
+  settingsLightMode: 'Jasny motyw',
   settingsWasteFactor: 'Naddatek na straty (×)',
   settingsDefaultCurrency: 'Domyślna waluta',
   settingsDefaultEmailLanguage: 'Domyślny język maili RFQ',
@@ -325,6 +402,24 @@ const pl: T = {
   zoomReset: 'Resetuj powiększenie',
   updateAvailable: 'dostępna do pobrania',
   upToDate: 'Masz najnowszą wersję',
+  exportCsv: 'Eksport CSV',
+  importCsv: 'Import CSV',
+  exportJson: 'Eksport JSON',
+  importJson: 'Import JSON',
+  exportLabel: 'Eksport',
+  importLabel: 'Import',
+  exportEmpty: 'Brak danych do eksportu',
+  importInvalidFile: 'Nie udało się wczytać pliku',
+  nextStep: 'Następny krok',
+  goToShortageReport: 'Przejdź do raportu zapotrzebowania',
+  goToEmailGenerator: 'Przejdź do generatora maili',
+  selectPlanFirst: 'Wybierz plan, aby obliczyć zapotrzebowanie',
+  noPlansYet: 'Brak planów produkcji',
+  addPlanCta: 'Dodaj plan produkcji',
+  olderReportsTitle: 'Wcześniejsze raporty',
+  olderReportsHint: 'Historia obliczonych zapotrzebowań',
+  computedAtLabel: 'Obliczono',
+  deleteReportConfirm: 'Usunąć raport',
 };
 
 const en: T = {
@@ -358,6 +453,7 @@ const en: T = {
   copy: 'Copy',
   copied: 'Copied',
   copyFailed: 'Copy failed',
+  duplicate: 'Duplicate',
   error: 'Error',
   warning: 'Warning',
   name: 'Name',
@@ -369,10 +465,11 @@ const en: T = {
   quantity: 'Quantity',
   price: 'Price (net, last)',
   currency: 'Currency',
-  moq: 'MOQ',
+  moq: 'Min. order',
   leadTime: 'Lead time (days)',
   shelfLife: 'Shelf life (months)',
   factorySupplied: 'Supplied by factory',
+  supplier: 'Supplier',
   preferredSupplier: 'Preferred supplier',
   alternativeSuppliers: 'Alternative suppliers',
   preferredEmailLanguage: 'Default email language',
@@ -395,12 +492,36 @@ const en: T = {
   rowsUnmatched: 'Unmatched',
   noStockYet: 'No stock imported yet. Import xlsx files from MP Firma.',
   resolveAmbiguity: 'Resolve',
+  stockWarehouse: 'Warehouse',
+  stockNetUnit: 'Net price',
+  stockVatUnit: 'VAT',
+  stockGrossUnit: 'Gross price',
+  stockNetTotal: 'Net value',
+  stockVatTotal: 'VAT (total)',
+  stockGrossTotal: 'Gross value',
+  stockManufacturer: 'Manufacturer symbol',
+  stockMpFirmaId: 'ID',
+  stockEditRow: 'Edit row',
+  stockDeleteRow: 'Delete row',
+  stockDeleteSnapshot: 'Delete import',
+  stockDeleteSnapshotConfirm: 'Delete the entire imported stock ({kind})? This cannot be undone.',
+  stockSnapshotImported: 'Imported',
+  stockSourceFile: 'Source file',
+  stockUnmatchedOnly: 'Unmatched only',
+  stockAllMatched: 'All entries matched.',
   planName: 'Plan name',
   planItems: 'Plan items',
   bulkMass: 'Bulk mass (kg, sachets)',
   computeShortages: 'Compute shortages',
   computeCost: 'Compute cost',
   generateEmails: 'Generate emails',
+  planStatusDraft: 'Draft',
+  planStatusComputed: 'Computed',
+  planStatusArchived: 'Archived',
+  planStatusDraftTooltip: 'Plan created, but raw material and component shortages have not been computed yet.',
+  planStatusComputedTooltip: 'Shortages have been computed — you can view the shortage report, cost and generate RFQ emails.',
+  planStatusArchivedTooltip: 'Plan archived — kept for history.',
+  duplicatePlan: 'Duplicate plan',
   required: 'Required',
   available: 'In stock',
   shortage: 'Shortage',
@@ -411,11 +532,13 @@ const en: T = {
   emailLanguage: 'Email language',
   refineWithAI: 'Refine with AI',
   aiUnavailable: 'AI unavailable — no API key in build',
+  openInMailClient: 'Open in mail',
   unitCost: 'Unit cost',
   totalPlanCost: 'Total plan cost',
   missingPrices: 'Missing prices for',
   settingsLanguage: 'App language',
   settingsDarkMode: 'Dark mode',
+  settingsLightMode: 'Light mode',
   settingsWasteFactor: 'Waste factor (×)',
   settingsDefaultCurrency: 'Default currency',
   settingsDefaultEmailLanguage: 'Default RFQ email language',
@@ -482,6 +605,24 @@ const en: T = {
   zoomReset: 'Reset zoom',
   updateAvailable: 'is available',
   upToDate: 'You have the latest version',
+  exportCsv: 'Export CSV',
+  importCsv: 'Import CSV',
+  exportJson: 'Export JSON',
+  importJson: 'Import JSON',
+  exportLabel: 'Export',
+  importLabel: 'Import',
+  exportEmpty: 'Nothing to export',
+  importInvalidFile: 'Failed to read file',
+  nextStep: 'Next step',
+  goToShortageReport: 'Go to shortage report',
+  goToEmailGenerator: 'Go to email generator',
+  selectPlanFirst: 'Select a plan to compute shortages',
+  noPlansYet: 'No production plans yet',
+  addPlanCta: 'Add production plan',
+  olderReportsTitle: 'Earlier reports',
+  olderReportsHint: 'History of computed shortages',
+  computedAtLabel: 'Computed',
+  deleteReportConfirm: 'Delete report',
 };
 
 export const translations: Record<Lang, T> = { pl, en };

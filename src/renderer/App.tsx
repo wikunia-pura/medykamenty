@@ -24,6 +24,20 @@ const App: React.FC = () => {
   const [appVersion, setAppVersion] = useState('0.0.0');
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [aiAvailable, setAiAvailable] = useState(false);
+  const [selectedPlanId, setSelectedPlanId] = useState<string>('');
+  const [autoGenerateEmails, setAutoGenerateEmails] = useState(false);
+  const [editPlanId, setEditPlanId] = useState<string>('');
+
+  const navigateToEmails = (planId: string) => {
+    if (planId) setSelectedPlanId(planId);
+    setAutoGenerateEmails(true);
+    setView('emailGenerator');
+  };
+
+  const navigateToEditPlan = (planId: string) => {
+    setEditPlanId(planId);
+    setView('productionPlan');
+  };
 
   useEffect(() => {
     void (async () => {
@@ -77,21 +91,45 @@ const App: React.FC = () => {
       case 'suppliers':
         return <Suppliers />;
       case 'stockImport':
-        return <StockImport aiAvailable={aiAvailable} useAiByDefault={settings.llm.useByDefault} />;
+        return (
+          <StockImport
+            aiAvailable={aiAvailable}
+            useAiByDefault={settings.llm.useByDefault}
+            onNavigate={setView}
+          />
+        );
       case 'productionPlan':
-        return <ProductionPlanView />;
+        return (
+          <ProductionPlanView
+            editPlanId={editPlanId}
+            onEditPlanIdConsumed={() => setEditPlanId('')}
+          />
+        );
       case 'shortageReport':
-        return <ShortageReportView />;
+        return (
+          <ShortageReportView
+            selectedPlanId={selectedPlanId}
+            onSelectPlan={setSelectedPlanId}
+            onNavigate={setView}
+            onNavigateToEmails={navigateToEmails}
+            onNavigateToEditPlan={navigateToEditPlan}
+          />
+        );
       case 'emailGenerator':
         return (
           <EmailGenerator
             defaultLanguage={settings.defaultEmailLanguage}
             aiAvailable={aiAvailable}
             useAiByDefault={settings.llm.useByDefault}
+            selectedPlanId={selectedPlanId}
+            onSelectPlan={setSelectedPlanId}
+            autoGenerate={autoGenerateEmails}
+            onAutoGenerateConsumed={() => setAutoGenerateEmails(false)}
+            onNavigate={setView}
           />
         );
       case 'costCalculator':
-        return <CostCalculatorView />;
+        return <CostCalculatorView onNavigate={setView} />;
       case 'maxProducible':
         return <MaxProducibleView />;
       case 'settings':

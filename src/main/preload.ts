@@ -34,15 +34,24 @@ const CH = {
   STOCK_LIST_SNAPSHOTS: 'stock:list-snapshots',
   STOCK_GET_CURRENT: 'stock:get-current',
   STOCK_RESOLVE_MATCH: 'stock:resolve-match',
+  STOCK_UPDATE_ROW: 'stock:update-row',
+  STOCK_DELETE_ROW: 'stock:delete-row',
+  STOCK_DELETE_SNAPSHOT: 'stock:delete-snapshot',
+  STOCK_DELETE_KIND: 'stock:delete-kind',
 
   PLAN_LIST: 'plan:list',
   PLAN_GET: 'plan:get',
   PLAN_CREATE: 'plan:create',
   PLAN_UPDATE: 'plan:update',
   PLAN_DELETE: 'plan:delete',
+  PLAN_DUPLICATE: 'plan:duplicate',
   PLAN_COMPUTE_SHORTAGES: 'plan:compute-shortages',
   PLAN_COMPUTE_COST: 'plan:compute-cost',
   PLAN_GENERATE_EMAILS: 'plan:generate-emails',
+
+  SHORTAGE_REPORT_LIST: 'shortageReport:list',
+  SHORTAGE_REPORT_GET: 'shortageReport:get',
+  SHORTAGE_REPORT_DELETE: 'shortageReport:delete',
 
   REVERSE_MAX_PRODUCIBLE: 'reverse:max-producible',
 
@@ -51,6 +60,9 @@ const CH = {
 
   BACKUP_EXPORT: 'backup:export',
   BACKUP_IMPORT: 'backup:import',
+
+  FILE_SAVE_TEXT: 'file:save-text',
+  FILE_OPEN_TEXT: 'file:open-text',
 
   LLM_IS_AVAILABLE: 'llm:is-available',
   LLM_REWRITE_EMAIL: 'llm:rewrite-email',
@@ -107,6 +119,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     targetKind: 'raw' | 'component',
     targetId: string,
   ) => ipcRenderer.invoke(CH.STOCK_RESOLVE_MATCH, snapshotId, rowKey, targetKind, targetId),
+  updateStockRow: (snapshotId: string, rowKey: string, patch: any) =>
+    ipcRenderer.invoke(CH.STOCK_UPDATE_ROW, snapshotId, rowKey, patch),
+  deleteStockRow: (snapshotId: string, rowKey: string) =>
+    ipcRenderer.invoke(CH.STOCK_DELETE_ROW, snapshotId, rowKey),
+  deleteStockSnapshot: (snapshotId: string) =>
+    ipcRenderer.invoke(CH.STOCK_DELETE_SNAPSHOT, snapshotId),
+  deleteStockSnapshotsByKind: (kind: 'raw' | 'component') =>
+    ipcRenderer.invoke(CH.STOCK_DELETE_KIND, kind),
 
   // Plans
   listPlans: () => ipcRenderer.invoke(CH.PLAN_LIST),
@@ -114,12 +134,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createPlan: (input: any) => ipcRenderer.invoke(CH.PLAN_CREATE, input),
   updatePlan: (id: string, patch: any) => ipcRenderer.invoke(CH.PLAN_UPDATE, id, patch),
   deletePlan: (id: string) => ipcRenderer.invoke(CH.PLAN_DELETE, id),
+  duplicatePlan: (id: string) => ipcRenderer.invoke(CH.PLAN_DUPLICATE, id),
   computeShortages: (planId: string) => ipcRenderer.invoke(CH.PLAN_COMPUTE_SHORTAGES, planId),
   computeCost: (planId: string) => ipcRenderer.invoke(CH.PLAN_COMPUTE_COST, planId),
   generateEmails: (
     planId: string,
     opts: { language: 'pl' | 'en'; useAI: boolean; sendToAllAlternatives?: boolean },
   ) => ipcRenderer.invoke(CH.PLAN_GENERATE_EMAILS, planId, opts),
+
+  // Shortage report history
+  listShortageReports: () => ipcRenderer.invoke(CH.SHORTAGE_REPORT_LIST),
+  getShortageReport: (id: string) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_GET, id),
+  deleteShortageReport: (id: string) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_DELETE, id),
 
   // Reverse
   maxProducible: (productId: string) => ipcRenderer.invoke(CH.REVERSE_MAX_PRODUCIBLE, productId),
@@ -131,6 +157,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Backup
   exportBackup: () => ipcRenderer.invoke(CH.BACKUP_EXPORT),
   importBackup: (mode: 'merge' | 'replace') => ipcRenderer.invoke(CH.BACKUP_IMPORT, mode),
+
+  // Generic file save/open
+  saveTextFile: (args: {
+    defaultName: string;
+    content: string;
+    title?: string;
+    filters?: { name: string; extensions: string[] }[];
+  }) => ipcRenderer.invoke(CH.FILE_SAVE_TEXT, args),
+  openTextFile: (args?: {
+    title?: string;
+    filters?: { name: string; extensions: string[] }[];
+  }) => ipcRenderer.invoke(CH.FILE_OPEN_TEXT, args ?? {}),
 
   // LLM
   isAiAvailable: () => ipcRenderer.invoke(CH.LLM_IS_AVAILABLE),

@@ -6,7 +6,7 @@ import Database from './database';
 import { registerIpcHandlers } from './ipc';
 import { IPC } from '../shared/ipcChannels';
 
-const DEV_SERVER_PORT = 3000;
+const DEV_SERVER_PORT = 5183;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 
 let mainWindow: BrowserWindow | null = null;
