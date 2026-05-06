@@ -223,6 +223,24 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   // ---- Demo ----
   ipcMain.handle(IPC.DEMO_SEED, () => seedDemo(db));
 
+  // ---- Wipe ----
+  ipcMain.handle(IPC.DATA_WIPE, () => {
+    db.importAll(
+      {
+        schemaVersion: 1,
+        suppliers: [],
+        rawMaterials: [],
+        components: [],
+        products: [],
+        stockSnapshots: [],
+        productionPlans: [],
+        settings: db.getSettings(),
+      },
+      'replace',
+    );
+    return { ok: true };
+  });
+
   // ---- App ----
   ipcMain.handle(IPC.APP_GET_VERSION, () => app.getVersion());
   ipcMain.handle(IPC.APP_OPEN_EXTERNAL, (_e, url: string) => shell.openExternal(url));

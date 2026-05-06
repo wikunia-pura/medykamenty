@@ -87,7 +87,7 @@ const RecipeEditor: React.FC<Props> = ({
           <tr>
             <th>{t.name}</th>
             <th className="num">{t.percentage}</th>
-            <th></th>
+            <th className="actions">{t.actionsHeader}</th>
           </tr>
         </thead>
         <tbody>
@@ -125,7 +125,7 @@ const RecipeEditor: React.FC<Props> = ({
                   }
                 />
               </td>
-              <td>
+              <td className="actions">
                 <button className="btn btn-sm" onClick={() => removeIngredient(idx)}>
                   ×
                 </button>
@@ -151,7 +151,7 @@ const RecipeEditor: React.FC<Props> = ({
           <tr>
             <th>{t.name}</th>
             <th className="num">{t.qtyPerUnit}</th>
-            <th></th>
+            <th className="actions">{t.actionsHeader}</th>
           </tr>
         </thead>
         <tbody>
@@ -187,7 +187,7 @@ const RecipeEditor: React.FC<Props> = ({
                   }
                 />
               </td>
-              <td>
+              <td className="actions">
                 <button className="btn btn-sm" onClick={() => removePackaging(idx)}>
                   ×
                 </button>

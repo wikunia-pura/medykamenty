@@ -112,7 +112,7 @@ const Products: React.FC = () => {
               <th className="num">{t.density}</th>
               <th className="num">{t.ingredients}</th>
               <th className="num">{t.packaging}</th>
-              <th></th>
+              <th className="actions">{t.actionsHeader}</th>
             </tr>
           </thead>
           <tbody>
@@ -131,7 +131,7 @@ const Products: React.FC = () => {
                 <td className="num">{p.densityGPerMl}</td>
                 <td className="num">{p.ingredients.length}</td>
                 <td className="num">{p.packaging.length}</td>
-                <td>
+                <td className="actions">
                   <button className="btn btn-sm" onClick={() => setEditing(p)}>
                     {t.edit}
                   </button>{' '}

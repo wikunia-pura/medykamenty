@@ -1,12 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import type { ViewKey } from './types';
-import type { StockSnapshot } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 interface Props {
   onNavigate: (key: ViewKey) => void;
-  aiAvailable: boolean;
 }
 
 interface Counts {
@@ -17,22 +15,23 @@ interface Counts {
   plans: number;
 }
 
-const Dashboard: React.FC<Props> = ({ onNavigate, aiAvailable }) => {
+const Dashboard: React.FC<Props> = ({ onNavigate }) => {
   const t = useT();
   const [counts, setCounts] = useState<Counts | null>(null);
-  const [latestSnapshot, setLatestSnapshot] = useState<StockSnapshot | undefined>();
   const [confirmDemo, setConfirmDemo] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
   const [demoMessage, setDemoMessage] = useState<string | null>(null);
+  const [confirmWipe, setConfirmWipe] = useState(false);
+  const [wipeBusy, setWipeBusy] = useState(false);
+  const [wipeMessage, setWipeMessage] = useState<string | null>(null);
 
   const reload = async () => {
-    const [products, rawMaterials, components, suppliers, plans, snapshots] = await Promise.all([
+    const [products, rawMaterials, components, suppliers, plans] = await Promise.all([
       window.electronAPI.listProducts(),
       window.electronAPI.listRawMaterials(),
       window.electronAPI.listComponents(),
       window.electronAPI.listSuppliers(),
       window.electronAPI.listPlans(),
-      window.electronAPI.listStockSnapshots(),
     ]);
     setCounts({
       products: products.length,
@@ -41,7 +40,6 @@ const Dashboard: React.FC<Props> = ({ onNavigate, aiAvailable }) => {
       suppliers: suppliers.length,
       plans: plans.length,
     });
-    setLatestSnapshot(snapshots[0]);
   };
 
   const runDemo = async () => {
@@ -56,6 +54,22 @@ const Dashboard: React.FC<Props> = ({ onNavigate, aiAvailable }) => {
       setDemoMessage((err as Error).message);
     } finally {
       setDemoBusy(false);
+    }
+  };
+
+  const runWipe = async () => {
+    setConfirmWipe(false);
+    setWipeBusy(true);
+    setWipeMessage(null);
+    try {
+      await window.electronAPI.wipeData();
+      await reload();
+      setWipeMessage(t.wipeDataSuccess);
+      setDemoMessage(null);
+    } catch (err) {
+      setWipeMessage((err as Error).message);
+    } finally {
+      setWipeBusy(false);
     }
   };
 
@@ -77,6 +91,16 @@ const Dashboard: React.FC<Props> = ({ onNavigate, aiAvailable }) => {
     </div>
   );
 
+  const steps = [
+    t.firstTimeStep1,
+    t.firstTimeStep2,
+    t.firstTimeStep3,
+    t.firstTimeStep4,
+    t.firstTimeStep5,
+    t.firstTimeStep6,
+    t.firstTimeStep7,
+  ];
+
   return (
     <div className="main">
       <h1>{t.dashboard}</h1>
@@ -90,68 +114,86 @@ const Dashboard: React.FC<Props> = ({ onNavigate, aiAvailable }) => {
         {counts && tile(t.productionPlan, counts.plans, 'productionPlan')}
       </div>
 
-      <h2>{t.loadDemoTitle}</h2>
-      <div className="card" style={isEmpty ? { borderColor: 'var(--primary)' } : undefined}>
-        <div className="hint" style={{ marginBottom: 12 }}>{t.loadDemoBody}</div>
-        <div className="btn-row">
-          <button
-            className={`btn ${isEmpty ? 'primary' : ''}`}
-            disabled={demoBusy}
-            onClick={() => setConfirmDemo(true)}
-          >
-            {demoBusy ? t.loading : t.loadDemoButton}
-          </button>
-        </div>
-        {demoMessage && (
-          <div className="hint" style={{ marginTop: 12 }}>
-            {demoMessage}
+      <details
+        className="card"
+        style={{
+          padding: 0,
+          marginTop: 24,
+          borderColor: isEmpty ? 'var(--primary)' : undefined,
+        }}
+      >
+        <summary
+          style={{
+            padding: 16,
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: 15,
+            listStyle: 'revert',
+          }}
+        >
+          {t.firstTimeTitle}
+        </summary>
+        <div style={{ padding: '0 16px 16px' }}>
+          <ol style={{ paddingLeft: 24, margin: '4px 0 16px', lineHeight: 1.7 }}>
+            {steps.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ol>
+          <div className="hint" style={{ marginBottom: 12 }}>{t.firstTimeDemoHint}</div>
+          <div className="btn-row">
+            <button
+              className={`btn ${isEmpty ? 'primary' : ''}`}
+              disabled={demoBusy}
+              onClick={() => setConfirmDemo(true)}
+            >
+              {demoBusy ? t.loading : t.loadDemoButton}
+            </button>
           </div>
-        )}
-      </div>
+          {demoMessage && (
+            <div className="hint" style={{ marginTop: 12 }}>
+              {demoMessage}
+            </div>
+          )}
+        </div>
+      </details>
 
-      <h2>{t.stockImport}</h2>
-      {latestSnapshot ? (
-        <div className="card">
-          <div>
-            <strong>{latestSnapshot.sourceFile}</strong>{' '}
-            <span className="hint">
-              ({new Date(latestSnapshot.importedAt).toLocaleString()},{' '}
-              {latestSnapshot.rows.length} {t.rowsImported.toLowerCase()})
-            </span>
+      {!isEmpty && (
+        <>
+          <h2>{t.wipeDataTitle}</h2>
+          <div className="card">
+            <div className="hint" style={{ marginBottom: 12 }}>{t.wipeDataBody}</div>
+            <div className="btn-row">
+              <button
+                className="btn"
+                disabled={wipeBusy}
+                onClick={() => setConfirmWipe(true)}
+              >
+                {wipeBusy ? t.loading : t.wipeDataButton}
+              </button>
+            </div>
+            {wipeMessage && (
+              <div className="hint" style={{ marginTop: 12 }}>
+                {wipeMessage}
+              </div>
+            )}
           </div>
-          <div className="btn-row" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={() => onNavigate('stockImport')}>
-              {t.stockImport}
-            </button>
-            <button className="btn primary" onClick={() => onNavigate('productionPlan')}>
-              {t.productionPlan}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="card">
-          <div>{t.noStockYet}</div>
-          <div className="btn-row" style={{ marginTop: 12 }}>
-            <button className="btn primary" onClick={() => onNavigate('stockImport')}>
-              {t.stockImport}
-            </button>
-          </div>
-        </div>
+        </>
       )}
-
-      <h2>{t.settingsLLM}</h2>
-      <div className="card">
-        <div>
-          {t.settingsLLMStatus}:{' '}
-          {aiAvailable ? <span className="tag success">available</span> : <span className="tag">unavailable</span>}
-        </div>
-      </div>
 
       {confirmDemo && (
         <ConfirmDialog
           message={t.loadDemoConfirm}
           onConfirm={runDemo}
           onCancel={() => setConfirmDemo(false)}
+          danger
+        />
+      )}
+
+      {confirmWipe && (
+        <ConfirmDialog
+          message={t.wipeDataConfirm}
+          onConfirm={runWipe}
+          onCancel={() => setConfirmWipe(false)}
           danger
         />
       )}

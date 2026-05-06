@@ -99,7 +99,7 @@ const RawMaterials: React.FC = () => {
               <th className="num">{t.moq}</th>
               <th className="num">{t.leadTime}</th>
               <th>{t.factorySupplied}</th>
-              <th></th>
+              <th className="actions">{t.actionsHeader}</th>
             </tr>
           </thead>
           <tbody>
@@ -119,7 +119,7 @@ const RawMaterials: React.FC = () => {
                 <td className="num">{rm.moq ?? ''}</td>
                 <td className="num">{rm.leadTimeDays ?? ''}</td>
                 <td>{rm.factorySupplied ? <span className="tag warn">factory</span> : ''}</td>
-                <td>
+                <td className="actions">
                   <button className="btn btn-sm" onClick={() => setEditing(rm)}>
                     {t.edit}
                   </button>{' '}

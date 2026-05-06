@@ -117,12 +117,57 @@ export interface T {
   version: string;
   selectProduct: string;
   selectSupplier: string;
+  unitsShort: string;
+  // Max producible
+  maxProducibleHero: string;
+  maxProducibleEmptyRecipe: string;
+  maxProducibleNoLimit: string;
+  maxProducibleLimitedBy: string;
+  maxProducibleWhyHeader: string;
+  maxProducibleZeroStock: string;
+  bottleneckTag: string;
+  perUnitLabel: string;
+  enoughFor: string;
+  compute: string;
+  // First-time guide
+  firstTimeTitle: string;
+  firstTimeStep1: string;
+  firstTimeStep2: string;
+  firstTimeStep3: string;
+  firstTimeStep4: string;
+  firstTimeStep5: string;
+  firstTimeStep6: string;
+  firstTimeStep7: string;
+  firstTimeDemoHint: string;
   // Demo
   loadDemoTitle: string;
   loadDemoBody: string;
   loadDemoButton: string;
   loadDemoConfirm: string;
   loadDemoSuccess: string;
+  wipeDataTitle: string;
+  wipeDataBody: string;
+  wipeDataButton: string;
+  wipeDataConfirm: string;
+  wipeDataSuccess: string;
+  // Adopt unmatched
+  adoptAsRaw: string;
+  adoptAsComponent: string;
+  adoptAllUnmatched: string;
+  adoptAllConfirm: string;
+  // Drop zone / actions
+  dropZoneTitle: string;
+  dropZoneSubtitle: string;
+  dropZoneDragOver: string;
+  actionsHeader: string;
+  removeFile: string;
+  // Footer
+  zoom: string;
+  zoomIn: string;
+  zoomOut: string;
+  zoomReset: string;
+  updateAvailable: string;
+  upToDate: string;
 }
 
 const pl: T = {
@@ -231,6 +276,26 @@ const pl: T = {
   version: 'wersja',
   selectProduct: 'Wybierz produkt',
   selectSupplier: 'Wybierz dostawcę',
+  unitsShort: 'szt.',
+  maxProducibleHero: 'Możesz wyprodukować',
+  maxProducibleEmptyRecipe: 'Produkt nie ma receptury — uzupełnij surowce i komponenty.',
+  maxProducibleNoLimit: 'Wszystkie pozycje są dostarczane przez fabrykę — brak ograniczeń materiałowych.',
+  maxProducibleLimitedBy: 'Limituje',
+  maxProducibleWhyHeader: 'Dlaczego nie więcej',
+  maxProducibleZeroStock: 'Brak stanu — żadnej sztuki nie da się złożyć z aktualnymi danymi.',
+  bottleneckTag: 'wąskie gardło',
+  perUnitLabel: 'Na 1 szt.',
+  enoughFor: 'Wystarczy na',
+  compute: 'Oblicz',
+  firstTimeTitle: 'Pierwsze uruchomienie — krok po kroku',
+  firstTimeStep1: 'Dodaj dostawców w „Dostawcy" (nazwa, e-mail, język maila RFQ).',
+  firstTimeStep2: 'Dodaj surowce w „Surowce" — przypisz preferowanego dostawcę, jednostkę i cenę.',
+  firstTimeStep3: 'Dodaj komponenty w „Komponenty" (opakowania, etykiety, kartony) — również z dostawcą.',
+  firstTimeStep4: 'Dodaj produkty w „Produkty" — wpisz recepturę: surowce w % i komponenty w sztukach.',
+  firstTimeStep5: 'Zaimportuj stany magazynowe w „Import stanów" (eksporty xlsx z MP Firma).',
+  firstTimeStep6: 'Utwórz plan w „Plan produkcji", wybierz produkty i kliknij „Oblicz zapotrzebowanie".',
+  firstTimeStep7: 'Z raportu zapotrzebowania wygeneruj maile RFQ i wyślij do dostawców.',
+  firstTimeDemoHint: 'Nie wiesz od czego zacząć? Wczytaj dane demo, żeby zobaczyć kompletny przykład — dostawców, surowce, produkt z recepturą, plan i stany.',
   loadDemoTitle: 'Dane demo',
   loadDemoBody:
     'Wczytuje fikcyjną firmę: 4 dostawców, 7 surowców (z jednym fabrycznym i jednym pustym), 3 komponenty, jeden produkt z recepturą, gotowy plan na 1000 sztuk i stany magazynowe. Po wczytaniu od razu można obliczyć zapotrzebowanie i wygenerować maile.',
@@ -238,6 +303,28 @@ const pl: T = {
   loadDemoConfirm:
     'To zastąpi WSZYSTKIE obecne dane (dostawcy, surowce, komponenty, produkty, plany, stany). Ustawienia zostają. Kontynuować?',
   loadDemoSuccess: 'Wczytano dane demo. Przejdź do „Plan produkcji" i kliknij „Oblicz zapotrzebowanie".',
+  wipeDataTitle: 'Wyczyść dane',
+  wipeDataBody:
+    'Usuwa WSZYSTKIE dane biznesowe (dostawcy, surowce, komponenty, produkty, plany, stany magazynowe). Ustawienia aplikacji zostają. Użyj, gdy chcesz wyjść z trybu demo i zacząć z czystym kontem.',
+  wipeDataButton: 'Wyczyść wszystkie dane',
+  wipeDataConfirm:
+    'Tej operacji nie można cofnąć. Usunąć wszystkich dostawców, surowce, komponenty, produkty, plany i stany magazynowe? Ustawienia zostaną zachowane.',
+  wipeDataSuccess: 'Dane wyczyszczone. Możesz teraz dodać własnych dostawców, surowce i produkty albo zaimportować backup.',
+  adoptAsRaw: 'Dodaj jako surowiec',
+  adoptAsComponent: 'Dodaj jako komponent',
+  adoptAllUnmatched: '+ Dodaj wszystkie nierozpoznane ({n})',
+  adoptAllConfirm: 'Utworzyć {n} nowych pozycji w katalogu na podstawie nierozpoznanych wierszy? Domyślne wartości: jednostka „kg" dla surowców, typ „other" dla komponentów; bez dostawcy. Możesz później dopiąć szczegóły w widokach Surowce/Komponenty.',
+  dropZoneTitle: 'Przeciągnij i upuść pliki xlsx',
+  dropZoneSubtitle: 'lub kliknij, aby wybrać. Akceptujemy eksporty MP Firma — surowce i komponenty.',
+  dropZoneDragOver: 'Upuść pliki tutaj',
+  actionsHeader: 'Akcje',
+  removeFile: 'Usuń plik',
+  zoom: 'Powiększenie',
+  zoomIn: 'Powiększ',
+  zoomOut: 'Pomniejsz',
+  zoomReset: 'Resetuj powiększenie',
+  updateAvailable: 'dostępna do pobrania',
+  upToDate: 'Masz najnowszą wersję',
 };
 
 const en: T = {
@@ -346,6 +433,26 @@ const en: T = {
   version: 'version',
   selectProduct: 'Select product',
   selectSupplier: 'Select supplier',
+  unitsShort: 'pcs',
+  maxProducibleHero: 'You can produce',
+  maxProducibleEmptyRecipe: 'Product has no recipe — add raw materials and components.',
+  maxProducibleNoLimit: 'All items are factory-supplied — no material constraints.',
+  maxProducibleLimitedBy: 'Limited by',
+  maxProducibleWhyHeader: 'Why not more',
+  maxProducibleZeroStock: 'No stock — zero units can be produced with current data.',
+  bottleneckTag: 'bottleneck',
+  perUnitLabel: 'Per unit',
+  enoughFor: 'Enough for',
+  compute: 'Compute',
+  firstTimeTitle: 'First launch — step by step',
+  firstTimeStep1: 'Add suppliers in "Suppliers" (name, email, RFQ email language).',
+  firstTimeStep2: 'Add raw materials in "Raw materials" — assign preferred supplier, unit and price.',
+  firstTimeStep3: 'Add components in "Components" (packaging, labels, cartons) — also with a supplier.',
+  firstTimeStep4: 'Add products in "Products" — define the recipe: raw materials in % and components in pieces.',
+  firstTimeStep5: 'Import stock in "Stock import" (xlsx exports from MP Firma).',
+  firstTimeStep6: 'Create a plan in "Production plan", pick products and click "Compute shortages".',
+  firstTimeStep7: 'From the shortage report, generate RFQ emails and send them to suppliers.',
+  firstTimeDemoHint: 'Not sure where to start? Load demo data to see a full example — suppliers, raw materials, a product with a recipe, a plan and stock.',
   loadDemoTitle: 'Demo data',
   loadDemoBody:
     'Loads a fictional company: 4 suppliers, 7 raw materials (one factory-supplied and one out of stock), 3 components, one product with a recipe, a ready plan for 1000 units, and stock snapshots. After loading you can compute shortages and generate emails right away.',
@@ -353,6 +460,28 @@ const en: T = {
   loadDemoConfirm:
     'This will REPLACE all current data (suppliers, raw materials, components, products, plans, stock). Settings are preserved. Continue?',
   loadDemoSuccess: 'Demo data loaded. Go to "Production plan" and click "Compute shortages".',
+  wipeDataTitle: 'Wipe data',
+  wipeDataBody:
+    'Removes ALL business data (suppliers, raw materials, components, products, plans, stock snapshots). App settings are kept. Use this to leave demo mode and start with a clean slate.',
+  wipeDataButton: 'Wipe all data',
+  wipeDataConfirm:
+    'This cannot be undone. Delete every supplier, raw material, component, product, plan and stock snapshot? Settings will be preserved.',
+  wipeDataSuccess: 'Data wiped. You can now add your own suppliers, materials and products, or import a backup.',
+  adoptAsRaw: 'Add as raw material',
+  adoptAsComponent: 'Add as component',
+  adoptAllUnmatched: '+ Add all unmatched ({n})',
+  adoptAllConfirm: 'Create {n} new catalog entries from unmatched rows? Defaults: unit "kg" for raw materials, type "other" for components; no supplier. You can fill in details later in Raw materials/Components.',
+  dropZoneTitle: 'Drag & drop xlsx files',
+  dropZoneSubtitle: 'or click to browse. Accepts MP Firma exports — raw materials and components.',
+  dropZoneDragOver: 'Drop files here',
+  actionsHeader: 'Actions',
+  removeFile: 'Remove file',
+  zoom: 'Zoom',
+  zoomIn: 'Zoom in',
+  zoomOut: 'Zoom out',
+  zoomReset: 'Reset zoom',
+  updateAvailable: 'is available',
+  upToDate: 'You have the latest version',
 };
 
 export const translations: Record<Lang, T> = { pl, en };

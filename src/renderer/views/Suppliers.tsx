@@ -79,7 +79,7 @@ const Suppliers: React.FC = () => {
               <th>{t.email}</th>
               <th>{t.phone}</th>
               <th>{t.preferredEmailLanguage}</th>
-              <th></th>
+              <th className="actions">{t.actionsHeader}</th>
             </tr>
           </thead>
           <tbody>
@@ -96,7 +96,7 @@ const Suppliers: React.FC = () => {
                 <td>{s.email}</td>
                 <td>{s.phone ?? ''}</td>
                 <td>{s.preferredEmailLanguage ?? ''}</td>
-                <td>
+                <td className="actions">
                   <button className="btn btn-sm" onClick={() => setEditing(s)}>
                     {t.edit}
                   </button>{' '}

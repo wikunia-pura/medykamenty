@@ -118,7 +118,7 @@ const ProductionPlanView: React.FC = () => {
               <th>{t.planName}</th>
               <th>Status</th>
               <th className="num">{t.planItems}</th>
-              <th></th>
+              <th className="actions">{t.actionsHeader}</th>
             </tr>
           </thead>
           <tbody>
@@ -138,7 +138,7 @@ const ProductionPlanView: React.FC = () => {
                   </span>
                 </td>
                 <td className="num">{p.items.length}</td>
-                <td>
+                <td className="actions">
                   <button className="btn btn-sm" onClick={() => setEditing(p)}>
                     {t.edit}
                   </button>{' '}
@@ -188,7 +188,7 @@ const ProductionPlanView: React.FC = () => {
                 <tr>
                   <th>{t.products}</th>
                   <th className="num">{t.quantity}</th>
-                  <th></th>
+                  <th className="actions">{t.actionsHeader}</th>
                 </tr>
               </thead>
               <tbody>
@@ -224,7 +224,7 @@ const ProductionPlanView: React.FC = () => {
                         }
                       />
                     </td>
-                    <td>
+                    <td className="actions">
                       <button className="btn btn-sm" onClick={() => removeItem(idx)}>
                         ×
                       </button>
@@ -248,7 +248,7 @@ const ProductionPlanView: React.FC = () => {
                 <tr>
                   <th>{t.products}</th>
                   <th className="num">{t.bulkMass}</th>
-                  <th></th>
+                  <th className="actions">{t.actionsHeader}</th>
                 </tr>
               </thead>
               <tbody>
@@ -284,7 +284,7 @@ const ProductionPlanView: React.FC = () => {
                       />{' '}
                       kg
                     </td>
-                    <td>
+                    <td className="actions">
                       <button className="btn btn-sm" onClick={() => removeBulk(idx)}>
                         ×
                       </button>

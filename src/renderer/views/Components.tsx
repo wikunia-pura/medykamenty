@@ -106,7 +106,7 @@ const Components: React.FC = () => {
               <th>{t.preferredSupplier}</th>
               <th className="num">{t.moq}</th>
               <th className="num">{t.price}</th>
-              <th></th>
+              <th className="actions">{t.actionsHeader}</th>
             </tr>
           </thead>
           <tbody>
@@ -125,7 +125,7 @@ const Components: React.FC = () => {
                 <td>{supplierName(c.preferredSupplierId)}</td>
                 <td className="num">{c.moq ?? ''}</td>
                 <td className="num">{c.lastPurchasePriceNet ?? ''}</td>
-                <td>
+                <td className="actions">
                   <button className="btn btn-sm" onClick={() => setEditing(c)}>
                     {t.edit}
                   </button>{' '}

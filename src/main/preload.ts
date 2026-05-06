@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, IpcRendererEvent, webFrame } from 'electron';
 
 // Channel constants are duplicated here because preload runs in a sandboxed
 // environment that cannot resolve the shared module reliably across all
@@ -57,6 +57,7 @@ const CH = {
   LLM_MATCH_SUGGEST: 'llm:match-suggest',
 
   DEMO_SEED: 'demo:seed',
+  DATA_WIPE: 'data:wipe',
 
   APP_GET_VERSION: 'app:get-version',
   APP_OPEN_EXTERNAL: 'app:open-external',
@@ -141,8 +142,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   suggestMatchWithAI: (sourceName: string, candidates: { id: string; name: string }[]) =>
     ipcRenderer.invoke(CH.LLM_MATCH_SUGGEST, sourceName, candidates),
 
-  // Demo
+  // Demo / data
   seedDemo: () => ipcRenderer.invoke(CH.DEMO_SEED),
+  wipeData: () => ipcRenderer.invoke(CH.DATA_WIPE),
 
   // App
   getAppVersion: () => ipcRenderer.invoke(CH.APP_GET_VERSION),
@@ -158,6 +160,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-error', (_e: IpcRendererEvent, msg) => cb(msg)),
   onDownloadProgress: (cb: (p: any) => void) =>
     ipcRenderer.on('download-progress', (_e: IpcRendererEvent, p) => cb(p)),
+
+  // Zoom (in-renderer only — uses webFrame, no IPC needed)
+  getZoomFactor: () => webFrame.getZoomFactor(),
+  setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
 
   platform: process.platform,
 });

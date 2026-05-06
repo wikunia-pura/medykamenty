@@ -12,12 +12,35 @@ const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 let mainWindow: BrowserWindow | null = null;
 let database: Database;
 
+function resolveIconPath(): string | undefined {
+  const candidates = app.isPackaged
+    ? [
+        path.join(process.resourcesPath, 'icon.png'),
+        path.join(process.resourcesPath, 'icon.icns'),
+        path.join(process.resourcesPath, 'icon.ico'),
+      ]
+    : [
+        path.join(__dirname, '..', '..', '..', 'resources', 'icon.png'),
+        path.join(__dirname, '..', '..', '..', 'resources', 'icon.icns'),
+        path.join(__dirname, '..', '..', '..', 'resources', 'icon.ico'),
+      ];
+  return candidates.find((p) => {
+    try {
+      return require('fs').existsSync(p);
+    } catch {
+      return false;
+    }
+  });
+}
+
 function createWindow(): void {
+  const iconPath = resolveIconPath();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 960,
     minHeight: 600,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -76,6 +99,16 @@ function setupAutoUpdater(): void {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') {
+    const iconPath = resolveIconPath();
+    if (iconPath) {
+      try {
+        app.dock?.setIcon(iconPath);
+      } catch (err) {
+        log.warn('Failed to set dock icon:', err);
+      }
+    }
+  }
   database = new Database();
   registerIpcHandlers(database, () => mainWindow);
   setupAutoUpdater();

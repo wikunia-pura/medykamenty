@@ -100,7 +100,7 @@ export interface ElectronAPI {
     candidates: { id: string; name: string }[],
   ): Promise<{ id: string; confidence: number } | null>;
 
-  // Demo
+  // Demo / data
   seedDemo(): Promise<{
     suppliers: number;
     rawMaterials: number;
@@ -109,6 +109,7 @@ export interface ElectronAPI {
     plans: number;
     stockSnapshots: number;
   }>;
+  wipeData(): Promise<{ ok: boolean }>;
 
   // App
   getAppVersion(): Promise<string>;
@@ -120,6 +121,10 @@ export interface ElectronAPI {
   onUpdateDownloaded(cb: (info: any) => void): void;
   onUpdateError(cb: (msg: string) => void): void;
   onDownloadProgress(cb: (p: any) => void): void;
+
+  // Zoom
+  getZoomFactor(): number;
+  setZoomFactor(factor: number): void;
 
   platform: NodeJS.Platform;
 }

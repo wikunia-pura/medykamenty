@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
+import Footer from './components/Footer';
 import UpdateNotification from './components/UpdateNotification';
 import { I18nProvider } from './i18n';
 import type { Lang, AppSettings } from '../shared/types';
@@ -66,7 +67,7 @@ const App: React.FC = () => {
     if (!settings) return <div className="main">Loading…</div>;
     switch (view) {
       case 'dashboard':
-        return <Dashboard onNavigate={setView} aiAvailable={aiAvailable} />;
+        return <Dashboard onNavigate={setView} />;
       case 'products':
         return <Products />;
       case 'rawMaterials':
@@ -103,9 +104,10 @@ const App: React.FC = () => {
       <div className="app">
         <UpdateNotification />
         <div className="app-body">
-          <Sidebar current={view} onSelect={setView} appVersion={appVersion} />
+          <Sidebar current={view} onSelect={setView} />
           {renderView()}
         </div>
+        <Footer appVersion={appVersion} />
       </div>
     </I18nProvider>
   );

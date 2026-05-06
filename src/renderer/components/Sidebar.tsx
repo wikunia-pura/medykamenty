@@ -13,10 +13,9 @@ interface NavItem {
 interface Props {
   current: ViewKey;
   onSelect: (key: ViewKey) => void;
-  appVersion: string;
 }
 
-const Sidebar: React.FC<Props> = ({ current, onSelect, appVersion }) => {
+const Sidebar: React.FC<Props> = ({ current, onSelect }) => {
   const t = useT();
   const items: NavItem[] = [
     { key: 'dashboard', label: t.dashboard, icon: '◇', group: 'main' },
@@ -37,7 +36,7 @@ const Sidebar: React.FC<Props> = ({ current, onSelect, appVersion }) => {
   return (
     <div className="sidebar">
       <div className="sidebar-brand">
-        <Logo size={26} />
+        <Logo size={40} />
       </div>
       <div className="sidebar-nav">
         {items.map((item) => {
@@ -58,9 +57,6 @@ const Sidebar: React.FC<Props> = ({ current, onSelect, appVersion }) => {
             </React.Fragment>
           );
         })}
-      </div>
-      <div className="sidebar-footer">
-        {t.version} {appVersion}
       </div>
     </div>
   );

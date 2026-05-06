@@ -1,6 +1,6 @@
 {
   "name": "cutis",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Production planning desktop app for Cutis cosmetics",
   "main": "dist/main/main/main.js",
   "scripts": {
@@ -36,6 +36,18 @@
       {
         "from": "config/ai-config.yml",
         "to": "ai-config.yml"
+      },
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "resources/icon.icns",
+        "to": "icon.icns"
+      },
+      {
+        "from": "resources/icon.ico",
+        "to": "icon.ico"
       }
     ],
     "win": {
