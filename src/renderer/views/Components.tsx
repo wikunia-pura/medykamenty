@@ -1,11 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
+import { HeaderNav } from '../navigation';
 import type { PackagingComponent, Supplier, ComponentType } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import SupplierMultiPicker from '../components/SupplierMultiPicker';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
-import { IconEdit, IconTrash, IconPlus, IconStar, IconClose } from '../components/Icons';
+import SearchableSelect from '../components/SearchableSelect';
+import NumberInput from '../components/NumberInput';
+import ColumnPicker from '../components/ColumnPicker';
+import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
+import { IconEdit, IconTrash, IconPlus, IconStar } from '../components/Icons';
+import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
+import { useEscapeKey } from '../utils/useEscapeKey';
 import {
   exportComponentsCsv,
   importComponentsCsv,
@@ -37,6 +44,81 @@ const Components: React.FC = () => {
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
+
+  useEscapeKey(() => setEditing(null), !!editing);
+
+  const COLUMNS: ColumnDef[] = useMemo(
+    () => [
+      { id: 'name', label: t.name, required: true },
+      { id: 'symbol', label: t.symbol, defaultVisible: true },
+      { id: 'type', label: 'Typ', defaultVisible: true },
+      { id: 'suppliers', label: t.suppliers, defaultVisible: true },
+      { id: 'moq', label: t.moq, defaultVisible: true },
+      { id: 'leadTime', label: t.leadTime, defaultVisible: false },
+      { id: 'price', label: t.price, defaultVisible: true },
+      { id: 'currency', label: t.currency, defaultVisible: false },
+      { id: 'notes', label: t.notes, defaultVisible: false },
+    ],
+    [t],
+  );
+  const {
+    isVisible,
+    toggle,
+    reorder,
+    reset: resetColumns,
+    orderedColumns,
+    orderedVisibleIds,
+  } = useColumnPrefs('components', COLUMNS);
+
+  const headerFor = (id: string): React.ReactNode => {
+    switch (id) {
+      case 'name':
+        return <th key={id} className="col-w-lg">{t.name}</th>;
+      case 'symbol':
+        return <th key={id} className="col-w-md">{t.symbol}</th>;
+      case 'type':
+        return <th key={id} className="col-w-sm">Typ</th>;
+      case 'suppliers':
+        return <th key={id} className="col-w-xl">{t.suppliers}</th>;
+      case 'moq':
+        return <th key={id} className="num col-w-sm">{t.moq}</th>;
+      case 'leadTime':
+        return <th key={id} className="num col-w-sm">{t.leadTime}</th>;
+      case 'price':
+        return <th key={id} className="num col-w-sm">{t.price}</th>;
+      case 'currency':
+        return <th key={id} className="col-w-sm">{t.currency}</th>;
+      case 'notes':
+        return <th key={id} className="col-w-lg">{t.notes}</th>;
+      default:
+        return null;
+    }
+  };
+
+  const cellFor = (id: string, c: PackagingComponent): React.ReactNode => {
+    switch (id) {
+      case 'name':
+        return <td key={id} className="col-name col-wrap">{c.name}</td>;
+      case 'symbol':
+        return <td key={id}>{c.mpFirmaSymbol ?? ''}</td>;
+      case 'type':
+        return <td key={id}>{c.type}</td>;
+      case 'suppliers':
+        return <td key={id} className="col-wrap">{renderSupplierChips(c)}</td>;
+      case 'moq':
+        return <td key={id} className="num">{c.moq ?? ''}</td>;
+      case 'leadTime':
+        return <td key={id} className="num">{c.leadTimeDays ?? ''}</td>;
+      case 'price':
+        return <td key={id} className="num">{c.lastPurchasePriceNet ?? ''}</td>;
+      case 'currency':
+        return <td key={id}>{c.currency ?? ''}</td>;
+      case 'notes':
+        return <td key={id} className="col-wrap">{c.notes ?? ''}</td>;
+      default:
+        return null;
+    }
+  };
 
   const reload = async () => {
     const [list, ss] = await Promise.all([
@@ -178,22 +260,30 @@ const Components: React.FC = () => {
   return (
     <div className="main">
       <div className="page-header">
+        <HeaderNav />
         <h1>{t.components}</h1>
-        <span className="page-header-count">({items.length})</span>
+        <span className="page-header-count">{items.length}</span>
       </div>
 
       <div className="card">
         <div className="toolbar">
           <div className="toolbar-actions">
-            <button className="btn primary" onClick={onAdd}>
-              <IconPlus size={14} /> {t.add}
-            </button>
             <ExportImportButtons
               format="csv"
               onExport={onExport}
               onImport={onImport}
               busy={busy}
             />
+            <ColumnPicker
+              columns={orderedColumns}
+              isVisible={isVisible}
+              toggle={toggle}
+              reorder={reorder}
+              reset={resetColumns}
+            />
+            <button className="btn primary toolbar-action-primary" onClick={onAdd}>
+              <IconPlus size={14} /> {t.add}
+            </button>
           </div>
           <div className="toolbar-search">
             <SearchInput value={query} onChange={setQuery} block />
@@ -205,32 +295,22 @@ const Components: React.FC = () => {
           <table className="table">
             <thead>
               <tr>
-                <th className="col-w-lg">{t.name}</th>
-                <th className="col-w-md">{t.symbol}</th>
-                <th className="col-w-sm">Typ</th>
-                <th className="col-w-xl">{t.suppliers}</th>
-                <th className="num col-w-sm">{t.moq}</th>
-                <th className="num col-w-sm">{t.price}</th>
-                <th className="actions">{t.actionsHeader}</th>
+                {orderedVisibleIds.map((id) => headerFor(id))}
+                <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="hint">
+                  <td colSpan={orderedVisibleIds.length + 1} className="hint">
                     {query ? '—' : t.noData}
                   </td>
                 </tr>
               )}
               {filtered.map((c) => (
                 <tr key={c.id}>
-                  <td className="col-name col-wrap">{c.name}</td>
-                  <td>{c.mpFirmaSymbol ?? ''}</td>
-                  <td>{c.type}</td>
-                  <td className="col-wrap">{renderSupplierChips(c)}</td>
-                  <td className="num">{c.moq ?? ''}</td>
-                  <td className="num">{c.lastPurchasePriceNet ?? ''}</td>
-                  <td className="actions">
+                  {orderedVisibleIds.map((id) => cellFor(id, c))}
+                  <td className="actions actions-sticky">
                     <div className="btn-row">
                       <button
                         className="btn btn-sm soft-edit"
@@ -258,22 +338,16 @@ const Components: React.FC = () => {
       {editing && (
         <div className="modal-overlay" onClick={() => setEditing(null)}>
           <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-header-text">
-                <h2 className="modal-title">
-                  {editing.id ? `${t.edit}: ${editing.name ?? ''}` : `${t.add} — ${t.components.toLowerCase()}`}
-                </h2>
-              </div>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={() => setEditing(null)}
-                title={t.close}
-                aria-label={t.close}
-              >
-                <IconClose size={16} />
-              </button>
-            </div>
+            <ModalHeader
+              icon={editing.id ? <IconEdit size={18} /> : <IconPlus size={18} />}
+              tone={editing.id ? 'edit' : 'add'}
+              title={
+                editing.id
+                  ? `${t.edit}: ${editing.name ?? ''}`
+                  : `${t.add} — ${t.components.toLowerCase()}`
+              }
+              onClose={() => setEditing(null)}
+            />
             <div className="modal-body">
             <div className="form-row">
               <label>{t.name}</label>
@@ -285,16 +359,11 @@ const Components: React.FC = () => {
             </div>
             <div className="form-row">
               <label>Typ</label>
-              <select
+              <SearchableSelect
+                options={TYPES.map((tt) => ({ value: tt, label: tt }))}
                 value={editing.type ?? 'other'}
-                onChange={(e) => setEditing({ ...editing, type: e.target.value as ComponentType })}
-              >
-                {TYPES.map((tt) => (
-                  <option key={tt} value={tt}>
-                    {tt}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setEditing({ ...editing, type: val as ComponentType })}
+              />
             </div>
             <div className="form-row">
               <label>{t.symbol}</label>
@@ -317,43 +386,27 @@ const Components: React.FC = () => {
             </div>
             <div className="form-row">
               <label>{t.moq}</label>
-              <input
+              <NumberInput
                 className="input"
-                type="number"
-                value={editing.moq ?? ''}
-                onChange={(e) =>
-                  setEditing({ ...editing, moq: e.target.value === '' ? undefined : Number(e.target.value) })
-                }
+                value={editing.moq}
+                onChange={(v) => setEditing({ ...editing, moq: v })}
               />
             </div>
             <div className="form-row">
               <label>{t.leadTime}</label>
-              <input
+              <NumberInput
                 className="input"
-                type="number"
-                value={editing.leadTimeDays ?? ''}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    leadTimeDays: e.target.value === '' ? undefined : Number(e.target.value),
-                  })
-                }
+                value={editing.leadTimeDays}
+                onChange={(v) => setEditing({ ...editing, leadTimeDays: v })}
               />
             </div>
             <div className="form-row">
               <label>{t.price}</label>
-              <input
+              <NumberInput
                 className="input"
-                type="number"
                 step="0.01"
-                value={editing.lastPurchasePriceNet ?? ''}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    lastPurchasePriceNet:
-                      e.target.value === '' ? undefined : Number(e.target.value),
-                  })
-                }
+                value={editing.lastPurchasePriceNet}
+                onChange={(v) => setEditing({ ...editing, lastPurchasePriceNet: v })}
               />
             </div>
             <div className="form-row">

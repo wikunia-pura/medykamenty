@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import type { ViewKey } from './types';
-import ConfirmDialog from '../components/ConfirmDialog';
+import type { ShortageLine, ShortageReportEntry } from '../../shared/types';
+import { IconImport } from '../components/Icons';
+import GaduGaduSun from '../components/GaduGaduSun';
 
 interface Props {
   onNavigate: (key: ViewKey) => void;
+  onNavigateToReport: (planId: string, reportId: string) => void;
 }
 
 interface Counts {
@@ -15,23 +18,27 @@ interface Counts {
   plans: number;
 }
 
-const Dashboard: React.FC<Props> = ({ onNavigate }) => {
+interface DataTile {
+  key: ViewKey;
+  label: string;
+  value: number;
+  icon: string;
+  accent: 'blue' | 'green' | 'purple' | 'amber' | 'cyan';
+}
+
+const Dashboard: React.FC<Props> = ({ onNavigate, onNavigateToReport }) => {
   const t = useT();
   const [counts, setCounts] = useState<Counts | null>(null);
-  const [confirmDemo, setConfirmDemo] = useState(false);
-  const [demoBusy, setDemoBusy] = useState(false);
-  const [demoMessage, setDemoMessage] = useState<string | null>(null);
-  const [confirmWipe, setConfirmWipe] = useState(false);
-  const [wipeBusy, setWipeBusy] = useState(false);
-  const [wipeMessage, setWipeMessage] = useState<string | null>(null);
+  const [latestReport, setLatestReport] = useState<ShortageReportEntry | null>(null);
 
   const reload = async () => {
-    const [products, rawMaterials, components, suppliers, plans] = await Promise.all([
+    const [products, rawMaterials, components, suppliers, plans, reports] = await Promise.all([
       window.electronAPI.listProducts(),
       window.electronAPI.listRawMaterials(),
       window.electronAPI.listComponents(),
       window.electronAPI.listSuppliers(),
       window.electronAPI.listPlans(),
+      window.electronAPI.listShortageReports(),
     ]);
     setCounts({
       products: products.length,
@@ -40,37 +47,7 @@ const Dashboard: React.FC<Props> = ({ onNavigate }) => {
       suppliers: suppliers.length,
       plans: plans.length,
     });
-  };
-
-  const runDemo = async () => {
-    setConfirmDemo(false);
-    setDemoBusy(true);
-    setDemoMessage(null);
-    try {
-      await window.electronAPI.seedDemo();
-      await reload();
-      setDemoMessage(t.loadDemoSuccess);
-    } catch (err) {
-      setDemoMessage((err as Error).message);
-    } finally {
-      setDemoBusy(false);
-    }
-  };
-
-  const runWipe = async () => {
-    setConfirmWipe(false);
-    setWipeBusy(true);
-    setWipeMessage(null);
-    try {
-      await window.electronAPI.wipeData();
-      await reload();
-      setWipeMessage(t.wipeDataSuccess);
-      setDemoMessage(null);
-    } catch (err) {
-      setWipeMessage((err as Error).message);
-    } finally {
-      setWipeBusy(false);
-    }
+    setLatestReport(reports[0] ?? null);
   };
 
   useEffect(() => {
@@ -78,125 +55,186 @@ const Dashboard: React.FC<Props> = ({ onNavigate }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const isEmpty = counts !== null && counts.products === 0 && counts.suppliers === 0;
+  const isEmpty =
+    counts !== null && counts.products === 0 && counts.suppliers === 0 && counts.plans === 0;
 
-  const tile = (label: string, value: number, target: ViewKey) => (
-    <div
-      className="card"
-      style={{ cursor: 'pointer', minWidth: 160 }}
-      onClick={() => onNavigate(target)}
-    >
-      <div className="hint">{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 600, marginTop: 8 }}>{value}</div>
-    </div>
-  );
+  const dataTiles: DataTile[] = counts
+    ? [
+        { key: 'products', label: t.products, value: counts.products, icon: '◐', accent: 'blue' },
+        { key: 'rawMaterials', label: t.rawMaterials, value: counts.rawMaterials, icon: '⬡', accent: 'green' },
+        { key: 'components', label: t.components, value: counts.components, icon: '▦', accent: 'purple' },
+        { key: 'suppliers', label: t.suppliers, value: counts.suppliers, icon: '◉', accent: 'amber' },
+        { key: 'productionPlan', label: t.productionPlan, value: counts.plans, icon: '▤', accent: 'cyan' },
+      ]
+    : [];
 
-  const steps = [
-    t.firstTimeStep1,
-    t.firstTimeStep2,
-    t.firstTimeStep3,
-    t.firstTimeStep4,
-    t.firstTimeStep5,
-    t.firstTimeStep6,
-    t.firstTimeStep7,
-  ];
+  const shortageLines: ShortageLine[] = latestReport
+    ? [...latestReport.report.rawLines, ...latestReport.report.componentLines]
+        .filter((l) => l.shortage > 0)
+        .sort((a, b) => b.shortage - a.shortage)
+    : [];
+  const topShortages = shortageLines.slice(0, 8);
+  const moreShortages = Math.max(0, shortageLines.length - topShortages.length);
+  const reportDate = latestReport
+    ? new Date(latestReport.computedAt).toLocaleDateString()
+    : '';
+
+  const fmt = (n: number, unit: ShortageLine['unit']) => n.toFixed(unit === 'pcs' ? 0 : 2);
+
+  const hour = new Date().getHours();
+  const greeting =
+    hour < 5
+      ? t.dashboardWelcomeNight
+      : hour < 12
+        ? t.dashboardWelcomeMorning
+        : hour < 18
+          ? t.dashboardWelcomeAfternoon
+          : t.dashboardWelcomeEvening;
 
   return (
-    <div className="main">
-      <h1>{t.dashboard}</h1>
-      <p className="subtitle">{t.appName} — {t.version} alpha</p>
+    <div className="main dashboard-main">
+      <section className="dashboard-welcome" aria-label={t.dashboard}>
+        <div className="dashboard-welcome-orb dashboard-welcome-orb-a" aria-hidden />
+        <div className="dashboard-welcome-orb dashboard-welcome-orb-b" aria-hidden />
+        <div className="dashboard-welcome-orb dashboard-welcome-orb-c" aria-hidden />
+        <div className="dashboard-welcome-content">
+          <span className="dashboard-welcome-eyebrow">{t.dashboardWelcomeEyebrow}</span>
+          <h1 className="dashboard-welcome-title">{greeting}</h1>
+          <p className="dashboard-welcome-tagline">{t.dashboardWelcomeTagline}</p>
+        </div>
+        <div className="dashboard-welcome-mark" aria-hidden>
+          <span className="dashboard-welcome-mark-glow" />
+          <GaduGaduSun size={120} />
+          <span className="dashboard-welcome-gg-number">Numer GG: 2273815</span>
+        </div>
+      </section>
 
-      <div className="row">
-        {counts && tile(t.products, counts.products, 'products')}
-        {counts && tile(t.rawMaterials, counts.rawMaterials, 'rawMaterials')}
-        {counts && tile(t.components, counts.components, 'components')}
-        {counts && tile(t.suppliers, counts.suppliers, 'suppliers')}
-        {counts && tile(t.productionPlan, counts.plans, 'productionPlan')}
+      <h2 className="dashboard-section-head" style={{ marginTop: 8 }}>
+        {t.dashboardYourData}
+      </h2>
+      <div className="dashboard-grid">
+        {dataTiles.map((tile) => (
+          <button
+            key={tile.key}
+            className={`dashboard-tile dashboard-tile-${tile.accent}`}
+            onClick={() => onNavigate(tile.key)}
+          >
+            <span className="dashboard-tile-icon">{tile.icon}</span>
+            <span className="dashboard-tile-count">{tile.value}</span>
+            <span className="dashboard-tile-label">{tile.label}</span>
+          </button>
+        ))}
       </div>
 
-      <details
-        className="card"
-        style={{
-          padding: 0,
-          marginTop: 24,
-          borderColor: isEmpty ? 'var(--primary)' : undefined,
-        }}
-      >
-        <summary
-          style={{
-            padding: 16,
-            cursor: 'pointer',
-            fontWeight: 600,
-            fontSize: 15,
-            listStyle: 'revert',
-          }}
-        >
-          {t.firstTimeTitle}
-        </summary>
-        <div style={{ padding: '0 16px 16px' }}>
-          <ol style={{ paddingLeft: 24, margin: '4px 0 16px', lineHeight: 1.7 }}>
-            {steps.map((step, i) => (
-              <li key={i}>{step}</li>
-            ))}
-          </ol>
-          <div className="hint" style={{ marginBottom: 12 }}>{t.firstTimeDemoHint}</div>
-          <div className="btn-row">
-            <button
-              className={`btn ${isEmpty ? 'primary' : ''}`}
-              disabled={demoBusy}
-              onClick={() => setConfirmDemo(true)}
-            >
-              {demoBusy ? t.loading : t.loadDemoButton}
+      <h2 className="dashboard-section-head">
+        {t.dashboardMissingItems}
+        {latestReport && (
+          <span className="dashboard-section-hint">
+            {t.dashboardLastReport}: {latestReport.planName} · {reportDate}
+          </span>
+        )}
+      </h2>
+
+      {!latestReport && (
+        <div className="dashboard-empty">
+          <span className="dashboard-empty-icon">⚠</span>
+          <div>
+            <div className="dashboard-empty-title">{t.dashboardNoReportYet}</div>
+            <button className="btn primary" onClick={() => onNavigate('productionPlan')}>
+              {t.addPlanCta} →
             </button>
           </div>
-          {demoMessage && (
-            <div className="hint" style={{ marginTop: 12 }}>
-              {demoMessage}
-            </div>
-          )}
         </div>
-      </details>
+      )}
 
-      {!isEmpty && (
+      {latestReport && topShortages.length === 0 && (
+        <div className="dashboard-empty dashboard-empty-success">
+          <span className="dashboard-empty-icon">✓</span>
+          <div className="dashboard-empty-title">{t.dashboardNoMissing}</div>
+        </div>
+      )}
+
+      {topShortages.length > 0 && (
         <>
-          <h2>{t.wipeDataTitle}</h2>
-          <div className="card">
-            <div className="hint" style={{ marginBottom: 12 }}>{t.wipeDataBody}</div>
-            <div className="btn-row">
-              <button
-                className="btn"
-                disabled={wipeBusy}
-                onClick={() => setConfirmWipe(true)}
-              >
-                {wipeBusy ? t.loading : t.wipeDataButton}
-              </button>
-            </div>
-            {wipeMessage && (
-              <div className="hint" style={{ marginTop: 12 }}>
-                {wipeMessage}
-              </div>
+          <div className="dashboard-grid dashboard-grid-shortage">
+            {topShortages.map((line) => {
+              const supplier =
+                latestReport!.report.groups.find(
+                  (g) =>
+                    g.rawLines.some((l) => l.itemId === line.itemId) ||
+                    g.componentLines.some((l) => l.itemId === line.itemId),
+                )?.supplierName ?? '—';
+              return (
+                <button
+                  key={`${line.itemKind}-${line.itemId}`}
+                  className={`dashboard-shortage-tile dashboard-shortage-${line.itemKind}`}
+                  onClick={() => onNavigateToReport(latestReport!.planId, latestReport!.id)}
+                >
+                  <div className="dashboard-shortage-head">
+                    <span className="tag">
+                      {line.itemKind === 'raw' ? 'surowiec' : 'komponent'}
+                    </span>
+                    <span className="dashboard-shortage-supplier" title={supplier}>
+                      {supplier}
+                    </span>
+                  </div>
+                  <div className="dashboard-shortage-name" title={line.itemName}>
+                    {line.itemName}
+                  </div>
+                  <div className="dashboard-shortage-amount">
+                    <span className="dashboard-shortage-amount-value">
+                      {fmt(line.shortage, line.unit)}
+                    </span>
+                    <span className="dashboard-shortage-amount-unit">{line.unit}</span>
+                  </div>
+                  <div className="dashboard-shortage-foot">
+                    {t.dashboardOrder}:{' '}
+                    <strong>
+                      {fmt(line.suggestedOrder, line.unit)} {line.unit}
+                    </strong>
+                  </div>
+                  <div
+                    className="dashboard-shortage-source"
+                    title={`${latestReport!.planName} · ${reportDate}`}
+                  >
+                    <span className="dashboard-shortage-source-label">
+                      {t.dashboardLastReport} · {reportDate}
+                    </span>
+                    <span className="dashboard-shortage-source-plan">
+                      {latestReport!.planName}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="dashboard-shortage-more">
+            {moreShortages > 0 && (
+              <span className="hint">
+                + {moreShortages} {moreShortages === 1 ? 'pozycja' : 'pozycji'}
+              </span>
             )}
+            <button className="btn primary" onClick={() => onNavigate('shortageReport')}>
+              {t.dashboardSeeFullReport} →
+            </button>
           </div>
         </>
       )}
 
-      {confirmDemo && (
-        <ConfirmDialog
-          message={t.loadDemoConfirm}
-          onConfirm={runDemo}
-          onCancel={() => setConfirmDemo(false)}
-          danger
-        />
-      )}
-
-      {confirmWipe && (
-        <ConfirmDialog
-          message={t.wipeDataConfirm}
-          onConfirm={runWipe}
-          onCancel={() => setConfirmWipe(false)}
-          danger
-        />
-      )}
+      <button
+        className={`dashboard-hero ${isEmpty ? 'dashboard-hero-pulse' : ''}`}
+        onClick={() => onNavigate('stockImport')}
+      >
+        <span className="dashboard-hero-icon">
+          <IconImport size={28} />
+        </span>
+        <span className="dashboard-hero-text">
+          <span className="dashboard-hero-step">{t.dashboardStartStep}</span>
+          <span className="dashboard-hero-title">{t.dashboardStartCta}</span>
+          <span className="dashboard-hero-hint">{t.dashboardStartHint}</span>
+        </span>
+        <span className="dashboard-hero-arrow">→</span>
+      </button>
     </div>
   );
 };

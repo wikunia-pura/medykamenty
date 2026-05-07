@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type {
   RawMaterial,
   PackagingComponent,
@@ -7,6 +7,8 @@ import type {
 } from '../../shared/types';
 import { useT } from '../i18n';
 import { IconPlus, IconClose } from './Icons';
+import SearchableSelect from './SearchableSelect';
+import NumberInput from './NumberInput';
 
 interface Props {
   rawMaterials: RawMaterial[];
@@ -15,6 +17,7 @@ interface Props {
   packaging: RecipePackaging[];
   onIngredientsChange: (next: RecipeIngredient[]) => void;
   onPackagingChange: (next: RecipePackaging[]) => void;
+  readOnly?: boolean;
 }
 
 const RecipeEditor: React.FC<Props> = ({
@@ -24,8 +27,29 @@ const RecipeEditor: React.FC<Props> = ({
   packaging,
   onIngredientsChange,
   onPackagingChange,
+  readOnly = false,
 }) => {
   const t = useT();
+
+  const rawOptions = useMemo(
+    () =>
+      rawMaterials.map((rm) => ({
+        value: rm.id,
+        label: rm.name,
+        hint: rm.factorySupplied ? '(factory)' : undefined,
+      })),
+    [rawMaterials],
+  );
+
+  const componentOptions = useMemo(
+    () =>
+      components.map((c) => ({
+        value: c.id,
+        label: c.name,
+        hint: c.type ? `(${c.type})` : undefined,
+      })),
+    [components],
+  );
 
   const sumPercent = ingredients.reduce((acc, i) => acc + (i.percentage || 0), 0);
   const overflow = sumPercent > 100.0001;
@@ -72,13 +96,15 @@ const RecipeEditor: React.FC<Props> = ({
           Σ {sumPercent.toFixed(2)} %
         </span>
         <div className="spacer" />
-        <button
-          className="btn btn-sm soft-edit"
-          onClick={addIngredient}
-          disabled={ingredients.length >= rawMaterials.length}
-        >
-          <IconPlus size={13} /> {t.add}
-        </button>
+        {!readOnly && (
+          <button
+            className="btn btn-sm soft-edit"
+            onClick={addIngredient}
+            disabled={ingredients.length >= rawMaterials.length}
+          >
+            <IconPlus size={13} /> {t.add}
+          </button>
+        )}
       </div>
       {overflow && <div className="error-text">{t.recipeSumError}</div>}
       {underflow && !overflow && <div className="warn-text hint">{t.recipeSumWarning}</div>}
@@ -88,13 +114,13 @@ const RecipeEditor: React.FC<Props> = ({
           <tr>
             <th>{t.name}</th>
             <th className="num">{t.percentage}</th>
-            <th className="actions">{t.actionsHeader}</th>
+            {!readOnly && <th className="actions">{t.actionsHeader}</th>}
           </tr>
         </thead>
         <tbody>
           {ingredients.length === 0 && (
             <tr>
-              <td colSpan={3} className="hint">
+              <td colSpan={readOnly ? 2 : 3} className="hint">
                 {t.noData}
               </td>
             </tr>
@@ -102,39 +128,36 @@ const RecipeEditor: React.FC<Props> = ({
           {ingredients.map((ing, idx) => (
             <tr key={idx}>
               <td>
-                <select
+                <SearchableSelect
+                  options={rawOptions}
                   value={ing.rawMaterialId}
-                  onChange={(e) => updateIngredient(idx, { rawMaterialId: e.target.value })}
-                >
-                  {rawMaterials.map((rm) => (
-                    <option key={rm.id} value={rm.id}>
-                      {rm.name}
-                      {rm.factorySupplied ? ' (factory)' : ''}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => updateIngredient(idx, { rawMaterialId: val })}
+                  placeholder={t.search}
+                  disabled={readOnly}
+                />
               </td>
               <td className="num">
-                <input
+                <NumberInput
                   className="input"
-                  type="number"
                   step="0.01"
                   style={{ width: 100 }}
                   value={ing.percentage}
-                  onChange={(e) =>
-                    updateIngredient(idx, { percentage: Number(e.target.value) || 0 })
-                  }
+                  emptyValue={0}
+                  onChange={(v) => updateIngredient(idx, { percentage: v ?? 0 })}
+                  disabled={readOnly}
                 />
               </td>
-              <td className="actions">
-                <button
-                  className="btn btn-sm soft-danger btn-icon-only"
-                  onClick={() => removeIngredient(idx)}
-                  title={t.delete}
-                >
-                  <IconClose size={12} />
-                </button>
-              </td>
+              {!readOnly && (
+                <td className="actions">
+                  <button
+                    className="btn btn-sm soft-danger btn-icon-only"
+                    onClick={() => removeIngredient(idx)}
+                    title={t.delete}
+                  >
+                    <IconClose size={12} />
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -143,26 +166,28 @@ const RecipeEditor: React.FC<Props> = ({
       <div className="row" style={{ marginBottom: 12 }}>
         <strong>{t.packaging}</strong>
         <div className="spacer" />
-        <button
-          className="btn btn-sm soft-edit"
-          onClick={addPackaging}
-          disabled={packaging.length >= components.length}
-        >
-          <IconPlus size={13} /> {t.add}
-        </button>
+        {!readOnly && (
+          <button
+            className="btn btn-sm soft-edit"
+            onClick={addPackaging}
+            disabled={packaging.length >= components.length}
+          >
+            <IconPlus size={13} /> {t.add}
+          </button>
+        )}
       </div>
       <table className="table">
         <thead>
           <tr>
             <th>{t.name}</th>
             <th className="num">{t.qtyPerUnit}</th>
-            <th className="actions">{t.actionsHeader}</th>
+            {!readOnly && <th className="actions">{t.actionsHeader}</th>}
           </tr>
         </thead>
         <tbody>
           {packaging.length === 0 && (
             <tr>
-              <td colSpan={3} className="hint">
+              <td colSpan={readOnly ? 2 : 3} className="hint">
                 {t.noData}
               </td>
             </tr>
@@ -170,37 +195,35 @@ const RecipeEditor: React.FC<Props> = ({
           {packaging.map((pkg, idx) => (
             <tr key={idx}>
               <td>
-                <select
+                <SearchableSelect
+                  options={componentOptions}
                   value={pkg.componentId}
-                  onChange={(e) => updatePackaging(idx, { componentId: e.target.value })}
-                >
-                  {components.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.type})
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td className="num">
-                <input
-                  className="input"
-                  type="number"
-                  style={{ width: 100 }}
-                  value={pkg.qtyPerUnit}
-                  onChange={(e) =>
-                    updatePackaging(idx, { qtyPerUnit: Number(e.target.value) || 0 })
-                  }
+                  onChange={(val) => updatePackaging(idx, { componentId: val })}
+                  placeholder={t.search}
+                  disabled={readOnly}
                 />
               </td>
-              <td className="actions">
-                <button
-                  className="btn btn-sm soft-danger btn-icon-only"
-                  onClick={() => removePackaging(idx)}
-                  title={t.delete}
-                >
-                  <IconClose size={12} />
-                </button>
+              <td className="num">
+                <NumberInput
+                  className="input"
+                  style={{ width: 100 }}
+                  value={pkg.qtyPerUnit}
+                  emptyValue={0}
+                  onChange={(v) => updatePackaging(idx, { qtyPerUnit: v ?? 0 })}
+                  disabled={readOnly}
+                />
               </td>
+              {!readOnly && (
+                <td className="actions">
+                  <button
+                    className="btn btn-sm soft-danger btn-icon-only"
+                    onClick={() => removePackaging(idx)}
+                    title={t.delete}
+                  >
+                    <IconClose size={12} />
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

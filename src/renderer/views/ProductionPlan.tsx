@@ -1,15 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
+import { HeaderNav } from '../navigation';
 import type {
   ProductionPlan,
   Product,
-  ProductionPlanItem,
-  BulkMassItem,
+  ShortageReportEntry,
+  EmailBatch,
 } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
-import { IconEdit, IconTrash, IconPlus, IconClose, IconDuplicate } from '../components/Icons';
+import { IconEdit, IconTrash, IconPlus, IconDuplicate } from '../components/Icons';
 import ExportImportButtons from '../components/ExportImportButtons';
+import ColumnPicker from '../components/ColumnPicker';
+import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
+import PlanEditorModal from '../components/PlanEditorModal';
+import HoverTooltip from '../components/HoverTooltip';
+import PlanReportsPopover from '../components/PlanReportsPopover';
 import {
   exportPlansJson,
   importPlansJson,
@@ -21,18 +27,51 @@ import {
 interface Props {
   editPlanId?: string;
   onEditPlanIdConsumed?: () => void;
+  initialSearch?: string;
+  onInitialSearchConsumed?: () => void;
+  onNavigateToReport?: (planId: string, reportId: string) => void;
+  onNavigateToBatch?: (batchId: string) => void;
 }
 
-const ProductionPlanView: React.FC<Props> = ({ editPlanId, onEditPlanIdConsumed }) => {
+const ProductionPlanView: React.FC<Props> = ({
+  editPlanId,
+  onEditPlanIdConsumed,
+  initialSearch,
+  onInitialSearchConsumed,
+  onNavigateToReport,
+  onNavigateToBatch,
+}) => {
   const t = useT();
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [reports, setReports] = useState<ShortageReportEntry[]>([]);
+  const [batches, setBatches] = useState<EmailBatch[]>([]);
   const [editing, setEditing] = useState<Partial<ProductionPlan> | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ProductionPlan | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const COLUMNS: ColumnDef[] = useMemo(
+    () => [
+      { id: 'name', label: t.planName, required: true },
+      { id: 'status', label: 'Status', defaultVisible: true },
+      { id: 'items', label: t.planItems, defaultVisible: true },
+      { id: 'bulk', label: t.bulkMass, defaultVisible: false },
+      { id: 'created', label: t.planCreatedAt, defaultVisible: false },
+      { id: 'updated', label: t.planUpdatedAt, defaultVisible: false },
+    ],
+    [t],
+  );
+  const {
+    isVisible,
+    toggle,
+    reorder,
+    reset: resetColumns,
+    orderedColumns,
+    orderedVisibleIds,
+  } = useColumnPrefs('plans', COLUMNS);
 
   const filteredPlans = useMemo(() => {
     if (!query.trim()) return plans;
@@ -45,13 +84,43 @@ const ProductionPlanView: React.FC<Props> = ({ editPlanId, onEditPlanIdConsumed 
   }, [plans, products, query]);
 
   const reload = async () => {
-    const [ps, prods] = await Promise.all([
+    const [ps, prods, rs, bs] = await Promise.all([
       window.electronAPI.listPlans(),
       window.electronAPI.listProducts(),
+      window.electronAPI.listShortageReports(),
+      window.electronAPI.listEmailBatches(),
     ]);
     setPlans(ps);
     setProducts(prods);
+    setReports(rs);
+    setBatches(bs);
   };
+
+  const reportsByPlan = useMemo(() => {
+    const map = new Map<string, ShortageReportEntry[]>();
+    for (const r of reports) {
+      const arr = map.get(r.planId) ?? [];
+      arr.push(r);
+      map.set(r.planId, arr);
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => b.computedAt.localeCompare(a.computedAt));
+    }
+    return map;
+  }, [reports]);
+
+  const batchesByPlan = useMemo(() => {
+    const map = new Map<string, EmailBatch[]>();
+    for (const b of batches) {
+      const arr = map.get(b.planId) ?? [];
+      arr.push(b);
+      map.set(b.planId, arr);
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
+    }
+    return map;
+  }, [batches]);
 
   useEffect(() => {
     void reload();
@@ -67,6 +136,13 @@ const ProductionPlanView: React.FC<Props> = ({ editPlanId, onEditPlanIdConsumed 
       onEditPlanIdConsumed?.();
     }
   }, [editPlanId, plans]);
+
+  // Pre-fill the search box when navigated here with an initial query.
+  useEffect(() => {
+    if (!initialSearch) return;
+    setQuery(initialSearch);
+    onInitialSearchConsumed?.();
+  }, [initialSearch]);
 
   const onAdd = () =>
     setEditing({
@@ -156,65 +232,33 @@ const ProductionPlanView: React.FC<Props> = ({ editPlanId, onEditPlanIdConsumed 
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? '?';
 
-  const updateItem = (idx: number, patch: Partial<ProductionPlanItem>) => {
-    if (!editing) return;
-    const next = (editing.items ?? []).slice();
-    next[idx] = { ...next[idx], ...patch };
-    setEditing({ ...editing, items: next });
-  };
-  const removeItem = (idx: number) => {
-    if (!editing) return;
-    setEditing({ ...editing, items: (editing.items ?? []).filter((_, i) => i !== idx) });
-  };
-  const addItem = () => {
-    if (!editing) return;
-    const firstProduct = products.find(
-      (p) => !(editing.items ?? []).some((i) => i.productId === p.id),
-    );
-    if (!firstProduct) return;
-    setEditing({
-      ...editing,
-      items: [...(editing.items ?? []), { productId: firstProduct.id, qtyUnits: 1000 }],
-    });
-  };
-
-  const updateBulk = (idx: number, patch: Partial<BulkMassItem>) => {
-    if (!editing) return;
-    const next = (editing.bulkMass ?? []).slice();
-    next[idx] = { ...next[idx], ...patch };
-    setEditing({ ...editing, bulkMass: next });
-  };
-  const removeBulk = (idx: number) => {
-    if (!editing) return;
-    setEditing({ ...editing, bulkMass: (editing.bulkMass ?? []).filter((_, i) => i !== idx) });
-  };
-  const addBulk = () => {
-    if (!editing || products.length === 0) return;
-    setEditing({
-      ...editing,
-      bulkMass: [...(editing.bulkMass ?? []), { productId: products[0].id, massKg: 10 }],
-    });
-  };
-
   return (
     <div className="main">
       <div className="page-header">
+        <HeaderNav />
         <h1>{t.productionPlan}</h1>
-        <span className="page-header-count">({plans.length})</span>
+        <span className="page-header-count">{plans.length}</span>
       </div>
 
       <div className="card">
         <div className="toolbar">
           <div className="toolbar-actions">
-            <button className="btn primary" onClick={onAdd}>
-              <IconPlus size={14} /> {t.add}
-            </button>
             <ExportImportButtons
               format="json"
               onExport={onExport}
               onImport={onImport}
               busy={busy}
             />
+            <ColumnPicker
+              columns={orderedColumns}
+              isVisible={isVisible}
+              toggle={toggle}
+              reorder={reorder}
+              reset={resetColumns}
+            />
+            <button className="btn primary toolbar-action-primary" onClick={onAdd}>
+              <IconPlus size={14} /> {t.add}
+            </button>
           </div>
           <div className="toolbar-search">
             <SearchInput value={query} onChange={setQuery} block />
@@ -226,32 +270,159 @@ const ProductionPlanView: React.FC<Props> = ({ editPlanId, onEditPlanIdConsumed 
           <table className="table">
             <thead>
               <tr>
-                <th className="col-w-xl">{t.planName}</th>
-                <th className="col-w-md">Status</th>
-                <th className="num col-w-sm">{t.planItems}</th>
-                <th className="actions">{t.actionsHeader}</th>
+                {orderedVisibleIds.map((id) => {
+                  switch (id) {
+                    case 'name':
+                      return <th key={id} className="col-w-xl">{t.planName}</th>;
+                    case 'status':
+                      return <th key={id} className="col-w-md">Status</th>;
+                    case 'items':
+                      return <th key={id} className="num col-w-sm">{t.planItems}</th>;
+                    case 'bulk':
+                      return <th key={id} className="num col-w-sm">{t.bulkMass}</th>;
+                    case 'created':
+                      return <th key={id} className="col-w-md">{t.planCreatedAt}</th>;
+                    case 'updated':
+                      return <th key={id} className="col-w-md">{t.planUpdatedAt}</th>;
+                    default:
+                      return null;
+                  }
+                })}
+                <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
             <tbody>
               {filteredPlans.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="hint">
+                  <td colSpan={orderedVisibleIds.length + 1} className="hint">
                     {query ? '—' : t.noData}
                   </td>
                 </tr>
               )}
               {filteredPlans.map((p) => {
                 const info = statusInfo(p.status);
+                const cellFor = (id: string): React.ReactNode => {
+                  switch (id) {
+                    case 'name':
+                      return <td key={id} className="col-name col-wrap">{p.name}</td>;
+                    case 'status': {
+                      const planReports = reportsByPlan.get(p.id) ?? [];
+                      const planBatches = batchesByPlan.get(p.id) ?? [];
+                      const isComputed = p.status === 'computed';
+                      const showPopover =
+                        isComputed && (planReports.length > 0 || planBatches.length > 0);
+                      return (
+                        <td key={id}>
+                          {showPopover ? (
+                            <PlanReportsPopover
+                              triggerClassName={`tag ${info.cls} tag-clickable`}
+                              triggerTitle={info.tooltip}
+                              trigger={info.label}
+                              reports={planReports}
+                              batches={planBatches}
+                              onSelectReport={(e) =>
+                                onNavigateToReport?.(e.planId, e.id)
+                              }
+                              onSelectBatch={(b) => onNavigateToBatch?.(b.id)}
+                            />
+                          ) : (
+                            <span className={`tag ${info.cls}`} title={info.tooltip}>
+                              {info.label}
+                            </span>
+                          )}
+                        </td>
+                      );
+                    }
+                    case 'items': {
+                      const items = p.items ?? [];
+                      if (items.length === 0) {
+                        return <td key={id} className="num"><span className="hint">0</span></td>;
+                      }
+                      const top = items.slice(0, 10);
+                      return (
+                        <td key={id} className="num">
+                          <HoverTooltip
+                            align="right"
+                            triggerClassName="count-bubble"
+                            trigger={items.length}
+                          >
+                            <div className="shortage-tooltip-header">
+                              {t.planItems} — {items.length}
+                            </div>
+                            <ul className="shortage-tooltip-list">
+                              {top.map((it, i) => (
+                                <li key={`${it.productId}-${i}`}>
+                                  <span className="shortage-tooltip-name">
+                                    {productName(it.productId)}
+                                  </span>
+                                  <span className="list-tooltip-amount">
+                                    {it.qtyUnits.toLocaleString()} szt.
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                            {items.length > top.length && (
+                              <div className="shortage-tooltip-more hint">
+                                + {items.length - top.length}
+                              </div>
+                            )}
+                          </HoverTooltip>
+                        </td>
+                      );
+                    }
+                    case 'bulk': {
+                      const bulk = p.bulkMass ?? [];
+                      if (bulk.length === 0) {
+                        return <td key={id} className="num"><span className="hint">0</span></td>;
+                      }
+                      const top = bulk.slice(0, 10);
+                      return (
+                        <td key={id} className="num">
+                          <HoverTooltip
+                            align="right"
+                            triggerClassName="count-bubble"
+                            trigger={bulk.length}
+                          >
+                            <div className="shortage-tooltip-header">
+                              {t.bulkMass} — {bulk.length}
+                            </div>
+                            <ul className="shortage-tooltip-list">
+                              {top.map((bm, i) => (
+                                <li key={`${bm.productId ?? 'noid'}-${i}`}>
+                                  <span className="shortage-tooltip-name">
+                                    {productName(bm.productId)}
+                                  </span>
+                                  <span className="list-tooltip-amount">
+                                    {(bm.massKg ?? 0).toLocaleString()} kg
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                            {bulk.length > top.length && (
+                              <div className="shortage-tooltip-more hint">
+                                + {bulk.length - top.length}
+                              </div>
+                            )}
+                          </HoverTooltip>
+                        </td>
+                      );
+                    }
+                    case 'created':
+                      return (
+                        <td key={id}>{new Date(p.createdAt).toLocaleDateString()}</td>
+                      );
+                    case 'updated':
+                      return (
+                        <td key={id}>{new Date(p.updatedAt).toLocaleDateString()}</td>
+                      );
+                    default:
+                      return null;
+                  }
+                };
                 return (
                   <tr key={p.id}>
-                    <td className="col-name col-wrap">{p.name}</td>
-                    <td>
-                      <span className={`tag ${info.cls}`} title={info.tooltip}>
-                        {info.label}
-                      </span>
-                    </td>
-                    <td className="num">{p.items.length}</td>
-                    <td className="actions">
+                    {orderedVisibleIds.map((id) => cellFor(id))}
+                    <td className="actions actions-sticky">
                       <div className="btn-row">
                         <button
                           className="btn btn-sm soft-edit"
@@ -285,203 +456,13 @@ const ProductionPlanView: React.FC<Props> = ({ editPlanId, onEditPlanIdConsumed 
       </div>
 
       {editing && (
-        <div className="modal-overlay" onClick={() => setEditing(null)}>
-          <div
-            className="modal modal-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="modal-header">
-              <div className="modal-header-text">
-                <h2 className="modal-title">
-                  {editing.id ? `${t.edit}: ${editing.name ?? ''}` : t.addPlanCta}
-                </h2>
-                <p className="modal-subtitle">
-                  {editing.id
-                    ? t.productionPlan
-                    : 'Zaplanuj produkcję: dodaj produkty pakowane oraz, opcjonalnie, masę luzem.'}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={() => setEditing(null)}
-                title={t.close}
-                aria-label={t.close}
-              >
-                <IconClose size={16} />
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div className="modal-section">
-                <div className="modal-section-header">
-                  <h3 className="modal-section-title">{t.planName}</h3>
-                </div>
-                <input
-                  className="input"
-                  placeholder={t.planName}
-                  value={editing.name ?? ''}
-                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                />
-              </div>
-
-              <div className="modal-section">
-                <div className="modal-section-header">
-                  <div>
-                    <h3 className="modal-section-title">{t.planItems}</h3>
-                    <div className="hint" style={{ marginTop: 2 }}>
-                      Produkty gotowe do pakowania w sztukach.
-                    </div>
-                  </div>
-                  <button
-                    className="btn btn-sm soft-edit"
-                    onClick={addItem}
-                    disabled={products.length === 0}
-                  >
-                    <IconPlus size={13} /> {t.add}
-                  </button>
-                </div>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>{t.products}</th>
-                      <th className="num">{t.quantity}</th>
-                      <th className="actions">{t.actionsHeader}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(editing.items ?? []).length === 0 && (
-                      <tr>
-                        <td colSpan={3} className="hint">
-                          {t.noData}
-                        </td>
-                      </tr>
-                    )}
-                    {(editing.items ?? []).map((item, idx) => (
-                      <tr key={idx}>
-                        <td>
-                          <select
-                            value={item.productId}
-                            onChange={(e) => updateItem(idx, { productId: e.target.value })}
-                          >
-                            {products.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} ({p.capacityMl} ml)
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="num">
-                          <input
-                            className="input"
-                            type="number"
-                            style={{ width: 120 }}
-                            value={item.qtyUnits}
-                            onChange={(e) =>
-                              updateItem(idx, { qtyUnits: Number(e.target.value) || 0 })
-                            }
-                          />
-                        </td>
-                        <td className="actions">
-                          <button
-                            className="btn btn-sm soft-danger btn-icon-only"
-                            onClick={() => removeItem(idx)}
-                            title={t.delete}
-                          >
-                            <IconClose size={12} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="modal-section">
-                <div className="modal-section-header">
-                  <div>
-                    <h3 className="modal-section-title">{t.bulkMass}</h3>
-                    <div className="hint" style={{ marginTop: 2 }}>
-                      Masa luzem (np. saszetki, hurt) — w kilogramach.
-                    </div>
-                  </div>
-                  <button
-                    className="btn btn-sm soft-edit"
-                    onClick={addBulk}
-                    disabled={products.length === 0}
-                  >
-                    <IconPlus size={13} /> {t.add}
-                  </button>
-                </div>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>{t.products}</th>
-                      <th className="num">{t.bulkMass}</th>
-                      <th className="actions">{t.actionsHeader}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(editing.bulkMass ?? []).length === 0 && (
-                      <tr>
-                        <td colSpan={3} className="hint">
-                          {t.noData}
-                        </td>
-                      </tr>
-                    )}
-                    {(editing.bulkMass ?? []).map((bm, idx) => (
-                      <tr key={idx}>
-                        <td>
-                          <select
-                            value={bm.productId}
-                            onChange={(e) => updateBulk(idx, { productId: e.target.value })}
-                          >
-                            {products.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="num">
-                          <input
-                            className="input"
-                            type="number"
-                            step="0.1"
-                            style={{ width: 100 }}
-                            value={bm.massKg}
-                            onChange={(e) =>
-                              updateBulk(idx, { massKg: Number(e.target.value) || 0 })
-                            }
-                          />{' '}
-                          kg
-                        </td>
-                        <td className="actions">
-                          <button
-                            className="btn btn-sm soft-danger btn-icon-only"
-                            onClick={() => removeBulk(idx)}
-                            title={t.delete}
-                          >
-                            <IconClose size={12} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button className="btn" onClick={() => setEditing(null)}>
-                {t.cancel}
-              </button>
-              <button className="btn primary-filled" onClick={onSave}>
-                {t.save}
-              </button>
-            </div>
-          </div>
-        </div>
+        <PlanEditorModal
+          editing={editing}
+          products={products}
+          setEditing={setEditing}
+          onCancel={() => setEditing(null)}
+          onSave={onSave}
+        />
       )}
 
       {confirmDelete && (

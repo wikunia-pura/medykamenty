@@ -1,10 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
+import { HeaderNav } from '../navigation';
 import type { Supplier, Lang } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
-import { IconEdit, IconTrash, IconPlus, IconClose } from '../components/Icons';
+import { IconEdit, IconTrash, IconPlus } from '../components/Icons';
+import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
+import SearchableSelect from '../components/SearchableSelect';
+import ColumnPicker from '../components/ColumnPicker';
+import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
+import { useEscapeKey } from '../utils/useEscapeKey';
 import {
   exportSuppliersCsv,
   importSuppliersCsv,
@@ -22,6 +28,61 @@ const Suppliers: React.FC = () => {
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
+
+  useEscapeKey(() => setEditing(null), !!editing);
+
+  const COLUMNS: ColumnDef[] = useMemo(
+    () => [
+      { id: 'name', label: t.name, required: true },
+      { id: 'email', label: t.email, defaultVisible: true },
+      { id: 'phone', label: t.phone, defaultVisible: true },
+      { id: 'language', label: t.preferredEmailLanguage, defaultVisible: true },
+      { id: 'notes', label: t.notes, defaultVisible: false },
+    ],
+    [t],
+  );
+  const {
+    isVisible,
+    toggle,
+    reorder,
+    reset: resetColumns,
+    orderedColumns,
+    orderedVisibleIds,
+  } = useColumnPrefs('suppliers', COLUMNS);
+
+  const headerFor = (id: string): React.ReactNode => {
+    switch (id) {
+      case 'name':
+        return <th key={id} className="col-w-lg">{t.name}</th>;
+      case 'email':
+        return <th key={id} className="col-w-lg">{t.email}</th>;
+      case 'phone':
+        return <th key={id} className="col-w-md">{t.phone}</th>;
+      case 'language':
+        return <th key={id} className="col-w-sm">{t.preferredEmailLanguage}</th>;
+      case 'notes':
+        return <th key={id} className="col-w-lg">{t.notes}</th>;
+      default:
+        return null;
+    }
+  };
+
+  const cellFor = (id: string, s: Supplier): React.ReactNode => {
+    switch (id) {
+      case 'name':
+        return <td key={id} className="col-name">{s.name}</td>;
+      case 'email':
+        return <td key={id}>{s.email}</td>;
+      case 'phone':
+        return <td key={id}>{s.phone ?? ''}</td>;
+      case 'language':
+        return <td key={id}>{s.preferredEmailLanguage ?? ''}</td>;
+      case 'notes':
+        return <td key={id} className="col-wrap">{s.notes ?? ''}</td>;
+      default:
+        return null;
+    }
+  };
 
   const reload = async () => {
     setItems(await window.electronAPI.listSuppliers());
@@ -116,22 +177,30 @@ const Suppliers: React.FC = () => {
   return (
     <div className="main">
       <div className="page-header">
+        <HeaderNav />
         <h1>{t.suppliers}</h1>
-        <span className="page-header-count">({items.length})</span>
+        <span className="page-header-count">{items.length}</span>
       </div>
 
       <div className="card">
         <div className="toolbar">
           <div className="toolbar-actions">
-            <button className="btn primary" onClick={onAdd}>
-              <IconPlus size={14} /> {t.add}
-            </button>
             <ExportImportButtons
               format="csv"
               onExport={onExport}
               onImport={onImport}
               busy={busy}
             />
+            <ColumnPicker
+              columns={orderedColumns}
+              isVisible={isVisible}
+              toggle={toggle}
+              reorder={reorder}
+              reset={resetColumns}
+            />
+            <button className="btn primary toolbar-action-primary" onClick={onAdd}>
+              <IconPlus size={14} /> {t.add}
+            </button>
           </div>
           <div className="toolbar-search">
             <SearchInput value={query} onChange={setQuery} block />
@@ -143,28 +212,22 @@ const Suppliers: React.FC = () => {
           <table className="table">
             <thead>
               <tr>
-                <th className="col-w-lg">{t.name}</th>
-                <th className="col-w-lg">{t.email}</th>
-                <th className="col-w-md">{t.phone}</th>
-                <th className="col-w-sm">{t.preferredEmailLanguage}</th>
-                <th className="actions">{t.actionsHeader}</th>
+                {orderedVisibleIds.map((id) => headerFor(id))}
+                <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="hint">
+                  <td colSpan={orderedVisibleIds.length + 1} className="hint">
                     {query ? '—' : t.noData}
                   </td>
                 </tr>
               )}
               {filtered.map((s) => (
                 <tr key={s.id}>
-                  <td className="col-name">{s.name}</td>
-                  <td>{s.email}</td>
-                  <td>{s.phone ?? ''}</td>
-                  <td>{s.preferredEmailLanguage ?? ''}</td>
-                  <td className="actions">
+                  {orderedVisibleIds.map((id) => cellFor(id, s))}
+                  <td className="actions actions-sticky">
                     <div className="btn-row">
                       <button
                         className="btn btn-sm soft-edit"
@@ -192,22 +255,16 @@ const Suppliers: React.FC = () => {
       {editing && (
         <div className="modal-overlay" onClick={() => setEditing(null)}>
           <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-header-text">
-                <h2 className="modal-title">
-                  {editing.id ? `${t.edit}: ${editing.name ?? ''}` : `${t.add} — ${t.suppliers.toLowerCase()}`}
-                </h2>
-              </div>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={() => setEditing(null)}
-                title={t.close}
-                aria-label={t.close}
-              >
-                <IconClose size={16} />
-              </button>
-            </div>
+            <ModalHeader
+              icon={editing.id ? <IconEdit size={18} /> : <IconPlus size={18} />}
+              tone={editing.id ? 'edit' : 'add'}
+              title={
+                editing.id
+                  ? `${t.edit}: ${editing.name ?? ''}`
+                  : `${t.add} — ${t.suppliers.toLowerCase()}`
+              }
+              onClose={() => setEditing(null)}
+            />
             <div className="modal-body">
               <div className="form-row">
                 <label>{t.name}</label>
@@ -235,19 +292,20 @@ const Suppliers: React.FC = () => {
               </div>
               <div className="form-row">
                 <label>{t.preferredEmailLanguage}</label>
-                <select
+                <SearchableSelect
+                  options={[
+                    { value: '', label: '—' },
+                    { value: 'pl', label: 'PL' },
+                    { value: 'en', label: 'EN' },
+                  ]}
                   value={editing.preferredEmailLanguage ?? ''}
-                  onChange={(e) =>
+                  onChange={(val) =>
                     setEditing({
                       ...editing,
-                      preferredEmailLanguage: (e.target.value || undefined) as Lang | undefined,
+                      preferredEmailLanguage: (val || undefined) as Lang | undefined,
                     })
                   }
-                >
-                  <option value="">—</option>
-                  <option value="pl">PL</option>
-                  <option value="en">EN</option>
-                </select>
+                />
               </div>
               <div className="form-row">
                 <label>{t.notes}</label>

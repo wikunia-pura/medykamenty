@@ -1,11 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
+import { HeaderNav } from '../navigation';
 import type { RawMaterial, Supplier, Unit } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import SupplierMultiPicker from '../components/SupplierMultiPicker';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
-import { IconEdit, IconTrash, IconPlus, IconStar, IconClose } from '../components/Icons';
+import SearchableSelect from '../components/SearchableSelect';
+import NumberInput from '../components/NumberInput';
+import ColumnPicker from '../components/ColumnPicker';
+import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
+import { IconEdit, IconTrash, IconPlus, IconStar } from '../components/Icons';
+import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
+import { useEscapeKey } from '../utils/useEscapeKey';
 import {
   exportRawMaterialsCsv,
   importRawMaterialsCsv,
@@ -26,6 +33,95 @@ const RawMaterials: React.FC = () => {
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
+
+  useEscapeKey(() => setEditing(null), !!editing);
+
+  const COLUMNS: ColumnDef[] = useMemo(
+    () => [
+      { id: 'name', label: t.name, required: true },
+      { id: 'symbol', label: t.symbol, defaultVisible: true },
+      { id: 'unit', label: t.unit, defaultVisible: true },
+      { id: 'suppliers', label: t.suppliers, defaultVisible: true },
+      { id: 'moq', label: t.moq, defaultVisible: true },
+      { id: 'leadTime', label: t.leadTime, defaultVisible: true },
+      { id: 'shelfLife', label: t.shelfLife, defaultVisible: false },
+      { id: 'price', label: t.price, defaultVisible: false },
+      { id: 'currency', label: t.currency, defaultVisible: false },
+      { id: 'factory', label: t.factorySupplied, defaultVisible: true },
+      { id: 'notes', label: t.notes, defaultVisible: false },
+    ],
+    [t],
+  );
+  const {
+    isVisible,
+    toggle,
+    reorder,
+    reset: resetColumns,
+    orderedColumns,
+    orderedVisibleIds,
+  } = useColumnPrefs('rawMaterials', COLUMNS);
+
+  const headerFor = (id: string): React.ReactNode => {
+    switch (id) {
+      case 'name':
+        return <th key={id} className="col-w-lg">{t.name}</th>;
+      case 'symbol':
+        return <th key={id} className="col-w-md">{t.symbol}</th>;
+      case 'unit':
+        return <th key={id} className="col-w-sm">{t.unit}</th>;
+      case 'suppliers':
+        return <th key={id} className="col-w-xl">{t.suppliers}</th>;
+      case 'moq':
+        return <th key={id} className="num col-w-sm">{t.moq}</th>;
+      case 'leadTime':
+        return <th key={id} className="num col-w-sm">{t.leadTime}</th>;
+      case 'shelfLife':
+        return <th key={id} className="num col-w-sm">{t.shelfLife}</th>;
+      case 'price':
+        return <th key={id} className="num col-w-sm">{t.price}</th>;
+      case 'currency':
+        return <th key={id} className="col-w-sm">{t.currency}</th>;
+      case 'factory':
+        return <th key={id} className="col-w-sm">{t.factorySupplied}</th>;
+      case 'notes':
+        return <th key={id} className="col-w-lg">{t.notes}</th>;
+      default:
+        return null;
+    }
+  };
+
+  const cellFor = (id: string, rm: RawMaterial): React.ReactNode => {
+    switch (id) {
+      case 'name':
+        return <td key={id} className="col-name col-wrap">{rm.name}</td>;
+      case 'symbol':
+        return <td key={id}>{rm.mpFirmaSymbol ?? ''}</td>;
+      case 'unit':
+        return <td key={id}>{rm.unit}</td>;
+      case 'suppliers':
+        return <td key={id} className="col-wrap">{renderSupplierChips(rm)}</td>;
+      case 'moq':
+        return <td key={id} className="num">{rm.moq ?? ''}</td>;
+      case 'leadTime':
+        return <td key={id} className="num">{rm.leadTimeDays ?? ''}</td>;
+      case 'shelfLife':
+        return <td key={id} className="num">{rm.shelfLifeMonths ?? ''}</td>;
+      case 'price':
+        return <td key={id} className="num">{rm.lastPurchasePriceNet ?? ''}</td>;
+      case 'currency':
+        return <td key={id}>{rm.currency ?? ''}</td>;
+      case 'factory':
+        return (
+          <td key={id}>
+            {rm.factorySupplied ? <span className="tag warn">factory</span> : ''}
+          </td>
+        );
+      case 'notes':
+        return <td key={id} className="col-wrap">{rm.notes ?? ''}</td>;
+      default:
+        return null;
+    }
+  };
 
   const reload = async () => {
     const [rms, ss] = await Promise.all([
@@ -172,22 +268,30 @@ const RawMaterials: React.FC = () => {
   return (
     <div className="main">
       <div className="page-header">
+        <HeaderNav />
         <h1>{t.rawMaterials}</h1>
-        <span className="page-header-count">({items.length})</span>
+        <span className="page-header-count">{items.length}</span>
       </div>
 
       <div className="card">
         <div className="toolbar">
           <div className="toolbar-actions">
-            <button className="btn primary" onClick={onAdd}>
-              <IconPlus size={14} /> {t.add}
-            </button>
             <ExportImportButtons
               format="csv"
               onExport={onExport}
               onImport={onImport}
               busy={busy}
             />
+            <ColumnPicker
+              columns={orderedColumns}
+              isVisible={isVisible}
+              toggle={toggle}
+              reorder={reorder}
+              reset={resetColumns}
+            />
+            <button className="btn primary toolbar-action-primary" onClick={onAdd}>
+              <IconPlus size={14} /> {t.add}
+            </button>
           </div>
           <div className="toolbar-search">
             <SearchInput value={query} onChange={setQuery} block />
@@ -199,34 +303,22 @@ const RawMaterials: React.FC = () => {
           <table className="table">
             <thead>
               <tr>
-                <th className="col-w-lg">{t.name}</th>
-                <th className="col-w-md">{t.symbol}</th>
-                <th className="col-w-sm">{t.unit}</th>
-                <th className="col-w-xl">{t.suppliers}</th>
-                <th className="num col-w-sm">{t.moq}</th>
-                <th className="num col-w-sm">{t.leadTime}</th>
-                <th className="col-w-sm">{t.factorySupplied}</th>
-                <th className="actions">{t.actionsHeader}</th>
+                {orderedVisibleIds.map((id) => headerFor(id))}
+                <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="hint">
+                  <td colSpan={orderedVisibleIds.length + 1} className="hint">
                     {query ? '—' : t.noData}
                   </td>
                 </tr>
               )}
               {filtered.map((rm) => (
                 <tr key={rm.id}>
-                  <td className="col-name col-wrap">{rm.name}</td>
-                  <td>{rm.mpFirmaSymbol ?? ''}</td>
-                  <td>{rm.unit}</td>
-                  <td className="col-wrap">{renderSupplierChips(rm)}</td>
-                  <td className="num">{rm.moq ?? ''}</td>
-                  <td className="num">{rm.leadTimeDays ?? ''}</td>
-                  <td>{rm.factorySupplied ? <span className="tag warn">factory</span> : ''}</td>
-                  <td className="actions">
+                  {orderedVisibleIds.map((id) => cellFor(id, rm))}
+                  <td className="actions actions-sticky">
                     <div className="btn-row">
                       <button
                         className="btn btn-sm soft-edit"
@@ -254,22 +346,16 @@ const RawMaterials: React.FC = () => {
       {editing && (
         <div className="modal-overlay" onClick={() => setEditing(null)}>
           <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-header-text">
-                <h2 className="modal-title">
-                  {editing.id ? `${t.edit}: ${editing.name ?? ''}` : `${t.add} — ${t.rawMaterials.toLowerCase()}`}
-                </h2>
-              </div>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={() => setEditing(null)}
-                title={t.close}
-                aria-label={t.close}
-              >
-                <IconClose size={16} />
-              </button>
-            </div>
+            <ModalHeader
+              icon={editing.id ? <IconEdit size={18} /> : <IconPlus size={18} />}
+              tone={editing.id ? 'edit' : 'add'}
+              title={
+                editing.id
+                  ? `${t.edit}: ${editing.name ?? ''}`
+                  : `${t.add} — ${t.rawMaterials.toLowerCase()}`
+              }
+              onClose={() => setEditing(null)}
+            />
             <div className="modal-body">
             <div className="form-row">
               <label>{t.name}</label>
@@ -289,16 +375,11 @@ const RawMaterials: React.FC = () => {
             </div>
             <div className="form-row">
               <label>{t.unit}</label>
-              <select
+              <SearchableSelect
+                options={UNITS.map((u) => ({ value: u, label: u }))}
                 value={editing.unit ?? 'kg'}
-                onChange={(e) => setEditing({ ...editing, unit: e.target.value as Unit })}
-              >
-                {UNITS.map((u) => (
-                  <option key={u} value={u}>
-                    {u}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setEditing({ ...editing, unit: val as Unit })}
+              />
             </div>
             <div className="form-row">
               <label>{t.factorySupplied}</label>
@@ -321,57 +402,35 @@ const RawMaterials: React.FC = () => {
             </div>
             <div className="form-row">
               <label>{t.moq}</label>
-              <input
+              <NumberInput
                 className="input"
-                type="number"
-                value={editing.moq ?? ''}
-                onChange={(e) =>
-                  setEditing({ ...editing, moq: e.target.value === '' ? undefined : Number(e.target.value) })
-                }
+                value={editing.moq}
+                onChange={(v) => setEditing({ ...editing, moq: v })}
               />
             </div>
             <div className="form-row">
               <label>{t.leadTime}</label>
-              <input
+              <NumberInput
                 className="input"
-                type="number"
-                value={editing.leadTimeDays ?? ''}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    leadTimeDays: e.target.value === '' ? undefined : Number(e.target.value),
-                  })
-                }
+                value={editing.leadTimeDays}
+                onChange={(v) => setEditing({ ...editing, leadTimeDays: v })}
               />
             </div>
             <div className="form-row">
               <label>{t.shelfLife}</label>
-              <input
+              <NumberInput
                 className="input"
-                type="number"
-                value={editing.shelfLifeMonths ?? ''}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    shelfLifeMonths: e.target.value === '' ? undefined : Number(e.target.value),
-                  })
-                }
+                value={editing.shelfLifeMonths}
+                onChange={(v) => setEditing({ ...editing, shelfLifeMonths: v })}
               />
             </div>
             <div className="form-row">
               <label>{t.price}</label>
-              <input
+              <NumberInput
                 className="input"
-                type="number"
                 step="0.01"
-                value={editing.lastPurchasePriceNet ?? ''}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    lastPurchasePriceNet:
-                      e.target.value === '' ? undefined : Number(e.target.value),
-                  })
-                }
+                value={editing.lastPurchasePriceNet}
+                onChange={(v) => setEditing({ ...editing, lastPurchasePriceNet: v })}
               />
             </div>
             <div className="form-row">

@@ -163,6 +163,7 @@ export interface StoreSchema {
   stockSnapshots: StockSnapshot[];
   productionPlans: ProductionPlan[];
   shortageReports?: ShortageReportEntry[];
+  emailBatches?: EmailBatch[];
   settings: AppSettings;
 }
 
@@ -210,6 +211,7 @@ export interface ShortageReportEntry {
   id: UUID;
   planId: UUID;
   planName: string;
+  reportName: string;
   computedAt: ISODate;
   report: ShortageReport;
 }
@@ -240,6 +242,23 @@ export interface RFQEmail {
   body: string;
   lines: ShortageLine[];
   refinedByAI?: boolean;
+}
+
+export interface RFQEmailRecord extends RFQEmail {
+  id: UUID;
+  sentAt?: ISODate;
+}
+
+export interface EmailBatch {
+  id: UUID;
+  reportId: UUID;
+  planId: UUID;
+  planName: string;
+  reportName: string;
+  reportComputedAt: ISODate;
+  generatedAt: ISODate;
+  language: Lang;
+  emails: RFQEmailRecord[];
 }
 
 export interface MaxProducibleResult {

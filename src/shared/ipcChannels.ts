@@ -48,12 +48,21 @@ export const IPC = {
   PLAN_DUPLICATE: 'plan:duplicate',
   PLAN_COMPUTE_SHORTAGES: 'plan:compute-shortages',
   PLAN_COMPUTE_COST: 'plan:compute-cost',
-  PLAN_GENERATE_EMAILS: 'plan:generate-emails',
 
   // Shortage report history
   SHORTAGE_REPORT_LIST: 'shortageReport:list',
   SHORTAGE_REPORT_GET: 'shortageReport:get',
   SHORTAGE_REPORT_DELETE: 'shortageReport:delete',
+  SHORTAGE_REPORT_UPDATE: 'shortageReport:update',
+
+  // Email batches (RFQ history)
+  EMAIL_BATCH_CREATE: 'emailBatch:create',
+  EMAIL_BATCH_LIST: 'emailBatch:list',
+  EMAIL_BATCH_GET: 'emailBatch:get',
+  EMAIL_BATCH_DELETE: 'emailBatch:delete',
+  EMAIL_BATCH_UPDATE_EMAIL: 'emailBatch:update-email',
+  EMAIL_BATCH_MARK_SENT: 'emailBatch:mark-sent',
+  EMAIL_BATCH_REGENERATE_EMAIL: 'emailBatch:regenerate-email',
 
   // Reverse
   REVERSE_MAX_PRODUCIBLE: 'reverse:max-producible',

@@ -12,6 +12,8 @@ import type {
   StockKind,
   ShortageReport,
   ShortageReportEntry,
+  EmailBatch,
+  RFQEmailRecord,
 } from '../shared/types';
 import {
   STORE_SCHEMA_VERSION,
@@ -20,12 +22,13 @@ import {
   DEFAULT_LANGUAGE,
   STOCK_SNAPSHOT_RETENTION,
   SHORTAGE_REPORT_RETENTION,
+  EMAIL_BATCH_RETENTION,
 } from '../shared/constants';
 import { newId, nowIso } from './utils/id';
 
 const DEFAULT_SETTINGS: AppSettings = {
   language: DEFAULT_LANGUAGE,
-  darkMode: false,
+  darkMode: true,
   wasteFactor: DEFAULT_WASTE_FACTOR,
   defaultCurrency: DEFAULT_CURRENCY,
   defaultEmailLanguage: DEFAULT_LANGUAGE,
@@ -33,6 +36,21 @@ const DEFAULT_SETTINGS: AppSettings = {
     useByDefault: false,
   },
 };
+
+function defaultReportName(planName: string, computedAt: string): string {
+  const stamp = new Date(computedAt).toLocaleString();
+  return `${planName} — ${stamp}`;
+}
+
+function withReportName(e: ShortageReportEntry): ShortageReportEntry {
+  if (e.reportName) return e;
+  return { ...e, reportName: defaultReportName(e.planName, e.computedAt) };
+}
+
+function withBatchReportName(b: EmailBatch): EmailBatch {
+  if (b.reportName) return b;
+  return { ...b, reportName: defaultReportName(b.planName, b.reportComputedAt) };
+}
 
 const DEFAULTS: StoreSchema = {
   schemaVersion: STORE_SCHEMA_VERSION,
@@ -43,6 +61,7 @@ const DEFAULTS: StoreSchema = {
   stockSnapshots: [],
   productionPlans: [],
   shortageReports: [],
+  emailBatches: [],
   settings: DEFAULT_SETTINGS,
 };
 
@@ -60,6 +79,15 @@ export default class Database {
       const settings = { ...DEFAULT_SETTINGS, ...this.store.get('settings', DEFAULT_SETTINGS) };
       this.store.set('settings', settings);
       this.store.set('schemaVersion', STORE_SCHEMA_VERSION);
+    }
+    // Backfill reportName on legacy entries so the new column isn't empty.
+    const reports = this.store.get('shortageReports', []) ?? [];
+    if (reports.some((r) => !r.reportName)) {
+      this.store.set('shortageReports', reports.map((r) => withReportName(r)));
+    }
+    const batches = this.store.get('emailBatches', []) ?? [];
+    if (batches.some((b) => !b.reportName)) {
+      this.store.set('emailBatches', batches.map((b) => withBatchReportName(b)));
     }
   }
 
@@ -373,19 +401,24 @@ export default class Database {
 
   // ---- Shortage report history ----
   listShortageReports(): ShortageReportEntry[] {
-    return [...(this.store.get('shortageReports', []) ?? [])].sort(
-      (a, b) => b.computedAt.localeCompare(a.computedAt),
-    );
+    return [...(this.store.get('shortageReports', []) ?? [])]
+      .map((e) => withReportName(e))
+      .sort((a, b) => b.computedAt.localeCompare(a.computedAt));
   }
   getShortageReport(id: string): ShortageReportEntry | undefined {
-    return (this.store.get('shortageReports', []) ?? []).find((r) => r.id === id);
+    const found = (this.store.get('shortageReports', []) ?? []).find(
+      (r) => r.id === id,
+    );
+    return found ? withReportName(found) : undefined;
   }
   addShortageReport(planId: string, report: ShortageReport): ShortageReportEntry {
     const plan = this.getPlan(planId);
+    const planName = plan?.name ?? '?';
     const entry: ShortageReportEntry = {
       id: newId(),
       planId,
-      planName: plan?.name ?? '?',
+      planName,
+      reportName: defaultReportName(planName, report.computedAt),
       computedAt: report.computedAt,
       report,
     };
@@ -399,6 +432,65 @@ export default class Database {
     const all = this.store.get('shortageReports', []) ?? [];
     this.store.set('shortageReports', all.filter((r) => r.id !== id));
     return { ok: true };
+  }
+  updateShortageReport(
+    id: string,
+    patch: { reportName?: string },
+  ): ShortageReportEntry | undefined {
+    const all = this.store.get('shortageReports', []) ?? [];
+    const idx = all.findIndex((r) => r.id === id);
+    if (idx === -1) return undefined;
+    const next: ShortageReportEntry = withReportName({ ...all[idx] });
+    if (patch.reportName !== undefined) next.reportName = patch.reportName;
+    const updated = all.slice();
+    updated[idx] = next;
+    this.store.set('shortageReports', updated);
+    return next;
+  }
+
+  // ---- Email batch history ----
+  listEmailBatches(): EmailBatch[] {
+    return [...(this.store.get('emailBatches', []) ?? [])]
+      .map((b) => withBatchReportName(b))
+      .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
+  }
+  getEmailBatch(id: string): EmailBatch | undefined {
+    const found = (this.store.get('emailBatches', []) ?? []).find((b) => b.id === id);
+    return found ? withBatchReportName(found) : undefined;
+  }
+  addEmailBatch(batch: EmailBatch): EmailBatch {
+    const all = [batch, ...(this.store.get('emailBatches', []) ?? [])];
+    const trimmed = all.slice(0, EMAIL_BATCH_RETENTION);
+    this.store.set('emailBatches', trimmed);
+    return batch;
+  }
+  deleteEmailBatch(id: string): { ok: boolean } {
+    const all = this.store.get('emailBatches', []) ?? [];
+    this.store.set('emailBatches', all.filter((b) => b.id !== id));
+    return { ok: true };
+  }
+  updateBatchEmail(
+    batchId: string,
+    emailId: string,
+    patch: Partial<Omit<RFQEmailRecord, 'id'>>,
+  ): EmailBatch | undefined {
+    const all = this.store.get('emailBatches', []) ?? [];
+    const idx = all.findIndex((b) => b.id === batchId);
+    if (idx === -1) return undefined;
+    const eIdx = all[idx].emails.findIndex((e) => e.id === emailId);
+    if (eIdx === -1) return undefined;
+    all[idx].emails[eIdx] = { ...all[idx].emails[eIdx], ...patch };
+    this.store.set('emailBatches', all);
+    return all[idx];
+  }
+  markEmailSent(
+    batchId: string,
+    emailId: string,
+    sentAt: string | null,
+  ): EmailBatch | undefined {
+    return this.updateBatchEmail(batchId, emailId, {
+      sentAt: sentAt ?? undefined,
+    });
   }
 
   // ---- Settings ----
@@ -427,6 +519,7 @@ export default class Database {
       stockSnapshots: this.store.get('stockSnapshots', []),
       productionPlans: this.store.get('productionPlans', []),
       shortageReports: this.store.get('shortageReports', []) ?? [],
+      emailBatches: this.store.get('emailBatches', []) ?? [],
       settings: this.getSettings(),
     };
   }
@@ -440,6 +533,7 @@ export default class Database {
       this.store.set('stockSnapshots', data.stockSnapshots ?? []);
       this.store.set('productionPlans', data.productionPlans ?? []);
       this.store.set('shortageReports', data.shortageReports ?? []);
+      this.store.set('emailBatches', data.emailBatches ?? []);
       this.store.set('settings', { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) });
       applied =
         (data.suppliers?.length ?? 0) +

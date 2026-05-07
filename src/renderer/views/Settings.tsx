@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { useT } from '../i18n';
+import { HeaderNav } from '../navigation';
 import type { AppSettings, Lang } from '../../shared/types';
 import Toggle from '../components/Toggle';
+import ConfirmDialog from '../components/ConfirmDialog';
+import SearchableSelect from '../components/SearchableSelect';
+import NumberInput from '../components/NumberInput';
 
 interface Props {
   settings: AppSettings;
@@ -13,6 +17,10 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
   const t = useT();
   const [busy, setBusy] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [confirmWipe, setConfirmWipe] = useState(false);
+  const [wipeMessage, setWipeMessage] = useState<string | null>(null);
+  const [confirmDemo, setConfirmDemo] = useState(false);
+  const [demoMessage, setDemoMessage] = useState<string | null>(null);
 
   const update = async (patch: Partial<AppSettings>) => {
     const next = await window.electronAPI.updateSettings(patch);
@@ -41,6 +49,34 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
     }
   };
 
+  const runDemo = async () => {
+    setConfirmDemo(false);
+    setBusy('demo');
+    setDemoMessage(null);
+    try {
+      await window.electronAPI.seedDemo();
+      setDemoMessage(t.loadDemoSuccess);
+    } catch (err) {
+      setDemoMessage((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runWipe = async () => {
+    setConfirmWipe(false);
+    setBusy('wipe');
+    setWipeMessage(null);
+    try {
+      await window.electronAPI.wipeData();
+      setWipeMessage(t.wipeDataSuccess);
+    } catch (err) {
+      setWipeMessage((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const checkUpdates = async () => {
     setBusy('updates');
     try {
@@ -54,19 +90,23 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
 
   return (
     <div className="main">
-      <h1>{t.settings}</h1>
+      <div className="page-header">
+        <HeaderNav />
+        <h1>{t.settings}</h1>
+      </div>
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>{t.appName}</h2>
         <div className="form-row">
           <label>{t.settingsLanguage}</label>
-          <select
+          <SearchableSelect
+            options={[
+              { value: 'pl', label: 'Polski' },
+              { value: 'en', label: 'English' },
+            ]}
             value={settings.language}
-            onChange={(e) => update({ language: e.target.value as Lang })}
-          >
-            <option value="pl">Polski</option>
-            <option value="en">English</option>
-          </select>
+            onChange={(val) => update({ language: val as Lang })}
+          />
         </div>
         <div className="form-row">
           <label>{t.settingsDarkMode}</label>
@@ -81,12 +121,12 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
         </div>
         <div className="form-row">
           <label>{t.settingsWasteFactor}</label>
-          <input
+          <NumberInput
             className="input"
-            type="number"
             step="0.01"
             value={settings.wasteFactor}
-            onChange={(e) => update({ wasteFactor: Number(e.target.value) || 1 })}
+            emptyValue={1}
+            onChange={(v) => update({ wasteFactor: v ?? 1 })}
           />
         </div>
         <div className="form-row">
@@ -99,13 +139,14 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
         </div>
         <div className="form-row">
           <label>{t.settingsDefaultEmailLanguage}</label>
-          <select
+          <SearchableSelect
+            options={[
+              { value: 'pl', label: 'PL' },
+              { value: 'en', label: 'EN' },
+            ]}
             value={settings.defaultEmailLanguage}
-            onChange={(e) => update({ defaultEmailLanguage: e.target.value as Lang })}
-          >
-            <option value="pl">PL</option>
-            <option value="en">EN</option>
-          </select>
+            onChange={(val) => update({ defaultEmailLanguage: val as Lang })}
+          />
         </div>
       </div>
 
@@ -160,6 +201,44 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
       </div>
 
       <div className="card">
+        <h2 style={{ marginTop: 0 }}>{t.loadDemoTitle}</h2>
+        <div className="hint" style={{ marginBottom: 12 }}>{t.loadDemoBody}</div>
+        <div className="btn-row">
+          <button
+            className="btn"
+            disabled={busy === 'demo'}
+            onClick={() => setConfirmDemo(true)}
+          >
+            {busy === 'demo' ? t.loading : t.loadDemoButton}
+          </button>
+        </div>
+        {demoMessage && (
+          <div className="hint" style={{ marginTop: 12 }}>
+            {demoMessage}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>{t.wipeDataTitle}</h2>
+        <div className="hint" style={{ marginBottom: 12 }}>{t.wipeDataBody}</div>
+        <div className="btn-row">
+          <button
+            className="btn danger"
+            disabled={busy === 'wipe'}
+            onClick={() => setConfirmWipe(true)}
+          >
+            {busy === 'wipe' ? t.loading : t.wipeDataButton}
+          </button>
+        </div>
+        {wipeMessage && (
+          <div className="hint" style={{ marginTop: 12 }}>
+            {wipeMessage}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
         <h2 style={{ marginTop: 0 }}>{t.about}</h2>
         <div className="btn-row">
           <button className="btn" disabled={busy === 'updates'} onClick={checkUpdates}>
@@ -177,6 +256,24 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
       </div>
 
       {info && <div className="card hint">{info}</div>}
+
+      {confirmWipe && (
+        <ConfirmDialog
+          message={t.wipeDataConfirm}
+          onConfirm={runWipe}
+          onCancel={() => setConfirmWipe(false)}
+          danger
+        />
+      )}
+
+      {confirmDemo && (
+        <ConfirmDialog
+          message={t.loadDemoConfirm}
+          onConfirm={runDemo}
+          onCancel={() => setConfirmDemo(false)}
+          danger
+        />
+      )}
     </div>
   );
 };

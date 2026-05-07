@@ -1,17 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
+import { HeaderNav } from '../navigation';
 import type {
   Product,
   RawMaterial,
   PackagingComponent,
-  RecipeIngredient,
-  RecipePackaging,
 } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
-import RecipeEditor from '../components/RecipeEditor';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
-import { IconEdit, IconTrash, IconPlus, IconDuplicate, IconClose } from '../components/Icons';
+import ColumnPicker from '../components/ColumnPicker';
+import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
+import { IconEdit, IconTrash, IconPlus, IconDuplicate } from '../components/Icons';
+import HoverTooltip from '../components/HoverTooltip';
 import ExportImportButtons from '../components/ExportImportButtons';
+import ProductEditorModal from '../components/ProductEditorModal';
 import {
   exportProductsJson,
   importProductsJson,
@@ -26,11 +28,165 @@ const Products: React.FC = () => {
   const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
   const [components, setComponents] = useState<PackagingComponent[]>([]);
   const [editing, setEditing] = useState<Partial<Product> | null>(null);
+  const [editingReadOnly, setEditingReadOnly] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Product | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
+
+  const closeEditor = () => {
+    setEditing(null);
+    setEditingReadOnly(false);
+  };
+
+  const openPreview = (p: Product) => {
+    setEditing(p);
+    setEditingReadOnly(true);
+  };
+
+  const COLUMNS: ColumnDef[] = useMemo(
+    () => [
+      { id: 'name', label: t.name, required: true },
+      { id: 'sku', label: 'SKU', defaultVisible: true },
+      { id: 'capacity', label: t.capacityMl, defaultVisible: true },
+      { id: 'density', label: t.density, defaultVisible: true },
+      { id: 'labor', label: t.laborCost, defaultVisible: false },
+      { id: 'ingredients', label: t.ingredients, defaultVisible: true },
+      { id: 'packaging', label: t.packaging, defaultVisible: true },
+      { id: 'notes', label: t.notes, defaultVisible: false },
+    ],
+    [t],
+  );
+  const {
+    isVisible,
+    toggle,
+    reorder,
+    reset: resetColumns,
+    orderedColumns,
+    orderedVisibleIds,
+  } = useColumnPrefs('products', COLUMNS);
+
+  const headerFor = (id: string): React.ReactNode => {
+    switch (id) {
+      case 'name':
+        return <th key={id} className="col-w-xl">{t.name}</th>;
+      case 'sku':
+        return <th key={id} className="col-w-md">SKU</th>;
+      case 'capacity':
+        return <th key={id} className="num col-w-sm">{t.capacityMl}</th>;
+      case 'density':
+        return <th key={id} className="num col-w-sm">{t.density}</th>;
+      case 'labor':
+        return <th key={id} className="num col-w-sm">{t.laborCost}</th>;
+      case 'ingredients':
+        return <th key={id} className="num col-w-sm">{t.ingredients}</th>;
+      case 'packaging':
+        return <th key={id} className="num col-w-sm">{t.packaging}</th>;
+      case 'notes':
+        return <th key={id} className="col-w-lg">{t.notes}</th>;
+      default:
+        return null;
+    }
+  };
+
+  const rawName = (id: string) =>
+    rawMaterials.find((r) => r.id === id)?.name ?? '?';
+  const componentName = (id: string) =>
+    components.find((c) => c.id === id)?.name ?? '?';
+
+  const cellFor = (id: string, p: Product): React.ReactNode => {
+    switch (id) {
+      case 'name':
+        return <td key={id} className="col-name col-wrap">{p.name}</td>;
+      case 'sku':
+        return <td key={id}>{p.sku ?? ''}</td>;
+      case 'capacity':
+        return <td key={id} className="num">{p.capacityMl}</td>;
+      case 'density':
+        return <td key={id} className="num">{p.densityGPerMl}</td>;
+      case 'labor':
+        return <td key={id} className="num">{p.conversionLaborCost ?? ''}</td>;
+      case 'ingredients': {
+        const ing = p.ingredients ?? [];
+        if (ing.length === 0) {
+          return <td key={id} className="num"><span className="hint">0</span></td>;
+        }
+        const top = ing.slice(0, 10);
+        return (
+          <td key={id} className="num">
+            <HoverTooltip
+              align="right"
+              triggerClassName="count-bubble"
+              trigger={ing.length}
+            >
+              <div className="shortage-tooltip-header">
+                {t.ingredients} — {ing.length}
+              </div>
+              <ul className="shortage-tooltip-list">
+                {top.map((it, i) => (
+                  <li key={`${it.rawMaterialId}-${i}`}>
+                    <span className="shortage-tooltip-name">
+                      {rawName(it.rawMaterialId)}
+                    </span>
+                    <span className="list-tooltip-amount">
+                      {(it.percentage ?? 0).toLocaleString()} %
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {ing.length > top.length && (
+                <div className="shortage-tooltip-more hint">
+                  + {ing.length - top.length}
+                </div>
+              )}
+            </HoverTooltip>
+          </td>
+        );
+      }
+      case 'packaging': {
+        const pkg = p.packaging ?? [];
+        if (pkg.length === 0) {
+          return <td key={id} className="num"><span className="hint">0</span></td>;
+        }
+        const top = pkg.slice(0, 10);
+        return (
+          <td key={id} className="num">
+            <HoverTooltip
+              align="right"
+              triggerClassName="count-bubble"
+              trigger={pkg.length}
+            >
+              <div className="shortage-tooltip-header">
+                {t.packaging} — {pkg.length}
+              </div>
+              <ul className="shortage-tooltip-list">
+                {top.map((pp, i) => (
+                  <li key={`${pp.componentId}-${i}`}>
+                    <span className="shortage-tooltip-name">
+                      {componentName(pp.componentId)}
+                    </span>
+                    <span className="list-tooltip-amount">
+                      {(pp.qtyPerUnit ?? 0).toLocaleString()} szt./op.
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {pkg.length > top.length && (
+                <div className="shortage-tooltip-more hint">
+                  + {pkg.length - top.length}
+                </div>
+              )}
+            </HoverTooltip>
+          </td>
+        );
+      }
+      case 'notes':
+        return <td key={id} className="col-wrap">{p.notes ?? ''}</td>;
+      default:
+        return null;
+    }
+  };
 
   const filtered = useMemo(
     () => items.filter((p) => matchesQuery(p, query)),
@@ -52,7 +208,8 @@ const Products: React.FC = () => {
     void reload();
   }, []);
 
-  const onAdd = () =>
+  const onAdd = () => {
+    setEditingReadOnly(false);
     setEditing({
       name: '',
       capacityMl: 100,
@@ -61,6 +218,7 @@ const Products: React.FC = () => {
       packaging: [],
       archived: false,
     });
+  };
 
   const onSave = async () => {
     if (!editing || !editing.name?.trim()) return;
@@ -90,7 +248,7 @@ const Products: React.FC = () => {
       } else {
         await window.electronAPI.createProduct(payload);
       }
-      setEditing(null);
+      closeEditor();
       await reload();
     } catch (err) {
       setError((err as Error).message);
@@ -145,6 +303,7 @@ const Products: React.FC = () => {
 
   const onDuplicate = async (p: Product) => {
     const copy = await window.electronAPI.duplicateProduct(p.id);
+    setEditingReadOnly(false);
     setEditing(copy);
     await reload();
   };
@@ -152,22 +311,30 @@ const Products: React.FC = () => {
   return (
     <div className="main">
       <div className="page-header">
+        <HeaderNav />
         <h1>{t.products}</h1>
-        <span className="page-header-count">({items.length})</span>
+        <span className="page-header-count">{items.length}</span>
       </div>
 
       <div className="card">
         <div className="toolbar">
           <div className="toolbar-actions">
-            <button className="btn primary" onClick={onAdd}>
-              <IconPlus size={14} /> {t.add}
-            </button>
             <ExportImportButtons
               format="json"
               onExport={onExport}
               onImport={onImport}
               busy={busy}
             />
+            <ColumnPicker
+              columns={orderedColumns}
+              isVisible={isVisible}
+              toggle={toggle}
+              reorder={reorder}
+              reset={resetColumns}
+            />
+            <button className="btn primary toolbar-action-primary" onClick={onAdd}>
+              <IconPlus size={14} /> {t.add}
+            </button>
           </div>
           <div className="toolbar-search">
             <SearchInput value={query} onChange={setQuery} block />
@@ -179,36 +346,37 @@ const Products: React.FC = () => {
           <table className="table">
             <thead>
               <tr>
-                <th className="col-w-xl">{t.name}</th>
-                <th className="col-w-md">SKU</th>
-                <th className="num col-w-sm">{t.capacityMl}</th>
-                <th className="num col-w-sm">{t.density}</th>
-                <th className="num col-w-sm">{t.ingredients}</th>
-                <th className="num col-w-sm">{t.packaging}</th>
-                <th className="actions">{t.actionsHeader}</th>
+                {orderedVisibleIds.map((id) => headerFor(id))}
+                <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="hint">
+                  <td colSpan={orderedVisibleIds.length + 1} className="hint">
                     {query ? '—' : t.noData}
                   </td>
                 </tr>
               )}
               {filtered.map((p) => (
-                <tr key={p.id}>
-                  <td className="col-name col-wrap">{p.name}</td>
-                  <td>{p.sku ?? ''}</td>
-                  <td className="num">{p.capacityMl}</td>
-                  <td className="num">{p.densityGPerMl}</td>
-                  <td className="num">{p.ingredients.length}</td>
-                  <td className="num">{p.packaging.length}</td>
-                  <td className="actions">
+                <tr
+                  key={p.id}
+                  className="row-clickable"
+                  onClick={() => openPreview(p)}
+                  title={t.preview}
+                >
+                  {orderedVisibleIds.map((id) => cellFor(id, p))}
+                  <td
+                    className="actions actions-sticky"
+                    onClick={(ev) => ev.stopPropagation()}
+                  >
                     <div className="btn-row">
                       <button
                         className="btn btn-sm soft-edit"
-                        onClick={() => setEditing(p)}
+                        onClick={() => {
+                          setEditingReadOnly(false);
+                          setEditing(p);
+                        }}
                         title={t.edit}
                       >
                         <IconEdit size={13} /> {t.edit}
@@ -237,120 +405,17 @@ const Products: React.FC = () => {
       </div>
 
       {editing && (
-        <div className="modal-overlay" onClick={() => setEditing(null)}>
-          <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-header-text">
-                <h2 className="modal-title">
-                  {editing.id ? `${t.edit}: ${editing.name ?? ''}` : `${t.add} — ${t.products.toLowerCase()}`}
-                </h2>
-              </div>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={() => setEditing(null)}
-                title={t.close}
-                aria-label={t.close}
-              >
-                <IconClose size={16} />
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div className="modal-section">
-                <div className="modal-section-header">
-                  <h3 className="modal-section-title">Podstawowe dane</h3>
-                </div>
-                <div className="form-row">
-                  <label>{t.name}</label>
-                  <input
-                    className="input"
-                    value={editing.name ?? ''}
-                    onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                  />
-                </div>
-                <div className="form-row">
-                  <label>SKU</label>
-                  <input
-                    className="input"
-                    value={editing.sku ?? ''}
-                    onChange={(e) => setEditing({ ...editing, sku: e.target.value })}
-                  />
-                </div>
-                <div className="form-row">
-                  <label>{t.capacityMl}</label>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.1"
-                    value={editing.capacityMl ?? 0}
-                    onChange={(e) => setEditing({ ...editing, capacityMl: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="form-row">
-                  <label>{t.density}</label>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.001"
-                    value={editing.densityGPerMl ?? 1}
-                    onChange={(e) => setEditing({ ...editing, densityGPerMl: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="form-row">
-                  <label>{t.laborCost}</label>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.01"
-                    value={editing.conversionLaborCost ?? ''}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        conversionLaborCost:
-                          e.target.value === '' ? undefined : Number(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-                <div className="form-row">
-                  <label>{t.notes}</label>
-                  <textarea
-                    value={editing.notes ?? ''}
-                    onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="modal-section">
-                <div className="modal-section-header">
-                  <h3 className="modal-section-title">{t.ingredients} & {t.packaging}</h3>
-                </div>
-                <RecipeEditor
-                  rawMaterials={rawMaterials}
-                  components={components}
-                  ingredients={editing.ingredients ?? []}
-                  packaging={editing.packaging ?? []}
-                  onIngredientsChange={(next: RecipeIngredient[]) =>
-                    setEditing({ ...editing, ingredients: next })
-                  }
-                  onPackagingChange={(next: RecipePackaging[]) =>
-                    setEditing({ ...editing, packaging: next })
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button className="btn" onClick={() => setEditing(null)}>
-                {t.cancel}
-              </button>
-              <button className="btn primary-filled" onClick={onSave}>
-                {t.save}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ProductEditorModal
+          editing={editing}
+          rawMaterials={rawMaterials}
+          components={components}
+          setEditing={setEditing}
+          onCancel={closeEditor}
+          onSave={onSave}
+          error={error}
+          readOnly={editingReadOnly}
+          onEnterEdit={() => setEditingReadOnly(false)}
+        />
       )}
 
       {confirmDelete && (

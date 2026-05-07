@@ -36,6 +36,13 @@ export interface T {
   duplicate: string;
   error: string;
   warning: string;
+  reset: string;
+  columns: string;
+  columnsConfigure: string;
+  preview: string;
+  previewMode: string;
+  editMode: string;
+  backToList: string;
   // Common fields
   name: string;
   email: string;
@@ -94,6 +101,8 @@ export interface T {
   stockAllMatched: string;
   // Production plan
   planName: string;
+  reportName: string;
+  selectedPlan: string;
   planItems: string;
   bulkMass: string;
   computeShortages: string;
@@ -106,6 +115,12 @@ export interface T {
   planStatusComputedTooltip: string;
   planStatusArchivedTooltip: string;
   duplicatePlan: string;
+  planCreatedAt: string;
+  planUpdatedAt: string;
+  planLinkedReports: string;
+  planLinkedShortageReports: string;
+  planLinkedEmailBatches: string;
+  planNoLinkedReports: string;
   // Shortage report
   required: string;
   available: string;
@@ -123,6 +138,11 @@ export interface T {
   unitCost: string;
   totalPlanCost: string;
   missingPrices: string;
+  costCalculatorHeroHint: string;
+  costCalculatorSelectPlans: string;
+  missingPricesTooltipHeader: string;
+  missingPricesTooltipExplain: string;
+  missingPricesAllPriced: string;
   // Settings
   settingsLanguage: string;
   settingsDarkMode: string;
@@ -148,25 +168,41 @@ export interface T {
   unitsShort: string;
   // Max producible
   maxProducibleHero: string;
+  maxProducibleHeroHint: string;
   maxProducibleEmptyRecipe: string;
   maxProducibleNoLimit: string;
   maxProducibleLimitedBy: string;
   maxProducibleWhyHeader: string;
   maxProducibleZeroStock: string;
+  maxProducibleSelectProducts: string;
+  maxProducibleSelectAll: string;
+  maxProducibleClearSelection: string;
+  maxProducibleSelectedCount: string;
+  maxProducibleRefresh: string;
+  maxProducibleShowDetails: string;
+  maxProducibleHideDetails: string;
   bottleneckTag: string;
   perUnitLabel: string;
   enoughFor: string;
   compute: string;
-  // First-time guide
-  firstTimeTitle: string;
-  firstTimeStep1: string;
-  firstTimeStep2: string;
-  firstTimeStep3: string;
-  firstTimeStep4: string;
-  firstTimeStep5: string;
-  firstTimeStep6: string;
-  firstTimeStep7: string;
-  firstTimeDemoHint: string;
+  // Dashboard
+  dashboardStartStep: string;
+  dashboardStartCta: string;
+  dashboardStartHint: string;
+  dashboardYourData: string;
+  dashboardMissingItems: string;
+  dashboardNoMissing: string;
+  dashboardNoReportYet: string;
+  dashboardLastReport: string;
+  dashboardSeeFullReport: string;
+  dashboardShortageBy: string;
+  dashboardOrder: string;
+  dashboardWelcomeEyebrow: string;
+  dashboardWelcomeMorning: string;
+  dashboardWelcomeAfternoon: string;
+  dashboardWelcomeEvening: string;
+  dashboardWelcomeNight: string;
+  dashboardWelcomeTagline: string;
   // Demo
   loadDemoTitle: string;
   loadDemoBody: string;
@@ -217,10 +253,33 @@ export interface T {
   olderReportsHint: string;
   computedAtLabel: string;
   deleteReportConfirm: string;
+  // Email generator
+  emailGeneratorHeroTitle: string;
+  emailGeneratorHeroHint: string;
+  selectShortageReportFirst: string;
+  noShortageReportsYet: string;
+  goToShortageReportToCompute: string;
+  shortageReportNoGroups: string;
+  olderEmailBatchesTitle: string;
+  olderEmailBatchesHint: string;
+  generatedAtLabel: string;
+  emailsCount: string;
+  sentCount: string;
+  markSent: string;
+  unmarkSent: string;
+  sentAtLabel: string;
+  sentBadge: string;
+  deleteBatchConfirm: string;
+  emailBatchTitle: string;
+  // Navigation history
+  navBack: string;
+  navForward: string;
+  navHistory: string;
+  openPlan: string;
 }
 
 const pl: T = {
-  appName: 'Cutis',
+  appName: 'Cutis Production Planner',
   language: 'Język',
   darkMode: 'Ciemny motyw',
   dashboard: 'Pulpit',
@@ -251,6 +310,13 @@ const pl: T = {
   copied: 'Skopiowano',
   copyFailed: 'Nie udało się skopiować',
   duplicate: 'Duplikuj',
+  reset: 'Resetuj',
+  columns: 'Kolumny',
+  columnsConfigure: 'Skonfiguruj widoczne kolumny',
+  preview: 'Podgląd',
+  previewMode: 'Tryb podglądu',
+  editMode: 'Tryb edycji',
+  backToList: 'Wróć do listy',
   error: 'Błąd',
   warning: 'Ostrzeżenie',
   name: 'Nazwa',
@@ -307,6 +373,8 @@ const pl: T = {
   stockUnmatchedOnly: 'Tylko niedopasowane',
   stockAllMatched: 'Wszystkie pozycje zostały dopasowane.',
   planName: 'Nazwa planu',
+  reportName: 'Nazwa raportu',
+  selectedPlan: 'Wybrany plan',
   planItems: 'Pozycje planu',
   bulkMass: 'Masa luzem (kg, do saszetek)',
   computeShortages: 'Oblicz zapotrzebowanie',
@@ -319,6 +387,12 @@ const pl: T = {
   planStatusComputedTooltip: 'Zapotrzebowanie zostało policzone — można wygenerować raport braków, koszt i maile RFQ.',
   planStatusArchivedTooltip: 'Plan zarchiwizowany — pozostawiony do historii.',
   duplicatePlan: 'Duplikuj plan',
+  planCreatedAt: 'Utworzono',
+  planUpdatedAt: 'Ostatnia edycja',
+  planLinkedReports: 'Powiązane raporty',
+  planLinkedShortageReports: 'Raporty braków',
+  planLinkedEmailBatches: 'Wygenerowane maile',
+  planNoLinkedReports: 'Brak powiązanych raportów',
   required: 'Potrzeba',
   available: 'Stan',
   shortage: 'Brak',
@@ -333,6 +407,13 @@ const pl: T = {
   unitCost: 'Koszt jednostkowy',
   totalPlanCost: 'Łączny koszt planu',
   missingPrices: 'Brak cen dla',
+  costCalculatorHeroHint: 'Wybierz jeden lub kilka planów, aby policzyć koszt jednostkowy każdego produktu i sumę całego planu.',
+  costCalculatorSelectPlans: 'Wybierz plany',
+  missingPricesTooltipHeader: 'Pozycje bez ceny zakupu',
+  missingPricesTooltipExplain:
+    'Te surowce / komponenty są w recepturze, ale nie mają zapisanej ostatniej ceny zakupu netto. Koszt jednostkowy i łączny są zaniżone — uzupełnij ceny w widoku Surowce lub Komponenty (pole „Ostatnia cena zakupu") albo zaimportuj dostawę.',
+  missingPricesAllPriced:
+    'Wszystkie surowce i komponenty mają zapisaną cenę — koszt jest kompletny.',
   settingsLanguage: 'Język aplikacji',
   settingsDarkMode: 'Ciemny motyw',
   settingsLightMode: 'Jasny motyw',
@@ -355,24 +436,40 @@ const pl: T = {
   selectSupplier: 'Wybierz dostawcę',
   unitsShort: 'szt.',
   maxProducibleHero: 'Możesz wyprodukować',
+  maxProducibleHeroHint: 'Wybierz jeden lub kilka produktów, aby zobaczyć ile sztuk można złożyć z aktualnych stanów.',
   maxProducibleEmptyRecipe: 'Produkt nie ma receptury — uzupełnij surowce i komponenty.',
   maxProducibleNoLimit: 'Wszystkie pozycje są dostarczane przez fabrykę — brak ograniczeń materiałowych.',
   maxProducibleLimitedBy: 'Limituje',
   maxProducibleWhyHeader: 'Dlaczego nie więcej',
   maxProducibleZeroStock: 'Brak stanu — żadnej sztuki nie da się złożyć z aktualnymi danymi.',
+  maxProducibleSelectProducts: 'Wybierz produkty',
+  maxProducibleSelectAll: 'Zaznacz wszystkie',
+  maxProducibleClearSelection: 'Wyczyść',
+  maxProducibleSelectedCount: 'wybrano',
+  maxProducibleRefresh: 'Odśwież',
+  maxProducibleShowDetails: 'Pokaż szczegóły',
+  maxProducibleHideDetails: 'Ukryj szczegóły',
   bottleneckTag: 'wąskie gardło',
   perUnitLabel: 'Na 1 szt.',
   enoughFor: 'Wystarczy na',
   compute: 'Oblicz',
-  firstTimeTitle: 'Pierwsze uruchomienie — krok po kroku',
-  firstTimeStep1: 'Dodaj dostawców w „Dostawcy" (nazwa, e-mail, język maila RFQ).',
-  firstTimeStep2: 'Dodaj surowce w „Surowce" — przypisz preferowanego dostawcę, jednostkę i cenę.',
-  firstTimeStep3: 'Dodaj komponenty w „Komponenty" (opakowania, etykiety, kartony) — również z dostawcą.',
-  firstTimeStep4: 'Dodaj produkty w „Produkty" — wpisz recepturę: surowce w % i komponenty w sztukach.',
-  firstTimeStep5: 'Zaimportuj stany magazynowe w „Import stanów" (eksporty xlsx z MP Firma).',
-  firstTimeStep6: 'Utwórz plan w „Plan produkcji", wybierz produkty i kliknij „Oblicz zapotrzebowanie".',
-  firstTimeStep7: 'Z raportu zapotrzebowania wygeneruj maile RFQ i wyślij do dostawców.',
-  firstTimeDemoHint: 'Nie wiesz od czego zacząć? Wczytaj dane demo, żeby zobaczyć kompletny przykład — dostawców, surowce, produkt z recepturą, plan i stany.',
+  dashboardStartStep: 'Krok 1',
+  dashboardStartCta: 'Importuj stany magazynowe',
+  dashboardStartHint: 'Wczytaj eksporty xlsx z MP Firma — to punkt startowy całego procesu.',
+  dashboardYourData: 'Twoje dane',
+  dashboardMissingItems: 'Brakujące pozycje',
+  dashboardNoMissing: 'Brak braków — wszystko jest na stanie.',
+  dashboardNoReportYet: 'Brak raportu zapotrzebowania. Utwórz plan i policz braki.',
+  dashboardLastReport: 'Ostatni raport',
+  dashboardSeeFullReport: 'Pokaż pełny raport',
+  dashboardShortageBy: 'Wg dostawcy',
+  dashboardOrder: 'Do zamówienia',
+  dashboardWelcomeEyebrow: 'Cutis Production Planner',
+  dashboardWelcomeMorning: 'Dzień dobry',
+  dashboardWelcomeAfternoon: 'Miłego dnia',
+  dashboardWelcomeEvening: 'Dobry wieczór',
+  dashboardWelcomeNight: 'Pracujesz po nocy?',
+  dashboardWelcomeTagline: 'Zaplanuj produkcję, sprawdź braki, wyślij maile RFQ — wszystko w jednym miejscu.',
   loadDemoTitle: 'Dane demo',
   loadDemoBody:
     'Wczytuje fikcyjną firmę: 4 dostawców, 7 surowców (z jednym fabrycznym i jednym pustym), 3 komponenty, jeden produkt z recepturą, gotowy plan na 1000 sztuk i stany magazynowe. Po wczytaniu od razu można obliczyć zapotrzebowanie i wygenerować maile.',
@@ -420,10 +517,32 @@ const pl: T = {
   olderReportsHint: 'Historia obliczonych zapotrzebowań',
   computedAtLabel: 'Obliczono',
   deleteReportConfirm: 'Usunąć raport',
+  emailGeneratorHeroTitle: 'Wygeneruj maile RFQ',
+  emailGeneratorHeroHint:
+    'Wybierz raport zapotrzebowania — to on wskazuje dostawców, do których wyślesz zapytania.',
+  selectShortageReportFirst: 'Wybierz raport zapotrzebowania',
+  noShortageReportsYet: 'Brak raportów zapotrzebowania',
+  goToShortageReportToCompute: 'Przejdź do raportu zapotrzebowania',
+  shortageReportNoGroups: 'Brak braków — nie ma do kogo wysyłać maili.',
+  olderEmailBatchesTitle: 'Wysłane partie maili',
+  olderEmailBatchesHint: 'Historia wygenerowanych zapytań RFQ',
+  generatedAtLabel: 'Wygenerowano',
+  emailsCount: 'maili',
+  sentCount: 'wysłane',
+  markSent: 'Oznacz jako wysłany',
+  unmarkSent: 'Cofnij oznaczenie',
+  sentAtLabel: 'Wysłano',
+  sentBadge: 'wysłany',
+  deleteBatchConfirm: 'Usunąć partię maili',
+  emailBatchTitle: 'Maile RFQ',
+  navBack: 'Wstecz',
+  navForward: 'Naprzód',
+  navHistory: 'Nawigacja',
+  openPlan: 'Otwórz plan',
 };
 
 const en: T = {
-  appName: 'Cutis',
+  appName: 'Cutis Production Planner',
   language: 'Language',
   darkMode: 'Dark mode',
   dashboard: 'Dashboard',
@@ -454,6 +573,13 @@ const en: T = {
   copied: 'Copied',
   copyFailed: 'Copy failed',
   duplicate: 'Duplicate',
+  reset: 'Reset',
+  columns: 'Columns',
+  columnsConfigure: 'Configure visible columns',
+  preview: 'Preview',
+  previewMode: 'Preview mode',
+  editMode: 'Edit mode',
+  backToList: 'Back to list',
   error: 'Error',
   warning: 'Warning',
   name: 'Name',
@@ -510,6 +636,8 @@ const en: T = {
   stockUnmatchedOnly: 'Unmatched only',
   stockAllMatched: 'All entries matched.',
   planName: 'Plan name',
+  reportName: 'Report name',
+  selectedPlan: 'Selected plan',
   planItems: 'Plan items',
   bulkMass: 'Bulk mass (kg, sachets)',
   computeShortages: 'Compute shortages',
@@ -522,6 +650,12 @@ const en: T = {
   planStatusComputedTooltip: 'Shortages have been computed — you can view the shortage report, cost and generate RFQ emails.',
   planStatusArchivedTooltip: 'Plan archived — kept for history.',
   duplicatePlan: 'Duplicate plan',
+  planCreatedAt: 'Created',
+  planUpdatedAt: 'Last edit',
+  planLinkedReports: 'Linked reports',
+  planLinkedShortageReports: 'Shortage reports',
+  planLinkedEmailBatches: 'Email batches',
+  planNoLinkedReports: 'No linked reports',
   required: 'Required',
   available: 'In stock',
   shortage: 'Shortage',
@@ -536,6 +670,13 @@ const en: T = {
   unitCost: 'Unit cost',
   totalPlanCost: 'Total plan cost',
   missingPrices: 'Missing prices for',
+  costCalculatorHeroHint: 'Pick one or more plans to compute unit cost for each product and the total plan cost.',
+  costCalculatorSelectPlans: 'Select plans',
+  missingPricesTooltipHeader: 'Items without a purchase price',
+  missingPricesTooltipExplain:
+    'These raw materials / components are in the recipe but have no recorded last net purchase price. Unit and total cost are understated — fill in the price in Raw materials or Components (field "Last purchase price"), or import a delivery.',
+  missingPricesAllPriced:
+    'All raw materials and components have a recorded price — cost is complete.',
   settingsLanguage: 'App language',
   settingsDarkMode: 'Dark mode',
   settingsLightMode: 'Light mode',
@@ -558,24 +699,40 @@ const en: T = {
   selectSupplier: 'Select supplier',
   unitsShort: 'pcs',
   maxProducibleHero: 'You can produce',
+  maxProducibleHeroHint: 'Pick one or more products to see how many units you can assemble from current stock.',
   maxProducibleEmptyRecipe: 'Product has no recipe — add raw materials and components.',
   maxProducibleNoLimit: 'All items are factory-supplied — no material constraints.',
   maxProducibleLimitedBy: 'Limited by',
   maxProducibleWhyHeader: 'Why not more',
   maxProducibleZeroStock: 'No stock — zero units can be produced with current data.',
+  maxProducibleSelectProducts: 'Select products',
+  maxProducibleSelectAll: 'Select all',
+  maxProducibleClearSelection: 'Clear',
+  maxProducibleSelectedCount: 'selected',
+  maxProducibleRefresh: 'Refresh',
+  maxProducibleShowDetails: 'Show details',
+  maxProducibleHideDetails: 'Hide details',
   bottleneckTag: 'bottleneck',
   perUnitLabel: 'Per unit',
   enoughFor: 'Enough for',
   compute: 'Compute',
-  firstTimeTitle: 'First launch — step by step',
-  firstTimeStep1: 'Add suppliers in "Suppliers" (name, email, RFQ email language).',
-  firstTimeStep2: 'Add raw materials in "Raw materials" — assign preferred supplier, unit and price.',
-  firstTimeStep3: 'Add components in "Components" (packaging, labels, cartons) — also with a supplier.',
-  firstTimeStep4: 'Add products in "Products" — define the recipe: raw materials in % and components in pieces.',
-  firstTimeStep5: 'Import stock in "Stock import" (xlsx exports from MP Firma).',
-  firstTimeStep6: 'Create a plan in "Production plan", pick products and click "Compute shortages".',
-  firstTimeStep7: 'From the shortage report, generate RFQ emails and send them to suppliers.',
-  firstTimeDemoHint: 'Not sure where to start? Load demo data to see a full example — suppliers, raw materials, a product with a recipe, a plan and stock.',
+  dashboardStartStep: 'Step 1',
+  dashboardStartCta: 'Import stock',
+  dashboardStartHint: 'Load xlsx exports from MP Firma — the starting point of the whole flow.',
+  dashboardYourData: 'Your data',
+  dashboardMissingItems: 'Missing items',
+  dashboardNoMissing: 'No shortages — everything is in stock.',
+  dashboardNoReportYet: 'No shortage report yet. Create a plan and compute shortages.',
+  dashboardLastReport: 'Last report',
+  dashboardSeeFullReport: 'See full report',
+  dashboardShortageBy: 'By supplier',
+  dashboardOrder: 'Order',
+  dashboardWelcomeEyebrow: 'Cutis Production Planner',
+  dashboardWelcomeMorning: 'Good morning',
+  dashboardWelcomeAfternoon: 'Good afternoon',
+  dashboardWelcomeEvening: 'Good evening',
+  dashboardWelcomeNight: 'Burning the midnight oil?',
+  dashboardWelcomeTagline: 'Plan production, spot shortages, send RFQ emails — all in one place.',
   loadDemoTitle: 'Demo data',
   loadDemoBody:
     'Loads a fictional company: 4 suppliers, 7 raw materials (one factory-supplied and one out of stock), 3 components, one product with a recipe, a ready plan for 1000 units, and stock snapshots. After loading you can compute shortages and generate emails right away.',
@@ -623,6 +780,28 @@ const en: T = {
   olderReportsHint: 'History of computed shortages',
   computedAtLabel: 'Computed',
   deleteReportConfirm: 'Delete report',
+  emailGeneratorHeroTitle: 'Generate RFQ emails',
+  emailGeneratorHeroHint:
+    'Pick a shortage report — it determines which suppliers will receive the quote requests.',
+  selectShortageReportFirst: 'Select a shortage report',
+  noShortageReportsYet: 'No shortage reports yet',
+  goToShortageReportToCompute: 'Go to shortage report',
+  shortageReportNoGroups: 'No shortages — there is no one to email.',
+  olderEmailBatchesTitle: 'Earlier email batches',
+  olderEmailBatchesHint: 'History of generated RFQs',
+  generatedAtLabel: 'Generated',
+  emailsCount: 'emails',
+  sentCount: 'sent',
+  markSent: 'Mark as sent',
+  unmarkSent: 'Unmark sent',
+  sentAtLabel: 'Sent',
+  sentBadge: 'sent',
+  deleteBatchConfirm: 'Delete email batch',
+  emailBatchTitle: 'RFQ emails',
+  navBack: 'Back',
+  navForward: 'Forward',
+  navHistory: 'Navigation',
+  openPlan: 'Open plan',
 };
 
 export const translations: Record<Lang, T> = { pl, en };

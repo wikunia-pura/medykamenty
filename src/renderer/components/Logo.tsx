@@ -8,9 +8,38 @@ interface Props {
 }
 
 const Logo: React.FC<Props> = ({ size = 28, withWordmark = true, className }) => {
-  // The source image already includes the wordmark.
+  if (!withWordmark) {
+    // Stylized lotus mark drawn as SVG so it stays crisp at any size and
+    // doesn't depend on cropping the bundled PNG.
+    const VIEW_W = 60;
+    const VIEW_H = 50;
+    const renderH = (size * VIEW_H) / VIEW_W;
+    const petal = 'M -2 0 Q -3 -22 0 -44 Q 3 -22 2 0 Z';
+    const petalShort = 'M -2 0 Q -3 -16 0 -34 Q 3 -16 2 0 Z';
+    return (
+      <svg
+        className={className}
+        width={size}
+        height={renderH}
+        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+        fill="currentColor"
+        aria-label="Cutis"
+        role="img"
+        style={{ display: 'block', flexShrink: 0, color: '#ffffff' }}
+      >
+        <g transform="translate(30 49)">
+          <path d={petal} />
+          <path d={petal} transform="rotate(-22)" />
+          <path d={petal} transform="rotate(22)" />
+          <path d={petalShort} transform="rotate(-44)" />
+          <path d={petalShort} transform="rotate(44)" />
+        </g>
+      </svg>
+    );
+  }
+
   const aspect = 210 / 150;
-  const height = withWordmark ? size * 1.25 : size;
+  const height = size * 1.25;
   const width = height * aspect;
 
   return (
@@ -30,7 +59,6 @@ const Logo: React.FC<Props> = ({ size = 28, withWordmark = true, className }) =>
         style={{
           display: 'block',
           objectFit: 'contain',
-          // The PNG mark is dark grey on transparent — invert in dark/sidebar contexts.
           filter: 'brightness(0) invert(1)',
         }}
       />

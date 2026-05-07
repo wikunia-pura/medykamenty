@@ -47,11 +47,19 @@ const CH = {
   PLAN_DUPLICATE: 'plan:duplicate',
   PLAN_COMPUTE_SHORTAGES: 'plan:compute-shortages',
   PLAN_COMPUTE_COST: 'plan:compute-cost',
-  PLAN_GENERATE_EMAILS: 'plan:generate-emails',
 
   SHORTAGE_REPORT_LIST: 'shortageReport:list',
   SHORTAGE_REPORT_GET: 'shortageReport:get',
   SHORTAGE_REPORT_DELETE: 'shortageReport:delete',
+  SHORTAGE_REPORT_UPDATE: 'shortageReport:update',
+
+  EMAIL_BATCH_CREATE: 'emailBatch:create',
+  EMAIL_BATCH_LIST: 'emailBatch:list',
+  EMAIL_BATCH_GET: 'emailBatch:get',
+  EMAIL_BATCH_DELETE: 'emailBatch:delete',
+  EMAIL_BATCH_UPDATE_EMAIL: 'emailBatch:update-email',
+  EMAIL_BATCH_MARK_SENT: 'emailBatch:mark-sent',
+  EMAIL_BATCH_REGENERATE_EMAIL: 'emailBatch:regenerate-email',
 
   REVERSE_MAX_PRODUCIBLE: 'reverse:max-producible',
 
@@ -137,15 +145,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
   duplicatePlan: (id: string) => ipcRenderer.invoke(CH.PLAN_DUPLICATE, id),
   computeShortages: (planId: string) => ipcRenderer.invoke(CH.PLAN_COMPUTE_SHORTAGES, planId),
   computeCost: (planId: string) => ipcRenderer.invoke(CH.PLAN_COMPUTE_COST, planId),
-  generateEmails: (
-    planId: string,
-    opts: { language: 'pl' | 'en'; useAI: boolean; sendToAllAlternatives?: boolean },
-  ) => ipcRenderer.invoke(CH.PLAN_GENERATE_EMAILS, planId, opts),
 
   // Shortage report history
   listShortageReports: () => ipcRenderer.invoke(CH.SHORTAGE_REPORT_LIST),
   getShortageReport: (id: string) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_GET, id),
   deleteShortageReport: (id: string) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_DELETE, id),
+  updateShortageReport: (id: string, patch: { reportName?: string }) =>
+    ipcRenderer.invoke(CH.SHORTAGE_REPORT_UPDATE, id, patch),
+
+  // Email batches (RFQ history)
+  generateEmails: (
+    reportId: string,
+    opts: { language: 'pl' | 'en'; useAI: boolean; sendToAllAlternatives?: boolean },
+  ) => ipcRenderer.invoke(CH.EMAIL_BATCH_CREATE, reportId, opts),
+  listEmailBatches: () => ipcRenderer.invoke(CH.EMAIL_BATCH_LIST),
+  getEmailBatch: (id: string) => ipcRenderer.invoke(CH.EMAIL_BATCH_GET, id),
+  deleteEmailBatch: (id: string) => ipcRenderer.invoke(CH.EMAIL_BATCH_DELETE, id),
+  updateBatchEmail: (
+    batchId: string,
+    emailId: string,
+    patch: { body?: string; subject?: string },
+  ) => ipcRenderer.invoke(CH.EMAIL_BATCH_UPDATE_EMAIL, batchId, emailId, patch),
+  markEmailSent: (batchId: string, emailId: string, sentAt: string | null) =>
+    ipcRenderer.invoke(CH.EMAIL_BATCH_MARK_SENT, batchId, emailId, sentAt),
+  regenerateBatchEmail: (
+    batchId: string,
+    emailId: string,
+    opts: { language: 'pl' | 'en'; useAI: boolean },
+  ) => ipcRenderer.invoke(CH.EMAIL_BATCH_REGENERATE_EMAIL, batchId, emailId, opts),
 
   // Reverse
   maxProducible: (productId: string) => ipcRenderer.invoke(CH.REVERSE_MAX_PRODUCIBLE, productId),

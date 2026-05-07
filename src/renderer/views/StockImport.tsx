@@ -1,16 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
+import { HeaderNav } from '../navigation';
 import type { StockRow, ImportSummary, RawMaterial, PackagingComponent } from '../../shared/types';
 import type { ViewKey } from './types';
-import AIToggleButton from '../components/AIToggleButton';
 import DropZone from '../components/DropZone';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
+import SearchableSelect from '../components/SearchableSelect';
+import NumberInput from '../components/NumberInput';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { IconTrash, IconPlus, IconCheck, IconEdit, IconClose } from '../components/Icons';
+import ColumnPicker from '../components/ColumnPicker';
+import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
+import { IconTrash, IconPlus, IconCheck, IconEdit } from '../components/Icons';
+import ModalHeader from '../components/ModalHeader';
+import { useEscapeKey } from '../utils/useEscapeKey';
 
 interface Props {
-  aiAvailable: boolean;
-  useAiByDefault: boolean;
   onNavigate?: (key: ViewKey) => void;
 }
 
@@ -23,7 +27,7 @@ function detectKind(name: string): 'raw' | 'component' {
   return 'raw';
 }
 
-const StockImport: React.FC<Props> = ({ aiAvailable, useAiByDefault, onNavigate }) => {
+const StockImport: React.FC<Props> = ({ onNavigate }) => {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
@@ -31,7 +35,6 @@ const StockImport: React.FC<Props> = ({ aiAvailable, useAiByDefault, onNavigate 
   const [compRows, setCompRows] = useState<StockRow[]>([]);
   const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
   const [components, setComponents] = useState<PackagingComponent[]>([]);
-  const [useAi, setUseAi] = useState(useAiByDefault);
   const [error, setError] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [rawExpanded, setRawExpanded] = useState(false);
@@ -55,6 +58,27 @@ const StockImport: React.FC<Props> = ({ aiAvailable, useAiByDefault, onNavigate 
   const [confirmDeleteSnapshot, setConfirmDeleteSnapshot] = useState<
     'raw' | 'component' | null
   >(null);
+
+  const STOCK_COLUMNS: ColumnDef[] = useMemo(
+    () => [
+      { id: 'name', label: t.name, required: true },
+      { id: 'match', label: 'Match', required: true },
+      { id: 'qty', label: t.quantity, defaultVisible: true },
+      { id: 'netUnit', label: t.stockNetUnit, defaultVisible: true },
+      { id: 'vatUnit', label: t.stockVatUnit, defaultVisible: true },
+      { id: 'grossUnit', label: t.stockGrossUnit, defaultVisible: true },
+      { id: 'currency', label: t.currency, defaultVisible: true },
+      { id: 'netTotal', label: t.stockNetTotal, defaultVisible: true },
+      { id: 'vatTotal', label: t.stockVatTotal, defaultVisible: true },
+      { id: 'grossTotal', label: t.stockGrossTotal, defaultVisible: true },
+      { id: 'symbol', label: t.symbol, defaultVisible: true },
+      { id: 'manufacturer', label: t.stockManufacturer, defaultVisible: true },
+      { id: 'warehouse', label: t.stockWarehouse, defaultVisible: false },
+      { id: 'notes', label: t.notes, defaultVisible: false },
+    ],
+    [t],
+  );
+  const stockColumns = useColumnPrefs('stockImport', STOCK_COLUMNS);
 
   const loadCurrent = async () => {
     const [stock, rms, cs] = await Promise.all([
@@ -255,6 +279,105 @@ const StockImport: React.FC<Props> = ({ aiAvailable, useAiByDefault, onNavigate 
     if (unmatchedOnly) filtered = filtered.filter(isUnmatched);
     if (query.trim()) filtered = filtered.filter((r) => matchesQuery(r, query));
 
+    const headerFor = (id: string): React.ReactNode => {
+      switch (id) {
+        case 'name':
+          return <th key={id} className="col-name-wide">{t.name}</th>;
+        case 'match':
+          return <th key={id} className="col-w-match">Match</th>;
+        case 'qty':
+          return <th key={id} className="num col-w-sm">{t.quantity}</th>;
+        case 'netUnit':
+          return <th key={id} className="num col-w-sm">{t.stockNetUnit}</th>;
+        case 'vatUnit':
+          return <th key={id} className="num col-w-sm">{t.stockVatUnit}</th>;
+        case 'grossUnit':
+          return <th key={id} className="num col-w-sm">{t.stockGrossUnit}</th>;
+        case 'currency':
+          return <th key={id} className="col-w-sm">{t.currency}</th>;
+        case 'netTotal':
+          return <th key={id} className="num col-w-sm">{t.stockNetTotal}</th>;
+        case 'vatTotal':
+          return <th key={id} className="num col-w-sm">{t.stockVatTotal}</th>;
+        case 'grossTotal':
+          return <th key={id} className="num col-w-sm">{t.stockGrossTotal}</th>;
+        case 'symbol':
+          return <th key={id} className="col-w-md">{t.symbol}</th>;
+        case 'manufacturer':
+          return <th key={id} className="col-w-md">{t.stockManufacturer}</th>;
+        case 'warehouse':
+          return <th key={id} className="col-w-md">{t.stockWarehouse}</th>;
+        case 'notes':
+          return <th key={id} className="col-w-lg">{t.notes}</th>;
+        default:
+          return null;
+      }
+    };
+
+    const matchCell = (r: StockRow) => {
+      const matchedRow = r.matchedRawMaterialId || r.matchedComponentId;
+      if (r.matchAmbiguous) {
+        return (
+          <span className="match-badge warn" title={t.rowsAmbiguous} aria-label={t.rowsAmbiguous}>
+            ?
+          </span>
+        );
+      }
+      if (matchedRow) {
+        return (
+          <span className="match-badge success" title={t.rowsMatched} aria-label={t.rowsMatched}>
+            <IconCheck size={12} />
+          </span>
+        );
+      }
+      return (
+        <button
+          className="match-badge danger as-button"
+          disabled={adoptBusy}
+          onClick={() => void adoptOne(r, kind)}
+          title={kind === 'raw' ? t.adoptAsRaw : t.adoptAsComponent}
+          aria-label={kind === 'raw' ? t.adoptAsRaw : t.adoptAsComponent}
+        >
+          <IconPlus size={12} />
+        </button>
+      );
+    };
+
+    const cellFor = (id: string, r: StockRow): React.ReactNode => {
+      switch (id) {
+        case 'name':
+          return <td key={id} className="col-name col-wrap">{r.name}</td>;
+        case 'match':
+          return <td key={id} className="col-match">{matchCell(r)}</td>;
+        case 'qty':
+          return <td key={id} className="num">{r.qty}</td>;
+        case 'netUnit':
+          return <td key={id} className="num">{r.netPrice ?? ''}</td>;
+        case 'vatUnit':
+          return <td key={id} className="num">{r.vatPrice ?? ''}</td>;
+        case 'grossUnit':
+          return <td key={id} className="num">{r.grossPrice ?? ''}</td>;
+        case 'currency':
+          return <td key={id}>{r.currency ?? ''}</td>;
+        case 'netTotal':
+          return <td key={id} className="num">{r.oNet ?? ''}</td>;
+        case 'vatTotal':
+          return <td key={id} className="num">{r.oVat ?? ''}</td>;
+        case 'grossTotal':
+          return <td key={id} className="num">{r.oGross ?? ''}</td>;
+        case 'symbol':
+          return <td key={id}>{r.mpFirmaSymbol ?? ''}</td>;
+        case 'manufacturer':
+          return <td key={id}>{r.manufacturerSymbol ?? ''}</td>;
+        case 'warehouse':
+          return <td key={id}>{r.warehouse ?? ''}</td>;
+        case 'notes':
+          return <td key={id} className="col-wrap">{r.notes ?? ''}</td>;
+        default:
+          return null;
+      }
+    };
+
     return (
       <>
         {unmatched === 0 && (
@@ -303,106 +426,62 @@ const StockImport: React.FC<Props> = ({ aiAvailable, useAiByDefault, onNavigate 
               {adoptBusy ? t.loading : t.adoptAllUnmatched.replace('{n}', String(unmatched))}
             </button>
           )}
+          <ColumnPicker
+            columns={stockColumns.orderedColumns}
+            isVisible={stockColumns.isVisible}
+            toggle={stockColumns.toggle}
+            reorder={stockColumns.reorder}
+            reset={stockColumns.reset}
+          />
         </div>
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th className="col-name-wide">{t.name}</th>
-                <th className="col-w-match">Match</th>
-                <th className="num col-w-sm">{t.quantity}</th>
-                <th className="num col-w-sm">{t.stockNetUnit}</th>
-                <th className="num col-w-sm">{t.stockVatUnit}</th>
-                <th className="num col-w-sm">{t.stockGrossUnit}</th>
-                <th className="col-w-sm">{t.currency}</th>
-                <th className="num col-w-sm">{t.stockNetTotal}</th>
-                <th className="num col-w-sm">{t.stockVatTotal}</th>
-                <th className="num col-w-sm">{t.stockGrossTotal}</th>
-                <th className="col-w-md">{t.symbol}</th>
-                <th className="col-w-md">{t.stockManufacturer}</th>
+                {stockColumns.orderedVisibleIds.map((id) => headerFor(id))}
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="hint">
+                  <td
+                    colSpan={stockColumns.orderedVisibleIds.length + 1}
+                    className="hint"
+                  >
                     {query || unmatchedOnly ? '—' : t.noData}
                   </td>
                 </tr>
               )}
-              {filtered.slice(0, 200).map((r, idx) => {
-                const matchedRow = r.matchedRawMaterialId || r.matchedComponentId;
-                return (
-                  <tr key={`${r.rowKey}-${idx}`}>
-                    <td className="col-name col-wrap">{r.name}</td>
-                    <td className="col-match">
-                      {r.matchAmbiguous ? (
-                        <span
-                          className="match-badge warn"
-                          title={t.rowsAmbiguous}
-                          aria-label={t.rowsAmbiguous}
-                        >
-                          ?
-                        </span>
-                      ) : matchedRow ? (
-                        <span
-                          className="match-badge success"
-                          title={t.rowsMatched}
-                          aria-label={t.rowsMatched}
-                        >
-                          <IconCheck size={12} />
-                        </span>
-                      ) : (
-                        <button
-                          className="match-badge danger as-button"
-                          disabled={adoptBusy}
-                          onClick={() => void adoptOne(r, kind)}
-                          title={
-                            kind === 'raw' ? t.adoptAsRaw : t.adoptAsComponent
-                          }
-                          aria-label={
-                            kind === 'raw' ? t.adoptAsRaw : t.adoptAsComponent
-                          }
-                        >
-                          <IconPlus size={12} />
-                        </button>
-                      )}
-                    </td>
-                    <td className="num">{r.qty}</td>
-                    <td className="num">{r.netPrice ?? ''}</td>
-                    <td className="num">{r.vatPrice ?? ''}</td>
-                    <td className="num">{r.grossPrice ?? ''}</td>
-                    <td>{r.currency ?? ''}</td>
-                    <td className="num">{r.oNet ?? ''}</td>
-                    <td className="num">{r.oVat ?? ''}</td>
-                    <td className="num">{r.oGross ?? ''}</td>
-                    <td>{r.mpFirmaSymbol ?? ''}</td>
-                    <td>{r.manufacturerSymbol ?? ''}</td>
-                    <td className="actions actions-sticky">
-                      <div className="btn-row">
-                        <button
-                          className="btn btn-sm soft-edit"
-                          onClick={() => setEditingRow({ row: r, kind, snapshotId })}
-                          title={t.stockEditRow}
-                        >
-                          <IconEdit size={13} /> {t.edit}
-                        </button>
-                        <button
-                          className="btn btn-sm soft-danger"
-                          onClick={() => setConfirmDeleteRow({ row: r, snapshotId })}
-                          title={t.stockDeleteRow}
-                        >
-                          <IconTrash size={13} /> {t.delete}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+              {filtered.slice(0, 200).map((r, idx) => (
+                <tr key={`${r.rowKey}-${idx}`}>
+                  {stockColumns.orderedVisibleIds.map((id) => cellFor(id, r))}
+                  <td className="actions actions-sticky">
+                    <div className="btn-row">
+                      <button
+                        className="btn btn-sm soft-edit"
+                        onClick={() => setEditingRow({ row: r, kind, snapshotId })}
+                        title={t.stockEditRow}
+                      >
+                        <IconEdit size={13} /> {t.edit}
+                      </button>
+                      <button
+                        className="btn btn-sm soft-danger"
+                        onClick={() => setConfirmDeleteRow({ row: r, snapshotId })}
+                        title={t.stockDeleteRow}
+                      >
+                        <IconTrash size={13} /> {t.delete}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
               {filtered.length > 200 && (
                 <tr>
-                  <td colSpan={13} className="hint">
+                  <td
+                    colSpan={stockColumns.orderedVisibleIds.length + 1}
+                    className="hint"
+                  >
                     … +{filtered.length - 200}
                   </td>
                 </tr>
@@ -464,6 +543,7 @@ const StockImport: React.FC<Props> = ({ aiAvailable, useAiByDefault, onNavigate 
   return (
     <div className="main">
       <div className="page-header">
+        <HeaderNav />
         <h1>{t.stockImport}</h1>
         {(rawRows.length > 0 || compRows.length > 0) && (
           <span className="page-header-count">
@@ -479,9 +559,6 @@ const StockImport: React.FC<Props> = ({ aiAvailable, useAiByDefault, onNavigate 
       <div className="card">
         <div className="card-header">
           <div className="card-title">{t.selectXlsxFiles}</div>
-          <div className="row">
-            <AIToggleButton enabled={useAi} onChange={setUseAi} available={aiAvailable} />
-          </div>
         </div>
 
         <DropZone
@@ -513,15 +590,16 @@ const StockImport: React.FC<Props> = ({ aiAvailable, useAiByDefault, onNavigate 
                     <tr key={f.path}>
                       <td className="col-name col-wrap">{f.name}</td>
                       <td>
-                        <select
+                        <SearchableSelect
+                          options={[
+                            { value: 'raw', label: t.rawMaterials },
+                            { value: 'component', label: t.components },
+                          ]}
                           value={f.kind}
-                          onChange={(e) =>
-                            setStagedKind(f.path, e.target.value as 'raw' | 'component')
+                          onChange={(val) =>
+                            setStagedKind(f.path, val as 'raw' | 'component')
                           }
-                        >
-                          <option value="raw">{t.rawMaterials}</option>
-                          <option value="component">{t.components}</option>
-                        </select>
+                        />
                       </td>
                       <td className="actions">
                         <button
@@ -622,26 +700,17 @@ interface EditRowProps {
 
 const EditRowDialog: React.FC<EditRowProps> = ({ row, onChange, onSave, onCancel }) => {
   const t = useT();
-  const num = (v: string): number | undefined =>
-    v === '' ? undefined : Number(v);
+  useEscapeKey(onCancel);
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-header-text">
-            <h2 className="modal-title">{t.stockEditRow}</h2>
-            <p className="modal-subtitle">{row.name}</p>
-          </div>
-          <button
-            type="button"
-            className="modal-close"
-            onClick={onCancel}
-            title={t.close}
-            aria-label={t.close}
-          >
-            <IconClose size={16} />
-          </button>
-        </div>
+        <ModalHeader
+          icon={<IconEdit size={18} />}
+          tone="edit"
+          title={t.stockEditRow}
+          subtitle={row.name}
+          onClose={onCancel}
+        />
         <div className="modal-body">
         <div className="form-row">
           <label>{t.name}</label>
@@ -679,42 +748,39 @@ const EditRowDialog: React.FC<EditRowProps> = ({ row, onChange, onSave, onCancel
         </div>
         <div className="form-row">
           <label>{t.quantity}</label>
-          <input
+          <NumberInput
             className="input"
-            type="number"
             step="0.01"
             value={row.qty}
-            onChange={(e) => onChange({ ...row, qty: Number(e.target.value) || 0 })}
+            emptyValue={0}
+            onChange={(v) => onChange({ ...row, qty: v ?? 0 })}
           />
         </div>
         <div className="form-row">
           <label>{t.stockNetUnit}</label>
-          <input
+          <NumberInput
             className="input"
-            type="number"
             step="0.01"
-            value={row.netPrice ?? ''}
-            onChange={(e) => onChange({ ...row, netPrice: num(e.target.value) })}
+            value={row.netPrice}
+            onChange={(v) => onChange({ ...row, netPrice: v })}
           />
         </div>
         <div className="form-row">
           <label>{t.stockVatUnit}</label>
-          <input
+          <NumberInput
             className="input"
-            type="number"
             step="0.01"
-            value={row.vatPrice ?? ''}
-            onChange={(e) => onChange({ ...row, vatPrice: num(e.target.value) })}
+            value={row.vatPrice}
+            onChange={(v) => onChange({ ...row, vatPrice: v })}
           />
         </div>
         <div className="form-row">
           <label>{t.stockGrossUnit}</label>
-          <input
+          <NumberInput
             className="input"
-            type="number"
             step="0.01"
-            value={row.grossPrice ?? ''}
-            onChange={(e) => onChange({ ...row, grossPrice: num(e.target.value) })}
+            value={row.grossPrice}
+            onChange={(v) => onChange({ ...row, grossPrice: v })}
           />
         </div>
         <div className="form-row">
@@ -727,32 +793,29 @@ const EditRowDialog: React.FC<EditRowProps> = ({ row, onChange, onSave, onCancel
         </div>
         <div className="form-row">
           <label>{t.stockNetTotal}</label>
-          <input
+          <NumberInput
             className="input"
-            type="number"
             step="0.01"
-            value={row.oNet ?? ''}
-            onChange={(e) => onChange({ ...row, oNet: num(e.target.value) })}
+            value={row.oNet}
+            onChange={(v) => onChange({ ...row, oNet: v })}
           />
         </div>
         <div className="form-row">
           <label>{t.stockVatTotal}</label>
-          <input
+          <NumberInput
             className="input"
-            type="number"
             step="0.01"
-            value={row.oVat ?? ''}
-            onChange={(e) => onChange({ ...row, oVat: num(e.target.value) })}
+            value={row.oVat}
+            onChange={(v) => onChange({ ...row, oVat: v })}
           />
         </div>
         <div className="form-row">
           <label>{t.stockGrossTotal}</label>
-          <input
+          <NumberInput
             className="input"
-            type="number"
             step="0.01"
-            value={row.oGross ?? ''}
-            onChange={(e) => onChange({ ...row, oGross: num(e.target.value) })}
+            value={row.oGross}
+            onChange={(v) => onChange({ ...row, oGross: v })}
           />
         </div>
         <div className="form-row">

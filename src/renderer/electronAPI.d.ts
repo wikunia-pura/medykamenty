@@ -11,7 +11,7 @@ import type {
   ShortageReport,
   ShortageReportEntry,
   CostReport,
-  RFQEmail,
+  EmailBatch,
   MaxProducibleResult,
   Lang,
   StoreSchema,
@@ -89,15 +89,39 @@ export interface ElectronAPI {
   duplicatePlan(id: string): Promise<ProductionPlan>;
   computeShortages(planId: string): Promise<ShortageReport>;
   computeCost(planId: string): Promise<CostReport>;
-  generateEmails(
-    planId: string,
-    opts: { language: Lang; useAI: boolean; sendToAllAlternatives?: boolean },
-  ): Promise<RFQEmail[]>;
 
   // Shortage report history
   listShortageReports(): Promise<ShortageReportEntry[]>;
   getShortageReport(id: string): Promise<ShortageReportEntry | undefined>;
   deleteShortageReport(id: string): Promise<{ ok: boolean }>;
+  updateShortageReport(
+    id: string,
+    patch: { reportName?: string },
+  ): Promise<ShortageReportEntry | undefined>;
+
+  // Email batches (RFQ history)
+  generateEmails(
+    reportId: string,
+    opts: { language: Lang; useAI: boolean; sendToAllAlternatives?: boolean },
+  ): Promise<EmailBatch>;
+  listEmailBatches(): Promise<EmailBatch[]>;
+  getEmailBatch(id: string): Promise<EmailBatch | undefined>;
+  deleteEmailBatch(id: string): Promise<{ ok: boolean }>;
+  updateBatchEmail(
+    batchId: string,
+    emailId: string,
+    patch: { body?: string; subject?: string },
+  ): Promise<EmailBatch | undefined>;
+  markEmailSent(
+    batchId: string,
+    emailId: string,
+    sentAt: string | null,
+  ): Promise<EmailBatch | undefined>;
+  regenerateBatchEmail(
+    batchId: string,
+    emailId: string,
+    opts: { language: Lang; useAI: boolean },
+  ): Promise<EmailBatch>;
 
   // Reverse
   maxProducible(productId: string): Promise<MaxProducibleResult>;

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
+import { HeaderNav } from '../navigation';
 import type {
   ProductionPlan,
+  Product,
   ShortageLine,
   ShortageReport,
   ShortageReportEntry,
@@ -10,48 +12,67 @@ import type {
 import type { ViewKey } from './types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NoPlansEmptyState from '../components/NoPlansEmptyState';
-import { IconMail, IconPlus, IconTrash, IconEdit } from '../components/Icons';
+import { IconMail, IconPlus, IconTrash, IconEdit, IconEye, IconArrowLeft } from '../components/Icons';
+import SearchableSelect from '../components/SearchableSelect';
+import PlanEditorModal from '../components/PlanEditorModal';
+import HoverTooltip from '../components/HoverTooltip';
 
 interface Props {
   selectedPlanId: string;
   onSelectPlan: (id: string) => void;
   onNavigate: (key: ViewKey) => void;
-  onNavigateToEmails: (planId: string) => void;
-  onNavigateToEditPlan: (planId: string) => void;
+  onNavigateToEmails: (reportId: string) => void;
+  focusReportId?: string;
+  onFocusReportConsumed?: () => void;
 }
 
-// Module-level cache so the report survives navigating away and back.
-const cache: {
-  planId: string | null;
-  report: ShortageReport | null;
+type ReportMode = 'preview' | 'edit';
+
+interface FocusState {
+  report: ShortageReport;
+  planId: string;
+  planName: string;
+  reportName: string;
   entryId: string | null;
-} = {
-  planId: null,
-  report: null,
-  entryId: null,
-};
+  mode: ReportMode;
+}
+
+// Module-level cache so the focused report survives navigating away and back.
+const cache: { focus: FocusState | null } = { focus: null };
 
 const ShortageReportView: React.FC<Props> = ({
   selectedPlanId,
   onSelectPlan,
   onNavigate,
   onNavigateToEmails,
-  onNavigateToEditPlan,
+  focusReportId,
+  onFocusReportConsumed,
 }) => {
   const t = useT();
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [report, setReport] = useState<ShortageReport | null>(
-    cache.planId === selectedPlanId ? cache.report : null,
-  );
-  const [currentEntryId, setCurrentEntryId] = useState<string | null>(
-    cache.planId === selectedPlanId ? cache.entryId : null,
-  );
+  const [focus, setFocus] = useState<FocusState | null>(cache.focus);
   const [history, setHistory] = useState<ShortageReportEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reassigningKey, setReassigningKey] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ShortageReportEntry | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [editingPlan, setEditingPlan] = useState<Partial<ProductionPlan> | null>(null);
+  const [planModalReadOnly, setPlanModalReadOnly] = useState(false);
+  const [titleDraft, setTitleDraft] = useState<string | null>(null);
+
+  const openPlanModal = (planId: string) => {
+    const plan = plans.find((p) => p.id === planId);
+    if (!plan) return;
+    setEditingPlan({ ...plan });
+    setPlanModalReadOnly(true);
+  };
+
+  const setFocusAndCache = (next: FocusState | null) => {
+    setFocus(next);
+    cache.focus = next;
+  };
 
   const loadHistory = async () => {
     const list = await window.electronAPI.listShortageReports();
@@ -59,40 +80,89 @@ const ShortageReportView: React.FC<Props> = ({
     return list;
   };
 
+  const reloadPlans = async () => {
+    const ps = await window.electronAPI.listPlans();
+    setPlans(ps);
+    return ps;
+  };
+
   useEffect(() => {
     void (async () => {
-      const [ps, ss] = await Promise.all([
+      const [ps, ss, pr] = await Promise.all([
         window.electronAPI.listPlans(),
         window.electronAPI.listSuppliers(),
+        window.electronAPI.listProducts(),
       ]);
       setPlans(ps);
       setSuppliers(ss);
+      setProducts(pr);
       if (!selectedPlanId && ps[0]) onSelectPlan(ps[0].id);
       await loadHistory();
     })();
   }, []);
 
-  const setPlan = (id: string) => {
-    onSelectPlan(id);
-    setReport(cache.planId === id ? cache.report : null);
-    setCurrentEntryId(cache.planId === id ? cache.entryId : null);
+  // Open a specific report when navigated here from another view.
+  useEffect(() => {
+    if (!focusReportId) return;
+    const entry = history.find((e) => e.id === focusReportId);
+    if (entry) {
+      openEntry(entry, 'preview');
+      onFocusReportConsumed?.();
+    }
+  }, [focusReportId, history]);
+
+  const openAddPlan = () => {
+    setPlanModalReadOnly(false);
+    setEditingPlan({
+      name: `Plan ${new Date().toISOString().slice(0, 10)}`,
+      items: [],
+      bulkMass: [],
+      status: 'draft',
+    });
+  };
+
+  const closePlanModal = () => {
+    setEditingPlan(null);
+    setPlanModalReadOnly(false);
+  };
+
+  const savePlan = async () => {
+    if (!editingPlan || !editingPlan.name?.trim()) return;
+    const payload = {
+      name: editingPlan.name.trim(),
+      items: editingPlan.items ?? [],
+      bulkMass: editingPlan.bulkMass ?? [],
+      status: editingPlan.status ?? 'draft',
+    };
+    const created = editingPlan.id
+      ? await window.electronAPI.updatePlan(editingPlan.id, payload)
+      : await window.electronAPI.createPlan(payload);
+    closePlanModal();
+    const ps = await reloadPlans();
+    // Auto-select the freshly created plan so user can immediately compute.
+    if (created && !editingPlan.id) {
+      const newId = (created as ProductionPlan).id;
+      if (newId && ps.some((p) => p.id === newId)) onSelectPlan(newId);
+    }
   };
 
   const compute = async () => {
     if (!selectedPlanId) return;
+    const plan = plans.find((p) => p.id === selectedPlanId);
     setBusy(true);
     setError(null);
     try {
       const r = await window.electronAPI.computeShortages(selectedPlanId);
-      setReport(r);
-      cache.planId = selectedPlanId;
-      cache.report = r;
-      // Refresh history; the most recent entry for this plan is the one just
-      // produced. Pin its id so the history list can hide it from "older".
       const list = await loadHistory();
       const newest = list.find((e) => e.planId === selectedPlanId);
-      setCurrentEntryId(newest?.id ?? null);
-      cache.entryId = newest?.id ?? null;
+      setFocusAndCache({
+        report: r,
+        planId: selectedPlanId,
+        planName: plan?.name ?? '',
+        reportName: newest?.reportName ?? '',
+        entryId: newest?.id ?? null,
+        mode: 'edit',
+      });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -101,7 +171,7 @@ const ShortageReportView: React.FC<Props> = ({
   };
 
   const reassignSupplier = async (line: ShortageLine, newSupplierId: string) => {
-    if (!selectedPlanId) return;
+    if (!focus || focus.mode !== 'edit') return;
     const key = `${line.itemKind}-${line.itemId}`;
     setReassigningKey(key);
     setError(null);
@@ -128,18 +198,53 @@ const ShortageReportView: React.FC<Props> = ({
           preferredSupplierId: next,
         });
       }
-      const r = await window.electronAPI.computeShortages(selectedPlanId);
-      setReport(r);
-      cache.planId = selectedPlanId;
-      cache.report = r;
+      const r = await window.electronAPI.computeShortages(focus.planId);
       const list = await loadHistory();
-      const newest = list.find((e) => e.planId === selectedPlanId);
-      setCurrentEntryId(newest?.id ?? null);
-      cache.entryId = newest?.id ?? null;
+      const newest = list.find((e) => e.planId === focus.planId);
+      setFocusAndCache({ ...focus, report: r, entryId: newest?.id ?? null });
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setReassigningKey(null);
+    }
+  };
+
+  const openEntry = (entry: ShortageReportEntry, mode: ReportMode) => {
+    onSelectPlan(entry.planId);
+    setError(null);
+    setFocusAndCache({
+      report: entry.report,
+      planId: entry.planId,
+      planName: entry.planName,
+      reportName: entry.reportName,
+      entryId: entry.id,
+      mode,
+    });
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const exitFocus = () => {
+    setFocusAndCache(null);
+    setError(null);
+  };
+
+  const commitTitleRename = async () => {
+    if (!focus || titleDraft === null) return;
+    const next = titleDraft.trim();
+    setTitleDraft(null);
+    if (!next || next === focus.reportName) return;
+    if (!focus.entryId) {
+      setError('Cannot rename a report that has not been saved yet.');
+      return;
+    }
+    try {
+      await window.electronAPI.updateShortageReport(focus.entryId, { reportName: next });
+      setFocusAndCache({ ...focus, reportName: next });
+      await loadHistory();
+    } catch (err) {
+      setError((err as Error).message);
     }
   };
 
@@ -148,95 +253,114 @@ const ShortageReportView: React.FC<Props> = ({
     const id = confirmDelete.id;
     setConfirmDelete(null);
     await window.electronAPI.deleteShortageReport(id);
-    if (currentEntryId === id) {
-      setReport(null);
-      setCurrentEntryId(null);
-      cache.report = null;
-      cache.entryId = null;
-    }
+    if (focus?.entryId === id) setFocusAndCache(null);
     await loadHistory();
   };
 
   const fmt = (n: number, unit: ShortageLine['unit']) =>
     n.toFixed(unit === 'pcs' ? 0 : 2);
 
-  const hasPlans = plans.length > 0;
-  const needsPlanChoice = hasPlans && !report;
-  const olderEntries = history.filter((e) => e.id !== currentEntryId);
-
-  const summarizeEntry = (e: ShortageReportEntry): string => {
-    const r = e.report;
-    const groups = r.groups.length;
-    const lines = r.rawLines.length + r.componentLines.length;
-    if (lines === 0) return t.noShortages;
-    return `${groups} ${groups === 1 ? 'dostawca' : 'dostawców'} · ${lines} pozycji`;
+  const missingLines = (e: ShortageReportEntry): ShortageLine[] => {
+    return [...e.report.rawLines, ...e.report.componentLines]
+      .filter((l) => l.shortage > 0)
+      .sort((a, b) => b.shortage - a.shortage);
   };
 
-  return (
-    <div className="main">
-      <h1>{t.shortageReport}</h1>
+  const hasPlans = plans.length > 0;
 
-      {!hasPlans ? (
-        <NoPlansEmptyState onAddPlan={() => onNavigate('productionPlan')} />
-      ) : (
-        <div className={`card ${needsPlanChoice ? 'highlight-callout' : ''}`}>
-          {needsPlanChoice && (
-            <div className="callout-hint">
-              <span>1.</span>
-              <span>{t.selectPlanFirst}</span>
-            </div>
-          )}
-          <div className="row" style={needsPlanChoice ? { justifyContent: 'center' } : undefined}>
-            <select
-              value={selectedPlanId}
-              onChange={(e) => setPlan(e.target.value)}
-              style={needsPlanChoice ? { minWidth: 280, fontSize: 15 } : undefined}
-            >
-              <option value="">— {t.selectPlanFirst} —</option>
-              {plans.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+  // ----- Focused view (compute / edit / preview a single report) -----
+  if (focus) {
+    const { report, mode, reportName } = focus;
+    return (
+      <div className="main">
+        <div className="focus-bar">
+          <button className="btn" onClick={exitFocus} title={t.backToList}>
+            <IconArrowLeft size={14} /> {t.backToList}
+          </button>
+          <div className="focus-bar-text">
+            {titleDraft !== null ? (
+              <input
+                autoFocus
+                className="focus-bar-title-input"
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={() => void commitTitleRename()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void commitTitleRename();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setTitleDraft(null);
+                  }
+                }}
+              />
+            ) : (
+              <h1
+                className="focus-bar-title focus-bar-title-editable"
+                onClick={() => setTitleDraft(reportName || '')}
+                title={t.edit}
+              >
+                {reportName || t.shortageReport}
+                <IconEdit size={13} className="focus-bar-title-pencil" />
+              </h1>
+            )}
+            <span className={`tag ${mode === 'edit' ? 'warn' : ''}`}>
+              {mode === 'edit' ? t.editMode : t.previewMode}
+            </span>
+          </div>
+          <div className="btn-row">
+            {focus.planId && (
+              <button
+                className="btn"
+                onClick={() => openPlanModal(focus.planId)}
+                title={t.openPlan}
+              >
+                {t.openPlan}
+              </button>
+            )}
+            {mode === 'preview' && (
+              <button
+                className="btn primary"
+                onClick={() =>
+                  setFocusAndCache({ ...focus, mode: 'edit' })
+                }
+                title={t.editMode}
+              >
+                <IconEdit size={13} /> {t.edit}
+              </button>
+            )}
             <button
-              className={needsPlanChoice ? 'btn primary-filled' : 'btn primary'}
-              onClick={compute}
-              disabled={!selectedPlanId || busy}
+              className="btn primary-filled"
+              onClick={() => focus.entryId && onNavigateToEmails(focus.entryId)}
+              disabled={!focus.entryId || focus.report.groups.length === 0}
+              title={t.goToEmailGenerator}
             >
-              {busy ? t.loading : t.computeShortages}
-            </button>
-            <button
-              className="btn"
-              onClick={() => onNavigate('productionPlan')}
-              title={t.addPlanCta}
-            >
-              <IconPlus size={13} /> {t.addPlanCta}
+              <IconMail size={13} /> {t.generateEmails}
             </button>
           </div>
-          {error && <div className="error-text" style={{ marginTop: 8 }}>{error}</div>}
         </div>
-      )}
 
-      {report && report.warnings.length > 0 && (
-        <div className="card" style={{ borderColor: 'var(--warning)' }}>
-          <strong className="warn-text">{t.warnings}</strong>
-          <ul>
-            {report.warnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+        {error && <div className="card error-text">{error}</div>}
 
-      {report && report.groups.length === 0 && (
-        <div className="card">
-          <strong>{t.noShortages}</strong>
-        </div>
-      )}
+        {report.warnings.length > 0 && (
+          <div className="card" style={{ borderColor: 'var(--warning)' }}>
+            <strong className="warn-text">{t.warnings}</strong>
+            <ul>
+              {report.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
-      {report &&
-        report.groups.map((g) => {
+        {report.groups.length === 0 && (
+          <div className="card">
+            <strong>{t.noShortages}</strong>
+          </div>
+        )}
+
+        {report.groups.map((g) => {
           const lines = [...g.rawLines, ...g.componentLines];
           if (lines.length === 0) return null;
           return (
@@ -289,20 +413,22 @@ const ShortageReportView: React.FC<Props> = ({
                           </span>
                         </td>
                         <td>
-                          <select
-                            className="supplier-select"
-                            value={line.preferredSupplierId ?? ''}
-                            disabled={reassigningKey === key}
-                            onChange={(e) => reassignSupplier(line, e.target.value)}
-                            title={t.selectSupplier}
-                          >
-                            <option value="">— {t.selectSupplier} —</option>
-                            {suppliers.map((s) => (
-                              <option key={s.id} value={s.id}>
-                                {s.name}
-                              </option>
-                            ))}
-                          </select>
+                          {mode === 'edit' ? (
+                            <SearchableSelect
+                              options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+                              value={line.preferredSupplierId ?? ''}
+                              onChange={(val) => reassignSupplier(line, val)}
+                              placeholder={t.selectSupplier}
+                              disabled={reassigningKey === key}
+                            />
+                          ) : (
+                            <span>
+                              {line.preferredSupplierId
+                                ? suppliers.find((s) => s.id === line.preferredSupplierId)
+                                    ?.name ?? '—'
+                                : '—'}
+                            </span>
+                          )}
                         </td>
                         <td className="num">{fmt(line.required, line.unit)}</td>
                         <td className="num">{fmt(line.available, line.unit)}</td>
@@ -321,7 +447,71 @@ const ShortageReportView: React.FC<Props> = ({
           );
         })}
 
-      {olderEntries.length > 0 && (
+        {focus.entryId && focus.report.groups.length > 0 && (
+          <button
+            className="floating-next"
+            onClick={() => onNavigateToEmails(focus.entryId!)}
+            title={t.goToEmailGenerator}
+          >
+            <span className="floating-next-step">3</span>
+            <span className="floating-next-text">
+              <span className="floating-next-hint">{t.nextStep}</span>
+              <span>{t.emailGenerator}</span>
+            </span>
+            <span className="floating-next-arrow">→</span>
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // ----- List view (default) -----
+  return (
+    <div className="main">
+      <div className="page-header">
+        <HeaderNav />
+        <h1>{t.shortageReport}</h1>
+        {history.length > 0 && (
+          <span className="page-header-count">{history.length}</span>
+        )}
+      </div>
+
+      {!hasPlans ? (
+        <NoPlansEmptyState onAddPlan={() => onNavigate('productionPlan')} />
+      ) : (
+        <div className="compute-hero">
+          <span className="compute-hero-icon" aria-hidden>
+            ⚡
+          </span>
+          <div className="compute-hero-text">
+            <span className="compute-hero-title">{t.computeShortages}</span>
+            <span className="compute-hero-hint">{t.dashboardMissingItems}</span>
+            <div className="compute-hero-controls">
+              <SearchableSelect
+                options={plans.map((p) => ({ value: p.id, label: p.name }))}
+                value={selectedPlanId}
+                onChange={onSelectPlan}
+                placeholder={t.selectPlanFirst}
+                footerAction={{
+                  label: t.addPlanCta,
+                  icon: <IconPlus size={13} />,
+                  onClick: openAddPlan,
+                }}
+              />
+              <button
+                className="compute-hero-cta"
+                onClick={compute}
+                disabled={!selectedPlanId || busy}
+              >
+                {busy ? t.loading : t.computeShortages} →
+              </button>
+            </div>
+            {error && <div className="compute-hero-error">{error}</div>}
+          </div>
+        </div>
+      )}
+
+      {history.length > 0 && (
         <div className="card">
           <div className="card-header">
             <div className="card-title">{t.olderReportsTitle}</div>
@@ -331,48 +521,122 @@ const ShortageReportView: React.FC<Props> = ({
             <table className="table">
               <thead>
                 <tr>
-                  <th>{t.planName}</th>
+                  <th>{t.reportName}</th>
+                  <th>{t.selectedPlan}</th>
                   <th>{t.computedAtLabel}</th>
                   <th>{t.shortageReport}</th>
-                  <th className="actions">{t.actionsHeader}</th>
+                  <th className="actions actions-sticky">{t.actionsHeader}</th>
                 </tr>
               </thead>
               <tbody>
-                {olderEntries.map((e) => {
-                  const planExists = plans.some((p) => p.id === e.planId);
+                {history.map((e) => {
+                  const missing = missingLines(e);
+                  const groups = e.report.groups.length;
+                  const top = missing.slice(0, 8);
+                  const livePlanName =
+                    plans.find((p) => p.id === e.planId)?.name ?? e.planName;
                   return (
-                    <tr key={e.id}>
-                      <td className="col-name col-wrap">{e.planName}</td>
-                      <td className="hint">{new Date(e.computedAt).toLocaleString()}</td>
-                      <td className="hint">{summarizeEntry(e)}</td>
-                      <td className="actions">
-                        <div className="btn-row">
-                          <button
-                            className="btn btn-sm soft-success"
-                            onClick={() => onNavigateToEmails(e.planId)}
-                            title={t.generateEmails}
-                            disabled={!planExists}
-                          >
-                            <IconMail size={13} /> {t.generateEmails}
-                          </button>
-                          <button
-                            className="btn btn-sm soft-edit"
-                            onClick={() => onNavigateToEditPlan(e.planId)}
-                            title={t.edit}
-                            disabled={!planExists}
-                          >
-                            <IconEdit size={13} /> {t.edit}
-                          </button>
-                          <button
-                            className="btn btn-sm soft-danger"
-                            onClick={() => setConfirmDelete(e)}
-                            title={t.delete}
-                          >
-                            <IconTrash size={13} /> {t.delete}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                  <tr
+                    key={e.id}
+                    className="row-clickable"
+                    onClick={() => openEntry(e, 'preview')}
+                    title={t.preview}
+                  >
+                    <td className="col-name col-wrap">{e.reportName}</td>
+                    <td className="col-wrap">
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          openPlanModal(e.planId);
+                        }}
+                        title={t.openPlan}
+                      >
+                        {livePlanName}
+                      </button>
+                    </td>
+                    <td className="hint">{new Date(e.computedAt).toLocaleString()}</td>
+                    <td>
+                      {missing.length === 0 ? (
+                        <span className="tag success">{t.noShortages}</span>
+                      ) : (
+                        <HoverTooltip
+                          trigger={
+                            <span className="shortage-summary">
+                              <strong className="shortage-count">{missing.length}</strong>
+                              <span className="hint">
+                                {missing.length === 1
+                                  ? 'brakująca pozycja'
+                                  : 'brakujących pozycji'}
+                                {' · '}
+                                {groups} {groups === 1 ? 'dostawca' : 'dostawców'}
+                              </span>
+                            </span>
+                          }
+                        >
+                          <div className="shortage-tooltip-header">
+                            {t.shortageReport} — {missing.length}{' '}
+                            {missing.length === 1 ? 'pozycja' : 'pozycji'}
+                          </div>
+                          <ul className="shortage-tooltip-list">
+                            {top.map((line) => (
+                              <li key={`${line.itemKind}-${line.itemId}`}>
+                                <span className="shortage-tooltip-name">
+                                  {line.itemName}
+                                </span>
+                                <span className="shortage-tooltip-amount">
+                                  {fmt(line.shortage, line.unit)} {line.unit}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                          {missing.length > top.length && (
+                            <div className="shortage-tooltip-more hint">
+                              + {missing.length - top.length}{' '}
+                              {missing.length - top.length === 1 ? 'pozycja' : 'pozycji'}
+                            </div>
+                          )}
+                        </HoverTooltip>
+                      )}
+                    </td>
+                    <td
+                      className="actions actions-sticky"
+                      onClick={(ev) => ev.stopPropagation()}
+                    >
+                      <div className="btn-row">
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => openEntry(e, 'preview')}
+                          title={t.preview}
+                        >
+                          <IconEye size={13} /> {t.preview}
+                        </button>
+                        <button
+                          className="btn btn-sm soft-edit"
+                          onClick={() => openEntry(e, 'edit')}
+                          title={t.edit}
+                        >
+                          <IconEdit size={13} /> {t.edit}
+                        </button>
+                        <button
+                          className="btn btn-sm soft-success"
+                          onClick={() => onNavigateToEmails(e.id)}
+                          disabled={e.report.groups.length === 0}
+                          title={t.generateEmails}
+                        >
+                          <IconMail size={13} /> {t.generateEmails}
+                        </button>
+                        <button
+                          className="btn btn-sm soft-danger"
+                          onClick={() => setConfirmDelete(e)}
+                          title={t.delete}
+                        >
+                          <IconTrash size={13} /> {t.delete}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
                   );
                 })}
               </tbody>
@@ -381,24 +645,9 @@ const ShortageReportView: React.FC<Props> = ({
         </div>
       )}
 
-      {report && (
-        <button
-          className="floating-next"
-          onClick={() => onNavigateToEmails(selectedPlanId)}
-          title={t.goToEmailGenerator}
-        >
-          <span className="floating-next-step">3</span>
-          <span className="floating-next-text">
-            <span className="floating-next-hint">{t.nextStep}</span>
-            <span>{t.emailGenerator}</span>
-          </span>
-          <span className="floating-next-arrow">→</span>
-        </button>
-      )}
-
       {confirmDelete && (
         <ConfirmDialog
-          message={`${t.deleteReportConfirm}: ${confirmDelete.planName} (${new Date(
+          message={`${t.deleteReportConfirm}: ${confirmDelete.reportName} (${new Date(
             confirmDelete.computedAt,
           ).toLocaleString()})?`}
           onConfirm={onConfirmDelete}
@@ -406,6 +655,37 @@ const ShortageReportView: React.FC<Props> = ({
           danger
         />
       )}
+
+      {editingPlan && (
+        <PlanEditorModal
+          editing={editingPlan}
+          products={products}
+          setEditing={setEditingPlan}
+          onCancel={closePlanModal}
+          onSave={savePlan}
+          readOnly={planModalReadOnly}
+          onEnterEdit={() => setPlanModalReadOnly(false)}
+        />
+      )}
+
+      {(() => {
+        const nextEntry = history.find((e) => e.report.groups.length > 0);
+        if (!nextEntry) return null;
+        return (
+          <button
+            className="floating-next"
+            onClick={() => onNavigateToEmails(nextEntry.id)}
+            title={t.goToEmailGenerator}
+          >
+            <span className="floating-next-step">3</span>
+            <span className="floating-next-text">
+              <span className="floating-next-hint">{t.nextStep}</span>
+              <span>{t.emailGenerator}</span>
+            </span>
+            <span className="floating-next-arrow">→</span>
+          </button>
+        );
+      })()}
     </div>
   );
 };

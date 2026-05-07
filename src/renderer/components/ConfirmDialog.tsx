@@ -1,5 +1,6 @@
 import React from 'react';
 import { useT } from '../i18n';
+import { useEscapeKey } from '../utils/useEscapeKey';
 
 interface Props {
   message: string;
@@ -10,6 +11,7 @@ interface Props {
 
 const ConfirmDialog: React.FC<Props> = ({ message, onConfirm, onCancel, danger }) => {
   const t = useT();
+  useEscapeKey(onCancel);
   return (
     <div
       style={{

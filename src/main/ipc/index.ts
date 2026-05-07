@@ -10,7 +10,7 @@ import { parseStockXlsx } from '../services/xlsxStockImporter';
 import { matchOne } from '../services/matcher';
 import { computeShortages } from '../services/shortageCalculator';
 import { computeCost } from '../services/costCalculator';
-import { generateEmails } from '../services/rfqGenerator';
+import { generateEmailsForReport, regenerateBatchEmail } from '../services/rfqGenerator';
 import { maxProducible } from '../services/reverseCalculator';
 import { isAiAvailable, getModel } from '../aiConfig';
 import { rewriteEmail, suggestMatch } from '../services/llmClient';
@@ -93,10 +93,10 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
             if (kind === 'raw') row.matchedRawMaterialId = result.id;
             else row.matchedComponentId = result.id;
             matched++;
-            // refresh price (oNet = ONetto Z)
-            if (typeof row.oNet === 'number' && row.oNet > 0) {
-              if (kind === 'raw') db.setRawMaterialLastPrice(result.id, row.oNet, row.currency);
-              else db.setComponentLastPrice(result.id, row.oNet, row.currency);
+            // refresh last purchase price (netPrice = Netto S, unit net price)
+            if (typeof row.netPrice === 'number' && row.netPrice > 0) {
+              if (kind === 'raw') db.setRawMaterialLastPrice(result.id, row.netPrice, row.currency);
+              else db.setComponentLastPrice(result.id, row.netPrice, row.currency);
             }
           } else if (result.ambiguous) {
             ambiguous++;
@@ -189,14 +189,42 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.SHORTAGE_REPORT_LIST, () => db.listShortageReports());
   ipcMain.handle(IPC.SHORTAGE_REPORT_GET, (_e, id: string) => db.getShortageReport(id));
   ipcMain.handle(IPC.SHORTAGE_REPORT_DELETE, (_e, id: string) => db.deleteShortageReport(id));
-  ipcMain.handle(IPC.PLAN_COMPUTE_COST, (_e, planId: string) => computeCost(planId, db));
   ipcMain.handle(
-    IPC.PLAN_GENERATE_EMAILS,
+    IPC.SHORTAGE_REPORT_UPDATE,
+    (_e, id: string, patch: { reportName?: string }) => db.updateShortageReport(id, patch),
+  );
+  ipcMain.handle(IPC.PLAN_COMPUTE_COST, (_e, planId: string) => computeCost(planId, db));
+
+  // ---- Email batch history ----
+  ipcMain.handle(
+    IPC.EMAIL_BATCH_CREATE,
     async (
       _e,
-      planId: string,
+      reportId: string,
       opts: { language: Lang; useAI: boolean; sendToAllAlternatives?: boolean },
-    ) => generateEmails(planId, opts, db),
+    ) => generateEmailsForReport(reportId, opts, db),
+  );
+  ipcMain.handle(IPC.EMAIL_BATCH_LIST, () => db.listEmailBatches());
+  ipcMain.handle(IPC.EMAIL_BATCH_GET, (_e, id: string) => db.getEmailBatch(id));
+  ipcMain.handle(IPC.EMAIL_BATCH_DELETE, (_e, id: string) => db.deleteEmailBatch(id));
+  ipcMain.handle(
+    IPC.EMAIL_BATCH_UPDATE_EMAIL,
+    (_e, batchId: string, emailId: string, patch: { body?: string; subject?: string }) =>
+      db.updateBatchEmail(batchId, emailId, patch),
+  );
+  ipcMain.handle(
+    IPC.EMAIL_BATCH_MARK_SENT,
+    (_e, batchId: string, emailId: string, sentAt: string | null) =>
+      db.markEmailSent(batchId, emailId, sentAt),
+  );
+  ipcMain.handle(
+    IPC.EMAIL_BATCH_REGENERATE_EMAIL,
+    async (
+      _e,
+      batchId: string,
+      emailId: string,
+      opts: { language: Lang; useAI: boolean },
+    ) => regenerateBatchEmail(batchId, emailId, opts, db),
   );
 
   // ---- Reverse ----
@@ -309,6 +337,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
         stockSnapshots: [],
         productionPlans: [],
         shortageReports: [],
+        emailBatches: [],
         settings: db.getSettings(),
       },
       'replace',

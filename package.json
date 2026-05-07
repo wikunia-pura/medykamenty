@@ -1,6 +1,6 @@
 {
   "name": "cutis",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "description": "Production planning desktop app for Cutis cosmetics",
   "main": "dist/main/main/main.js",
   "scripts": {
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "com.cutis.app",
-    "productName": "Cutis",
+    "productName": "Cutis Production Planner",
     "directories": {
       "output": "release"
     },

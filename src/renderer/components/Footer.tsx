@@ -71,7 +71,7 @@ const Footer: React.FC<Props> = ({ appVersion }) => {
 
         <div className="app-footer-section app-footer-center">
           <span className="app-footer-text">
-            Made with <span className="app-footer-heart">♥</span> for Cutis
+            Made with <span className="app-footer-heart">♥</span> for 🍌 by 🦙
           </span>
         </div>
 
