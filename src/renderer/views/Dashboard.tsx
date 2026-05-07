@@ -3,7 +3,7 @@ import { useT } from '../i18n';
 import type { ViewKey } from './types';
 import type { ShortageLine, ShortageReportEntry } from '../../shared/types';
 import { IconImport } from '../components/Icons';
-import GaduGaduSun from '../components/GaduGaduSun';
+import drugsUrl from '../assets/drugs2.webp';
 
 interface Props {
   onNavigate: (key: ViewKey) => void;
@@ -93,21 +93,21 @@ const Dashboard: React.FC<Props> = ({ onNavigate, onNavigateToReport }) => {
 
   return (
     <div className="main dashboard-main">
-      <section className="dashboard-welcome" aria-label={t.dashboard}>
-        <div className="dashboard-welcome-orb dashboard-welcome-orb-a" aria-hidden />
-        <div className="dashboard-welcome-orb dashboard-welcome-orb-b" aria-hidden />
-        <div className="dashboard-welcome-orb dashboard-welcome-orb-c" aria-hidden />
-        <div className="dashboard-welcome-content">
-          <span className="dashboard-welcome-eyebrow">{t.dashboardWelcomeEyebrow}</span>
-          <h1 className="dashboard-welcome-title">{greeting}</h1>
-          <p className="dashboard-welcome-tagline">{t.dashboardWelcomeTagline}</p>
-        </div>
-        <div className="dashboard-welcome-mark" aria-hidden>
-          <span className="dashboard-welcome-mark-glow" />
-          <GaduGaduSun size={120} />
-          <span className="dashboard-welcome-gg-number">Numer GG: 2273815</span>
-        </div>
-      </section>
+      <div className="dashboard-welcome-row">
+        <section className="dashboard-welcome" aria-label={t.dashboard}>
+          <div className="dashboard-welcome-orb dashboard-welcome-orb-a" aria-hidden />
+          <div className="dashboard-welcome-orb dashboard-welcome-orb-b" aria-hidden />
+          <div className="dashboard-welcome-orb dashboard-welcome-orb-c" aria-hidden />
+          <div className="dashboard-welcome-content">
+            <span className="dashboard-welcome-eyebrow">{t.dashboardWelcomeEyebrow}</span>
+            <h1 className="dashboard-welcome-title">{greeting}</h1>
+            <p className="dashboard-welcome-tagline">{t.dashboardWelcomeTagline}</p>
+          </div>
+        </section>
+        <aside className="dashboard-welcome-image" aria-hidden>
+          <img src={drugsUrl} alt="" className="dashboard-welcome-image-img" />
+        </aside>
+      </div>
 
       <h2 className="dashboard-section-head" style={{ marginTop: 8 }}>
         {t.dashboardYourData}
