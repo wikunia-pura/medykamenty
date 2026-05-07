@@ -66,6 +66,23 @@ const ProductEditorModal: React.FC<Props> = ({
           onClose={onCancel}
         />
 
+        {editing.id && (editing.createdAt || editing.updatedAt) && (
+          <div className="modal-meta-strip">
+            {editing.createdAt && (
+              <span>
+                <span className="hint">{t.planCreatedAt}:</span>{' '}
+                {new Date(editing.createdAt).toLocaleString()}
+              </span>
+            )}
+            {editing.updatedAt && (
+              <span>
+                <span className="hint">{t.planUpdatedAt}:</span>{' '}
+                {new Date(editing.updatedAt).toLocaleString()}
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="modal-body">
           <div className="modal-section">
             <div className="modal-section-header">
@@ -154,23 +171,30 @@ const ProductEditorModal: React.FC<Props> = ({
         </div>
 
         <div className="modal-footer">
-          <button className="btn" onClick={onCancel}>
-            {readOnly ? t.close : t.cancel}
-          </button>
           {readOnly ? (
-            onEnterEdit && (
-              <button className="btn primary-filled" onClick={onEnterEdit}>
-                <IconEdit size={13} /> {t.edit}
+            <>
+              {onEnterEdit && (
+                <button className="btn" onClick={onEnterEdit}>
+                  <IconEdit size={13} /> {t.edit}
+                </button>
+              )}
+              <button className="btn primary-filled" onClick={onCancel}>
+                {t.close}
               </button>
-            )
+            </>
           ) : (
-            <button
-              className="btn primary-filled"
-              onClick={() => void onSave()}
-              disabled={!editing.name?.trim()}
-            >
-              {t.save}
-            </button>
+            <>
+              <button className="btn" onClick={onCancel}>
+                {t.cancel}
+              </button>
+              <button
+                className="btn primary-filled"
+                onClick={() => void onSave()}
+                disabled={!editing.name?.trim()}
+              >
+                {t.save}
+              </button>
+            </>
           )}
         </div>
       </div>

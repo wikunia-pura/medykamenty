@@ -15,22 +15,22 @@ const ModalHeader: React.FC<Props> = ({ icon, title, subtitle, onClose, tone = '
   const t = useT();
   return (
     <div className="modal-header">
-      <span className={`modal-header-icon modal-header-icon-${tone}`} aria-hidden>
-        {icon}
-      </span>
-      <div className="modal-header-text">
+      <div className="modal-header-row">
+        <span className={`modal-header-icon modal-header-icon-${tone}`} aria-hidden>
+          {icon}
+        </span>
         <h2 className="modal-title">{title}</h2>
-        {subtitle && <p className="modal-subtitle">{subtitle}</p>}
+        <button
+          type="button"
+          className="modal-close"
+          onClick={onClose}
+          title={t.close}
+          aria-label={t.close}
+        >
+          <IconClose size={16} />
+        </button>
       </div>
-      <button
-        type="button"
-        className="modal-close"
-        onClick={onClose}
-        title={t.close}
-        aria-label={t.close}
-      >
-        <IconClose size={16} />
-      </button>
+      {subtitle && <p className="modal-subtitle">{subtitle}</p>}
     </div>
   );
 };

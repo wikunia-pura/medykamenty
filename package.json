@@ -1,6 +1,6 @@
 {
   "name": "cutis",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Production planning desktop app for Cutis cosmetics",
   "main": "dist/main/main/main.js",
   "scripts": {

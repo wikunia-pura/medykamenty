@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
-import { HeaderNav } from '../navigation';
+import { HeaderNav, useNavigation } from '../navigation';
 import type {
   EmailBatch,
   Lang,
@@ -34,15 +34,21 @@ interface Props {
   autoGenerate?: boolean;
   onAutoGenerateConsumed?: () => void;
   onNavigate?: (key: ViewKey) => void;
+  onNavigateToReport?: (planId: string, reportId: string) => void;
   focusBatchId?: string;
   onFocusBatchConsumed?: () => void;
 }
 
 interface FocusState {
   batch: EmailBatch;
+  originFromNav?: boolean;
 }
 
 const cache: { focus: FocusState | null } = { focus: null };
+
+export const resetEmailGeneratorFocus = () => {
+  cache.focus = null;
+};
 
 const formatReportLabel = (e: ShortageReportEntry): string => {
   const groups = e.report.groups.length;
@@ -59,10 +65,12 @@ const EmailGenerator: React.FC<Props> = ({
   autoGenerate,
   onAutoGenerateConsumed,
   onNavigate,
+  onNavigateToReport,
   focusBatchId,
   onFocusBatchConsumed,
 }) => {
   const t = useT();
+  const navCtx = useNavigation();
   const [reports, setReports] = useState<ShortageReportEntry[]>([]);
   const [batches, setBatches] = useState<EmailBatch[]>([]);
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
@@ -182,7 +190,7 @@ const EmailGenerator: React.FC<Props> = ({
     if (!focusBatchId) return;
     const batch = batches.find((b) => b.id === focusBatchId);
     if (batch) {
-      setFocusAndCache({ batch });
+      setFocusAndCache({ batch, originFromNav: true });
       onFocusBatchConsumed?.();
       if (typeof window !== 'undefined') {
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -190,9 +198,17 @@ const EmailGenerator: React.FC<Props> = ({
     }
   }, [focusBatchId, batches]);
 
+  const handleBack = () => {
+    if (focus?.originFromNav && navCtx?.canGoBack) {
+      navCtx.goBack();
+    } else {
+      setFocusAndCache(null);
+    }
+  };
+
   const refreshFocus = async (batchId: string) => {
     const fresh = await window.electronAPI.getEmailBatch(batchId);
-    if (fresh) setFocusAndCache({ batch: fresh });
+    if (fresh) setFocusAndCache({ batch: fresh, originFromNav: focus?.originFromNav });
     await loadAll();
   };
 
@@ -211,7 +227,10 @@ const EmailGenerator: React.FC<Props> = ({
     const updatedEmails = focus.batch.emails.map((e) =>
       e.id === emailId ? { ...e, body } : e,
     );
-    setFocusAndCache({ batch: { ...focus.batch, emails: updatedEmails } });
+    setFocusAndCache({
+      batch: { ...focus.batch, emails: updatedEmails },
+      originFromNav: focus.originFromNav,
+    });
     await window.electronAPI.updateBatchEmail(batchId, emailId, { body });
   };
 
@@ -229,7 +248,7 @@ const EmailGenerator: React.FC<Props> = ({
         emailId,
         { language: nextLang, useAI: useAiByDefault && aiAvailable },
       );
-      setFocusAndCache({ batch: updated });
+      setFocusAndCache({ batch: updated, originFromNav: focus?.originFromNav });
       await loadAll();
     } catch (err) {
       setError((err as Error).message);
@@ -269,22 +288,43 @@ const EmailGenerator: React.FC<Props> = ({
     const filteredEmails = !focusQuery.trim()
       ? batch.emails
       : batch.emails.filter((e) => matchesQuery(e, focusQuery));
+    const livePlanName = plans.find((p) => p.id === batch.planId)?.name ?? batch.planName;
     return (
       <div className="main">
         <div className="focus-bar">
           <button
             className="btn"
-            onClick={() => setFocusAndCache(null)}
+            onClick={handleBack}
             title={t.backToList}
           >
             <IconArrowLeft size={14} /> {t.backToList}
           </button>
           <div className="focus-bar-text">
             <h1 className="focus-bar-title">
-              {t.emailBatchTitle} — {batch.reportName}
+              {t.emailBatchTitle}
             </h1>
-            <span className="hint">
-              {t.computedAtLabel}: {new Date(batch.reportComputedAt).toLocaleString()}
+            <span className="focus-bar-meta">
+              <span className="hint">{t.reportName}:</span>{' '}
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => onNavigateToReport?.(batch.planId, batch.reportId)}
+                title={t.goToShortageReport}
+                disabled={!onNavigateToReport}
+              >
+                {batch.reportName}
+              </button>
+            </span>
+            <span className="focus-bar-meta">
+              <span className="hint">{t.selectedPlan}:</span>{' '}
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => openPlanModal(batch.planId)}
+                title={t.openPlan}
+              >
+                {livePlanName}
+              </button>
             </span>
             <span className="tag">
               {sentCount}/{batch.emails.length} {t.sentCount}
@@ -327,20 +367,21 @@ const EmailGenerator: React.FC<Props> = ({
                   )}
                 </div>
                 <div className="btn-row">
-                  <div style={{ width: 84 }}>
-                    <SearchableSelect
-                      options={[
-                        { value: 'pl', label: 'PL' },
-                        { value: 'en', label: 'EN' },
-                      ]}
-                      value={e.language}
-                      onChange={(val) =>
-                        val !== e.language &&
-                        void changeEmailLanguage(batch.id, e.id, val as Lang)
+                  <select
+                    className="input email-lang-select"
+                    value={e.language}
+                    onChange={(ev) => {
+                      const val = ev.target.value as Lang;
+                      if (val !== e.language) {
+                        void changeEmailLanguage(batch.id, e.id, val);
                       }
-                      disabled={isRegen}
-                    />
-                  </div>
+                    }}
+                    disabled={isRegen}
+                    title={t.preferredEmailLanguage}
+                  >
+                    <option value="pl">PL</option>
+                    <option value="en">EN</option>
+                  </select>
                   <button
                     className={`btn btn-sm ${
                       copiedKey === key ? 'soft-success' : 'soft-edit'
@@ -391,6 +432,18 @@ const EmailGenerator: React.FC<Props> = ({
             </div>
           );
         })}
+
+        {editingPlan && (
+          <PlanEditorModal
+            editing={editingPlan}
+            products={products}
+            setEditing={setEditingPlan}
+            onCancel={closePlanModal}
+            onSave={savePlan}
+            readOnly={planModalReadOnly}
+            onEnterEdit={() => setPlanModalReadOnly(false)}
+          />
+        )}
       </div>
     );
   }
@@ -503,7 +556,23 @@ const EmailGenerator: React.FC<Props> = ({
                         onClick={() => setFocusAndCache({ batch: b })}
                         title={t.preview}
                       >
-                        <td className="col-name col-wrap">{b.reportName}</td>
+                        <td className="col-name col-wrap">
+                          {onNavigateToReport ? (
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                onNavigateToReport(b.planId, b.reportId);
+                              }}
+                              title={t.goToShortageReport}
+                            >
+                              {b.reportName}
+                            </button>
+                          ) : (
+                            b.reportName
+                          )}
+                        </td>
                         <td className="col-wrap">
                           <button
                             type="button"

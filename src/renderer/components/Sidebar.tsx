@@ -24,7 +24,7 @@ interface Props {
 
 const groupLabels: Record<NonNullable<NavItem['group']>, string | null> = {
   dashboard: null,
-  workflow: 'Wizard',
+  workflow: 'Zapotrzebowanie',
   plan: 'Plan',
   tools: 'Narzędzia',
   catalog: 'Katalog',
@@ -56,9 +56,9 @@ const Sidebar: React.FC<Props> = ({ current, onSelect }) => {
     { key: 'stockImport', label: t.stockImport, icon: '⇪', group: 'workflow', step: 1 },
     { key: 'shortageReport', label: t.shortageReport, icon: '⚠', group: 'workflow', step: 2 },
     { key: 'emailGenerator', label: t.emailGenerator, icon: '✉', group: 'workflow', step: 3 },
-    { key: 'productionPlan', label: t.productionPlan, icon: '▤', group: 'plan' },
     { key: 'costCalculator', label: t.costCalculator, icon: '$', group: 'tools' },
     { key: 'maxProducible', label: t.maxProducible, icon: '∞', group: 'tools' },
+    { key: 'productionPlan', label: t.productionPlan, icon: '▤', group: 'plan' },
     { key: 'products', label: t.products, icon: '◐', group: 'catalog' },
     { key: 'rawMaterials', label: t.rawMaterials, icon: '⬡', group: 'catalog' },
     { key: 'components', label: t.components, icon: '▦', group: 'catalog' },

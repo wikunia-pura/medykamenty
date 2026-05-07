@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type {
   ProductionPlan,
   ProductionPlanItem,
@@ -22,6 +22,8 @@ interface Props {
   onEnterEdit?: () => void;
 }
 
+type Tab = 'items' | 'bulk';
+
 const PlanEditorModal: React.FC<Props> = ({
   editing,
   products,
@@ -35,37 +37,53 @@ const PlanEditorModal: React.FC<Props> = ({
 
   useEscapeKey(onCancel);
 
+  const items = editing.items ?? [];
+  const bulkMass = editing.bulkMass ?? [];
+
+  const [activeTab, setActiveTab] = useState<Tab>(
+    items.length === 0 && bulkMass.length > 0 ? 'bulk' : 'items',
+  );
+
   const updateItem = (idx: number, patch: Partial<ProductionPlanItem>) => {
-    const next = (editing.items ?? []).slice();
+    const next = items.slice();
     next[idx] = { ...next[idx], ...patch };
     setEditing({ ...editing, items: next });
   };
   const removeItem = (idx: number) => {
-    setEditing({ ...editing, items: (editing.items ?? []).filter((_, i) => i !== idx) });
+    setEditing({ ...editing, items: items.filter((_, i) => i !== idx) });
   };
   const addItem = () => {
     if (products.length === 0) return;
     setEditing({
       ...editing,
-      items: [...(editing.items ?? []), { productId: products[0].id, qtyUnits: 1000 }],
+      items: [...items, { productId: products[0].id, qtyUnits: 1000 }],
     });
   };
 
   const updateBulk = (idx: number, patch: Partial<BulkMassItem>) => {
-    const next = (editing.bulkMass ?? []).slice();
+    const next = bulkMass.slice();
     next[idx] = { ...next[idx], ...patch };
     setEditing({ ...editing, bulkMass: next });
   };
   const removeBulk = (idx: number) => {
-    setEditing({ ...editing, bulkMass: (editing.bulkMass ?? []).filter((_, i) => i !== idx) });
+    setEditing({ ...editing, bulkMass: bulkMass.filter((_, i) => i !== idx) });
   };
   const addBulk = () => {
     if (products.length === 0) return;
     setEditing({
       ...editing,
-      bulkMass: [...(editing.bulkMass ?? []), { productId: products[0].id, massKg: 10 }],
+      bulkMass: [...bulkMass, { productId: products[0].id, massKg: 10 }],
     });
   };
+
+  const productOptions = products.map((p) => ({
+    value: p.id,
+    label: p.name,
+    hint: `${p.capacityMl} ml`,
+  }));
+
+  const totalUnits = items.reduce((acc, it) => acc + (it.qtyUnits || 0), 0);
+  const totalKg = bulkMass.reduce((acc, b) => acc + (b.massKg || 0), 0);
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
@@ -93,175 +111,198 @@ const PlanEditorModal: React.FC<Props> = ({
           }
           subtitle={
             editing.id
-              ? t.productionPlan
+              ? undefined
               : 'Zaplanuj produkcję: dodaj produkty pakowane oraz, opcjonalnie, masę luzem.'
           }
           onClose={onCancel}
         />
 
-        <div className="modal-body">
-          <div className="modal-section">
-            <div className="modal-section-header">
-              <h3 className="modal-section-title">{t.planName}</h3>
-            </div>
-            <input
-              className="input"
-              placeholder={t.planName}
-              value={editing.name ?? ''}
-              onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-              disabled={readOnly}
-            />
-            {editing.id && (editing.createdAt || editing.updatedAt) && (
-              <div className="hint" style={{ marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                {editing.createdAt && (
-                  <span>
-                    {t.planCreatedAt}: {new Date(editing.createdAt).toLocaleString()}
-                  </span>
-                )}
-                {editing.updatedAt && (
-                  <span>
-                    {t.planUpdatedAt}: {new Date(editing.updatedAt).toLocaleString()}
-                  </span>
-                )}
-              </div>
+        {editing.id && (editing.createdAt || editing.updatedAt) && (
+          <div className="modal-meta-strip">
+            {editing.createdAt && (
+              <span>
+                <span className="hint">{t.planCreatedAt}:</span>{' '}
+                {new Date(editing.createdAt).toLocaleString()}
+              </span>
+            )}
+            {editing.updatedAt && (
+              <span>
+                <span className="hint">{t.planUpdatedAt}:</span>{' '}
+                {new Date(editing.updatedAt).toLocaleString()}
+              </span>
             )}
           </div>
+        )}
 
+        <div className="modal-body">
           <div className="modal-section">
-            <div className="modal-section-header">
-              <div>
-                <h3 className="modal-section-title">{t.planItems}</h3>
-                <div className="hint" style={{ marginTop: 2 }}>
-                  Produkty gotowe do pakowania w sztukach.
-                </div>
-              </div>
-              {!readOnly && (
-                <button
-                  className="btn btn-sm soft-edit"
-                  onClick={addItem}
-                  disabled={products.length === 0}
-                >
-                  <IconPlus size={13} /> {t.add}
-                </button>
-              )}
+            <div className="form-row">
+              <label>{t.planName}</label>
+              <input
+                className="input"
+                placeholder={t.planName}
+                value={editing.name ?? ''}
+                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                disabled={readOnly}
+              />
             </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t.products}</th>
-                  <th className="num">{t.quantity}</th>
-                  {!readOnly && <th className="actions">{t.actionsHeader}</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {(editing.items ?? []).length === 0 && (
-                  <tr>
-                    <td colSpan={readOnly ? 2 : 3} className="hint">
-                      {t.noData}
-                    </td>
-                  </tr>
-                )}
-                {(editing.items ?? []).map((item, idx) => (
-                  <tr key={idx}>
-                    <td>
-                      <SearchableSelect
-                        options={products.map((p) => ({
-                          value: p.id,
-                          label: p.name,
-                          hint: `(${p.capacityMl} ml)`,
-                        }))}
-                        value={item.productId}
-                        onChange={(val) => updateItem(idx, { productId: val })}
-                        placeholder={t.search}
-                        disabled={readOnly}
-                      />
-                    </td>
-                    <td className="num">
-                      <NumberInput
-                        className="input"
-                        style={{ width: 120 }}
-                        value={item.qtyUnits}
-                        emptyValue={0}
-                        onChange={(v) => updateItem(idx, { qtyUnits: v ?? 0 })}
-                        disabled={readOnly}
-                      />
-                    </td>
-                    {!readOnly && (
-                      <td className="actions">
-                        <button
-                          className="btn btn-sm soft-danger btn-icon-only"
-                          onClick={() => removeItem(idx)}
-                          title={t.delete}
-                        >
-                          <IconClose size={12} />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
 
           <div className="modal-section">
-            <div className="modal-section-header">
-              <div>
-                <h3 className="modal-section-title">{t.bulkMass}</h3>
-                <div className="hint" style={{ marginTop: 2 }}>
-                  Masa luzem (np. saszetki, hurt) — w kilogramach.
+            <div className="modal-tabs">
+              <button
+                type="button"
+                className={`modal-tab ${activeTab === 'items' ? 'active' : ''}`}
+                onClick={() => setActiveTab('items')}
+              >
+                <span>{t.planItems}</span>
+                <span className="modal-tab-count">{items.length}</span>
+              </button>
+              <button
+                type="button"
+                className={`modal-tab ${activeTab === 'bulk' ? 'active' : ''}`}
+                onClick={() => setActiveTab('bulk')}
+              >
+                <span>{t.bulkMass}</span>
+                <span className="modal-tab-count">{bulkMass.length}</span>
+              </button>
+              <div className="modal-tabs-spacer" />
+              <div className="modal-tabs-actions">
+                {activeTab === 'items' ? (
+                  <>
+                    {items.length > 0 && (
+                      <span className="tag">
+                        Σ {totalUnits.toLocaleString()} szt.
+                      </span>
+                    )}
+                    {!readOnly && (
+                      <button
+                        className="btn btn-sm soft-edit"
+                        onClick={addItem}
+                        disabled={products.length === 0}
+                      >
+                        <IconPlus size={13} /> {t.add}
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {bulkMass.length > 0 && (
+                      <span className="tag">Σ {totalKg.toFixed(2)} kg</span>
+                    )}
+                    {!readOnly && (
+                      <button
+                        className="btn btn-sm soft-edit"
+                        onClick={addBulk}
+                        disabled={products.length === 0}
+                      >
+                        <IconPlus size={13} /> {t.add}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            {activeTab === 'items' ? (
+              items.length === 0 ? (
+                <div className="plan-empty-state">
+                  <div className="plan-empty-state-icon" aria-hidden>
+                    📦
+                  </div>
+                  <div className="plan-empty-state-text">
+                    {readOnly
+                      ? t.noData
+                      : 'Brak produktów. Dodaj pierwszy, aby zaplanować pakowanie.'}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="plan-rows-header">
+                    <span>{t.products}</span>
+                    <span>{t.quantity}</span>
+                    {!readOnly && <span aria-hidden />}
+                  </div>
+                  <div className="plan-rows">
+                    {items.map((item, idx) => (
+                      <div className="plan-row" key={idx}>
+                        <div className="plan-row-product">
+                          <SearchableSelect
+                            options={productOptions}
+                            value={item.productId}
+                            onChange={(val) => updateItem(idx, { productId: val })}
+                            placeholder={t.search}
+                            disabled={readOnly}
+                          />
+                        </div>
+                        <div className="plan-row-qty">
+                          <NumberInput
+                            className="input"
+                            style={{ width: 120 }}
+                            value={item.qtyUnits}
+                            emptyValue={0}
+                            onChange={(v) => updateItem(idx, { qtyUnits: v ?? 0 })}
+                            disabled={readOnly}
+                          />
+                          <span className="plan-row-unit">szt.</span>
+                        </div>
+                        {!readOnly && (
+                          <button
+                            className="btn btn-sm soft-danger btn-icon-only"
+                            onClick={() => removeItem(idx)}
+                            title={t.delete}
+                          >
+                            <IconClose size={12} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )
+            ) : bulkMass.length === 0 ? (
+              <div className="plan-empty-state">
+                <div className="plan-empty-state-icon" aria-hidden>
+                  ⚖️
+                </div>
+                <div className="plan-empty-state-text">
+                  {readOnly
+                    ? t.noData
+                    : 'Brak masy luzem. Dodaj jeśli planujesz hurt lub saszetki.'}
                 </div>
               </div>
-              {!readOnly && (
-                <button
-                  className="btn btn-sm soft-edit"
-                  onClick={addBulk}
-                  disabled={products.length === 0}
-                >
-                  <IconPlus size={13} /> {t.add}
-                </button>
-              )}
-            </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t.products}</th>
-                  <th className="num">{t.bulkMass}</th>
-                  {!readOnly && <th className="actions">{t.actionsHeader}</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {(editing.bulkMass ?? []).length === 0 && (
-                  <tr>
-                    <td colSpan={readOnly ? 2 : 3} className="hint">
-                      {t.noData}
-                    </td>
-                  </tr>
-                )}
-                {(editing.bulkMass ?? []).map((bm, idx) => (
-                  <tr key={idx}>
-                    <td>
-                      <SearchableSelect
-                        options={products.map((p) => ({ value: p.id, label: p.name }))}
-                        value={bm.productId}
-                        onChange={(val) => updateBulk(idx, { productId: val })}
-                        placeholder={t.search}
-                        disabled={readOnly}
-                      />
-                    </td>
-                    <td className="num">
-                      <NumberInput
-                        className="input"
-                        step="0.1"
-                        style={{ width: 100 }}
-                        value={bm.massKg}
-                        emptyValue={0}
-                        onChange={(v) => updateBulk(idx, { massKg: v ?? 0 })}
-                        disabled={readOnly}
-                      />{' '}
-                      kg
-                    </td>
-                    {!readOnly && (
-                      <td className="actions">
+            ) : (
+              <>
+                <div className="plan-rows-header">
+                  <span>{t.products}</span>
+                  <span>{t.bulkMass}</span>
+                  {!readOnly && <span aria-hidden />}
+                </div>
+                <div className="plan-rows">
+                  {bulkMass.map((bm, idx) => (
+                    <div className="plan-row" key={idx}>
+                      <div className="plan-row-product">
+                        <SearchableSelect
+                          options={productOptions}
+                          value={bm.productId}
+                          onChange={(val) => updateBulk(idx, { productId: val })}
+                          placeholder={t.search}
+                          disabled={readOnly}
+                        />
+                      </div>
+                      <div className="plan-row-qty">
+                        <NumberInput
+                          className="input"
+                          step="0.1"
+                          style={{ width: 120 }}
+                          value={bm.massKg}
+                          emptyValue={0}
+                          onChange={(v) => updateBulk(idx, { massKg: v ?? 0 })}
+                          disabled={readOnly}
+                        />
+                        <span className="plan-row-unit">kg</span>
+                      </div>
+                      {!readOnly && (
                         <button
                           className="btn btn-sm soft-danger btn-icon-only"
                           onClick={() => removeBulk(idx)}
@@ -269,33 +310,40 @@ const PlanEditorModal: React.FC<Props> = ({
                         >
                           <IconClose size={12} />
                         </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
         <div className="modal-footer">
-          <button className="btn" onClick={onCancel}>
-            {readOnly ? t.close : t.cancel}
-          </button>
           {readOnly ? (
-            onEnterEdit && (
-              <button className="btn primary-filled" onClick={onEnterEdit}>
-                <IconEdit size={13} /> {t.edit}
+            <>
+              {onEnterEdit && (
+                <button className="btn" onClick={onEnterEdit}>
+                  <IconEdit size={13} /> {t.edit}
+                </button>
+              )}
+              <button className="btn primary-filled" onClick={onCancel}>
+                {t.close}
               </button>
-            )
+            </>
           ) : (
-            <button
-              className="btn primary-filled"
-              onClick={() => void onSave()}
-              disabled={!editing.name?.trim()}
-            >
-              {t.save}
-            </button>
+            <>
+              <button className="btn" onClick={onCancel}>
+                {t.cancel}
+              </button>
+              <button
+                className="btn primary-filled"
+                onClick={() => void onSave()}
+                disabled={!editing.name?.trim()}
+              >
+                {t.save}
+              </button>
+            </>
           )}
         </div>
       </div>

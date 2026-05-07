@@ -48,6 +48,8 @@ function createWindow(): void {
     },
   });
 
+  mainWindow.maximize();
+
   if (app.isPackaged) {
     mainWindow.loadFile(path.join(__dirname, '..', '..', 'renderer', 'index.html'));
   } else {
@@ -98,6 +100,19 @@ function setupAutoUpdater(): void {
   }
 }
 
+function ensureAutoLaunch(): void {
+  if (!app.isPackaged) return;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: true,
+      openAsHidden: false,
+      ...(process.platform === 'win32' ? { path: process.execPath, args: [] } : {}),
+    });
+  } catch (err) {
+    log.warn('Failed to set login item:', err);
+  }
+}
+
 app.whenReady().then(() => {
   if (process.platform === 'darwin') {
     const iconPath = resolveIconPath();
@@ -109,6 +124,7 @@ app.whenReady().then(() => {
       }
     }
   }
+  ensureAutoLaunch();
   database = new Database();
   registerIpcHandlers(database, () => mainWindow);
   setupAutoUpdater();

@@ -13,8 +13,8 @@ import Components from './views/Components';
 import Suppliers from './views/Suppliers';
 import StockImport from './views/StockImport';
 import ProductionPlanView from './views/ProductionPlan';
-import ShortageReportView from './views/ShortageReport';
-import EmailGenerator from './views/EmailGenerator';
+import ShortageReportView, { resetShortageReportFocus } from './views/ShortageReport';
+import EmailGenerator, { resetEmailGeneratorFocus } from './views/EmailGenerator';
 import CostCalculatorView from './views/CostCalculator';
 import MaxProducibleView from './views/MaxProducible';
 import Settings from './views/Settings';
@@ -31,6 +31,7 @@ const App: React.FC = () => {
   const view = nav.stack[nav.index];
   const canGoBack = nav.index > 0;
   const canGoForward = nav.index < nav.stack.length - 1;
+  const [sidebarTick, setSidebarTick] = useState(0);
 
   const setView = (next: ViewKey) => {
     setNav((prev) => {
@@ -43,6 +44,13 @@ const App: React.FC = () => {
       }
       return { stack, index: stack.length - 1 };
     });
+  };
+
+  const handleSidebarSelect = (next: ViewKey) => {
+    resetShortageReportFocus();
+    resetEmailGeneratorFocus();
+    setSidebarTick((n) => n + 1);
+    setView(next);
   };
 
   const goBack = () =>
@@ -181,6 +189,7 @@ const App: React.FC = () => {
       case 'shortageReport':
         return (
           <ShortageReportView
+            key={`shortageReport-${sidebarTick}`}
             selectedPlanId={selectedPlanId}
             onSelectPlan={setSelectedPlanId}
             onNavigate={setView}
@@ -192,6 +201,7 @@ const App: React.FC = () => {
       case 'emailGenerator':
         return (
           <EmailGenerator
+            key={`emailGenerator-${sidebarTick}`}
             defaultLanguage={settings.defaultEmailLanguage}
             aiAvailable={aiAvailable}
             useAiByDefault={settings.llm.useByDefault}
@@ -200,6 +210,7 @@ const App: React.FC = () => {
             autoGenerate={autoGenerateEmails}
             onAutoGenerateConsumed={() => setAutoGenerateEmails(false)}
             onNavigate={setView}
+            onNavigateToReport={navigateToReport}
             focusBatchId={focusBatchId}
             onFocusBatchConsumed={() => setFocusBatchId('')}
           />
@@ -224,7 +235,7 @@ const App: React.FC = () => {
           goForward={goForward}
         >
           <div className="app-body">
-            <Sidebar current={view} onSelect={setView} />
+            <Sidebar current={view} onSelect={handleSidebarSelect} />
             {renderView()}
           </div>
         </NavigationProvider>

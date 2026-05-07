@@ -9,6 +9,7 @@ import { useT } from '../i18n';
 import { IconPlus, IconClose } from './Icons';
 import SearchableSelect from './SearchableSelect';
 import NumberInput from './NumberInput';
+import HoverTooltip from './HoverTooltip';
 
 interface Props {
   rawMaterials: RawMaterial[];
@@ -92,9 +93,16 @@ const RecipeEditor: React.FC<Props> = ({
     <div>
       <div className="row" style={{ marginBottom: 12 }}>
         <strong>{t.ingredients}</strong>
-        <span className={overflow ? 'error-text' : underflow ? 'warn-text' : 'hint'}>
-          Σ {sumPercent.toFixed(2)} %
-        </span>
+        {overflow || underflow ? (
+          <HoverTooltip
+            triggerClassName={`recipe-sum-pct ${overflow ? 'error-text' : 'warn-text'}`}
+            trigger={<>Σ {sumPercent.toFixed(2)} %</>}
+          >
+            <div>{overflow ? t.recipeSumError : t.recipeSumWarning}</div>
+          </HoverTooltip>
+        ) : (
+          <span className="hint">Σ {sumPercent.toFixed(2)} %</span>
+        )}
         <div className="spacer" />
         {!readOnly && (
           <button
@@ -106,8 +114,6 @@ const RecipeEditor: React.FC<Props> = ({
           </button>
         )}
       </div>
-      {overflow && <div className="error-text">{t.recipeSumError}</div>}
-      {underflow && !overflow && <div className="warn-text hint">{t.recipeSumWarning}</div>}
 
       <table className="table" style={{ marginBottom: 16 }}>
         <thead>

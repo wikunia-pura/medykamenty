@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
-import { HeaderNav } from '../navigation';
+import { HeaderNav, useNavigation } from '../navigation';
 import type {
   ProductionPlan,
   Product,
@@ -35,10 +35,15 @@ interface FocusState {
   reportName: string;
   entryId: string | null;
   mode: ReportMode;
+  originFromNav?: boolean;
 }
 
 // Module-level cache so the focused report survives navigating away and back.
 const cache: { focus: FocusState | null } = { focus: null };
+
+export const resetShortageReportFocus = () => {
+  cache.focus = null;
+};
 
 const ShortageReportView: React.FC<Props> = ({
   selectedPlanId,
@@ -49,6 +54,7 @@ const ShortageReportView: React.FC<Props> = ({
   onFocusReportConsumed,
 }) => {
   const t = useT();
+  const navCtx = useNavigation();
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [focus, setFocus] = useState<FocusState | null>(cache.focus);
@@ -106,7 +112,7 @@ const ShortageReportView: React.FC<Props> = ({
     if (!focusReportId) return;
     const entry = history.find((e) => e.id === focusReportId);
     if (entry) {
-      openEntry(entry, 'preview');
+      openEntry(entry, 'preview', true);
       onFocusReportConsumed?.();
     }
   }, [focusReportId, history]);
@@ -209,7 +215,11 @@ const ShortageReportView: React.FC<Props> = ({
     }
   };
 
-  const openEntry = (entry: ShortageReportEntry, mode: ReportMode) => {
+  const openEntry = (
+    entry: ShortageReportEntry,
+    mode: ReportMode,
+    originFromNav = false,
+  ) => {
     onSelectPlan(entry.planId);
     setError(null);
     setFocusAndCache({
@@ -219,6 +229,7 @@ const ShortageReportView: React.FC<Props> = ({
       reportName: entry.reportName,
       entryId: entry.id,
       mode,
+      originFromNav,
     });
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -228,6 +239,14 @@ const ShortageReportView: React.FC<Props> = ({
   const exitFocus = () => {
     setFocusAndCache(null);
     setError(null);
+  };
+
+  const handleBack = () => {
+    if (focus?.originFromNav && navCtx?.canGoBack) {
+      navCtx.goBack();
+    } else {
+      exitFocus();
+    }
   };
 
   const commitTitleRename = async () => {
@@ -271,10 +290,12 @@ const ShortageReportView: React.FC<Props> = ({
   // ----- Focused view (compute / edit / preview a single report) -----
   if (focus) {
     const { report, mode, reportName } = focus;
+    const livePlanName =
+      plans.find((p) => p.id === focus.planId)?.name ?? focus.planName;
     return (
       <div className="main">
         <div className="focus-bar">
-          <button className="btn" onClick={exitFocus} title={t.backToList}>
+          <button className="btn" onClick={handleBack} title={t.backToList}>
             <IconArrowLeft size={14} /> {t.backToList}
           </button>
           <div className="focus-bar-text">
@@ -305,20 +326,24 @@ const ShortageReportView: React.FC<Props> = ({
                 <IconEdit size={13} className="focus-bar-title-pencil" />
               </h1>
             )}
+            {focus.planId && livePlanName && (
+              <span className="focus-bar-meta">
+                <span className="hint">{t.selectedPlan}:</span>{' '}
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => openPlanModal(focus.planId)}
+                  title={t.openPlan}
+                >
+                  {livePlanName}
+                </button>
+              </span>
+            )}
             <span className={`tag ${mode === 'edit' ? 'warn' : ''}`}>
               {mode === 'edit' ? t.editMode : t.previewMode}
             </span>
           </div>
           <div className="btn-row">
-            {focus.planId && (
-              <button
-                className="btn"
-                onClick={() => openPlanModal(focus.planId)}
-                title={t.openPlan}
-              >
-                {t.openPlan}
-              </button>
-            )}
             {mode === 'preview' && (
               <button
                 className="btn primary"
@@ -460,6 +485,18 @@ const ShortageReportView: React.FC<Props> = ({
             </span>
             <span className="floating-next-arrow">→</span>
           </button>
+        )}
+
+        {editingPlan && (
+          <PlanEditorModal
+            editing={editingPlan}
+            products={products}
+            setEditing={setEditingPlan}
+            onCancel={closePlanModal}
+            onSave={savePlan}
+            readOnly={planModalReadOnly}
+            onEnterEdit={() => setPlanModalReadOnly(false)}
+          />
         )}
       </div>
     );

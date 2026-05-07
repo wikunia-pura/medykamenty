@@ -19,6 +19,9 @@ export const NavigationProvider: React.FC<
   </NavigationContext.Provider>
 );
 
+export const useNavigation = (): NavigationContextValue | null =>
+  useContext(NavigationContext);
+
 export const HeaderNav: React.FC = () => {
   const ctx = useContext(NavigationContext);
   const t = useT();
