@@ -54,7 +54,6 @@ function createWindow(): void {
     mainWindow.loadFile(path.join(__dirname, '..', '..', 'renderer', 'index.html'));
   } else {
     mainWindow.loadURL(DEV_SERVER_URL);
-    mainWindow.webContents.openDevTools();
   }
 
   mainWindow.on('closed', () => {
