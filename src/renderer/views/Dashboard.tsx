@@ -103,6 +103,14 @@ const Dashboard: React.FC<Props> = ({ onNavigate, onNavigateToReport }) => {
             <h1 className="dashboard-welcome-title">{greeting}</h1>
             <p className="dashboard-welcome-tagline">{t.dashboardWelcomeTagline}</p>
           </div>
+          <blockquote className="dashboard-welcome-motto" aria-label="Motto">
+            <span className="dashboard-welcome-motto-intro">
+              {t.dashboardWelcomeMottoIntro}
+            </span>
+            <span className="dashboard-welcome-motto-quote">
+              {t.dashboardWelcomeMotto}
+            </span>
+          </blockquote>
         </section>
         <aside className="dashboard-welcome-image" aria-hidden>
           <img src={drugsUrl} alt="" className="dashboard-welcome-image-img" />

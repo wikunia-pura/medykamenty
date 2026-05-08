@@ -203,6 +203,8 @@ export interface T {
   dashboardWelcomeEvening: string;
   dashboardWelcomeNight: string;
   dashboardWelcomeTagline: string;
+  dashboardWelcomeMottoIntro: string;
+  dashboardWelcomeMotto: string;
   // Demo
   loadDemoTitle: string;
   loadDemoBody: string;
@@ -470,6 +472,8 @@ const pl: T = {
   dashboardWelcomeEvening: 'Dobry wieczór',
   dashboardWelcomeNight: 'Pracujesz po nocy?',
   dashboardWelcomeTagline: 'Zaplanuj produkcję, sprawdź braki, wyślij maile RFQ — wszystko w jednym miejscu.',
+  dashboardWelcomeMottoIntro: 'Pracuj z uśmiechem i powtarzaj nasze motto:',
+  dashboardWelcomeMotto: 'Od jednego strzała jeszcze nikt się nie uzależnił',
   loadDemoTitle: 'Dane demo',
   loadDemoBody:
     'Wczytuje fikcyjną firmę: 4 dostawców, 7 surowców (z jednym fabrycznym i jednym pustym), 3 komponenty, jeden produkt z recepturą, gotowy plan na 1000 sztuk i stany magazynowe. Po wczytaniu od razu można obliczyć zapotrzebowanie i wygenerować maile.',
@@ -733,6 +737,8 @@ const en: T = {
   dashboardWelcomeEvening: 'Good evening',
   dashboardWelcomeNight: 'Burning the midnight oil?',
   dashboardWelcomeTagline: 'Plan production, spot shortages, send RFQ emails — all in one place.',
+  dashboardWelcomeMottoIntro: 'Pracuj z uśmiechem i powtarzaj nasze motto:',
+  dashboardWelcomeMotto: 'Od jednego strzała jeszcze nikt się nie uzależnił',
   loadDemoTitle: 'Demo data',
   loadDemoBody:
     'Loads a fictional company: 4 suppliers, 7 raw materials (one factory-supplied and one out of stock), 3 components, one product with a recipe, a ready plan for 1000 units, and stock snapshots. After loading you can compute shortages and generate emails right away.',
