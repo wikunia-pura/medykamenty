@@ -18,6 +18,7 @@ import EmailGenerator, { resetEmailGeneratorFocus } from './views/EmailGenerator
 import CostCalculatorView from './views/CostCalculator';
 import MaxProducibleView from './views/MaxProducible';
 import Settings from './views/Settings';
+import Login from './views/Login';
 
 const NAV_STACK_LIMIT = 50;
 
@@ -71,6 +72,44 @@ const App: React.FC = () => {
   const [planSearchQuery, setPlanSearchQuery] = useState<string>('');
   const [focusReportId, setFocusReportId] = useState<string>('');
   const [focusBatchId, setFocusBatchId] = useState<string>('');
+  const [session, setSession] = useState<{ email: string; userId: string } | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const [migrationInfo, setMigrationInfo] = useState<{
+    hasLocalData: boolean;
+    migrated: boolean;
+  } | null>(null);
+
+  const handleSignedIn = async () => {
+    const s = await window.electronAPI.authGetSession();
+    setSession(s);
+  };
+
+  const handleSignOut = async () => {
+    await window.electronAPI.authSignOut();
+    setSession(null);
+  };
+
+  const handleRunMigration = async () => {
+    if (!migrationInfo) return;
+    const result = await window.electronAPI.migrationRun();
+    if (result.ok) {
+      alert(
+        `Przeniesiono do chmury:\n` +
+          `• Dostawcy: ${result.counts.suppliers}\n` +
+          `• Surowce: ${result.counts.rawMaterials}\n` +
+          `• Komponenty: ${result.counts.components}\n` +
+          `• Produkty: ${result.counts.products}\n` +
+          `• Plany: ${result.counts.productionPlans}\n` +
+          `• Snapshoty: ${result.counts.stockSnapshots}\n` +
+          `• Raporty: ${result.counts.shortageReports}\n` +
+          `• Maile RFQ: ${result.counts.emailBatches}`,
+      );
+      const fresh = await window.electronAPI.migrationGetStatus();
+      setMigrationInfo({ hasLocalData: fresh.hasLocalData, migrated: fresh.migrated });
+    } else {
+      alert(`Błąd migracji:\n${result.error}`);
+    }
+  };
 
   const navigateToEmails = (reportId: string) => {
     if (reportId) setSelectedReportId(reportId);
@@ -122,6 +161,8 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // Load local settings (dark mode, language) + version immediately so the
+  // login screen respects them — these don't require a session.
   useEffect(() => {
     void (async () => {
       try {
@@ -139,13 +180,32 @@ const App: React.FC = () => {
         console.error('Failed to load version', err);
       }
       try {
+        const s = await window.electronAPI.authGetSession();
+        setSession(s);
+      } finally {
+        setSessionChecked(true);
+      }
+    })();
+  }, []);
+
+  // After signing in, fetch AI availability + migration status (these need DB / auth).
+  useEffect(() => {
+    if (!session) return;
+    void (async () => {
+      try {
         const ai = await window.electronAPI.isAiAvailable();
         setAiAvailable(ai.available);
       } catch (err) {
         console.error('Failed to query AI availability', err);
       }
+      try {
+        const m = await window.electronAPI.migrationGetStatus();
+        setMigrationInfo({ hasLocalData: m.hasLocalData, migrated: m.migrated });
+      } catch (err) {
+        console.error('Failed to query migration status', err);
+      }
     })();
-  }, []);
+  }, [session]);
 
   const setLang = async (newLang: Lang) => {
     setLangState(newLang);
@@ -224,10 +284,43 @@ const App: React.FC = () => {
     }
   };
 
+  if (!sessionChecked) {
+    return <div className="app" />;
+  }
+
+  if (!session) {
+    return (
+      <I18nProvider lang={lang} setLang={setLang}>
+        <div className="app">
+          <Login onSignedIn={handleSignedIn} />
+        </div>
+      </I18nProvider>
+    );
+  }
+
   return (
     <I18nProvider lang={lang} setLang={setLang}>
       <div className="app">
         <UpdateNotification />
+        {migrationInfo && migrationInfo.hasLocalData && !migrationInfo.migrated && (
+          <div
+            style={{
+              padding: '12px 16px',
+              background: '#fff3cd',
+              color: '#664d03',
+              borderBottom: '1px solid #ffe69c',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            <span>
+              Wykryto dane z poprzedniej wersji aplikacji. Prześlij je raz do chmury, aby były
+              współdzielone z innymi użytkownikami.
+            </span>
+            <button onClick={handleRunMigration}>Prześlij dane do chmury</button>
+          </div>
+        )}
         <NavigationProvider
           canGoBack={canGoBack}
           canGoForward={canGoForward}
@@ -235,7 +328,12 @@ const App: React.FC = () => {
           goForward={goForward}
         >
           <div className="app-body">
-            <Sidebar current={view} onSelect={handleSidebarSelect} />
+            <Sidebar
+              current={view}
+              onSelect={handleSidebarSelect}
+              userEmail={session.email}
+              onSignOut={handleSignOut}
+            />
             {renderView()}
           </div>
         </NavigationProvider>

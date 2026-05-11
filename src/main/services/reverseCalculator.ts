@@ -13,14 +13,14 @@ function buildIndex(rows: StockRow[] | undefined, by: 'raw' | 'component'): Map<
   return map;
 }
 
-export function maxProducible(productId: string, db: Database): MaxProducibleResult {
-  const product = db.getProduct(productId);
+export async function maxProducible(productId: string, db: Database): Promise<MaxProducibleResult> {
+  const product = await db.getProduct(productId);
   if (!product) throw new Error(`Product ${productId} not found`);
 
   const settings = db.getSettings();
   const W = settings.wasteFactor;
-  const rawSnapshot = db.getCurrentSnapshot('raw');
-  const compSnapshot = db.getCurrentSnapshot('component');
+  const rawSnapshot = await db.getCurrentSnapshot('raw');
+  const compSnapshot = await db.getCurrentSnapshot('component');
   const rawIndex = buildIndex(rawSnapshot?.rows, 'raw');
   const compIndex = buildIndex(compSnapshot?.rows, 'component');
 
@@ -28,7 +28,7 @@ export function maxProducible(productId: string, db: Database): MaxProducibleRes
   const bottlenecks: MaxProducibleResult['bottlenecks'] = [];
 
   for (const ing of product.ingredients) {
-    const rm = db.getRawMaterial(ing.rawMaterialId);
+    const rm = await db.getRawMaterial(ing.rawMaterialId);
     if (!rm) continue;
     if (rm.factorySupplied) continue;
     const gPerUnit = massPerUnitG * (ing.percentage / 100) * W;
@@ -50,7 +50,7 @@ export function maxProducible(productId: string, db: Database): MaxProducibleRes
   }
 
   for (const pkg of product.packaging) {
-    const comp = db.getComponent(pkg.componentId);
+    const comp = await db.getComponent(pkg.componentId);
     if (!comp) continue;
     if (pkg.qtyPerUnit <= 0) continue;
     const available = compIndex.get(comp.id) ?? 0;

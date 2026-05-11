@@ -20,6 +20,8 @@ interface NavItem {
 interface Props {
   current: ViewKey;
   onSelect: (key: ViewKey) => void;
+  userEmail?: string;
+  onSignOut?: () => void;
 }
 
 const groupLabels: Record<NonNullable<NavItem['group']>, string | null> = {
@@ -33,7 +35,7 @@ const groupLabels: Record<NonNullable<NavItem['group']>, string | null> = {
 
 const STORAGE_KEY = 'sidebar.collapsed';
 
-const Sidebar: React.FC<Props> = ({ current, onSelect }) => {
+const Sidebar: React.FC<Props> = ({ current, onSelect, userEmail, onSignOut }) => {
   const t = useT();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -130,6 +132,22 @@ const Sidebar: React.FC<Props> = ({ current, onSelect }) => {
             );
           })}
         </div>
+        {userEmail && onSignOut && (
+          <div className="sidebar-account">
+            <div className="sidebar-account-email" title={userEmail}>
+              {userEmail}
+            </div>
+            <button
+              type="button"
+              className="sidebar-account-signout"
+              onClick={onSignOut}
+              title="Wyloguj"
+            >
+              <span className="nav-icon">⎋</span>
+              <span className="nav-label">Wyloguj</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

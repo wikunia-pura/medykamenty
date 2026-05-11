@@ -26,19 +26,19 @@ function buildStockIndex(
   return map;
 }
 
-export function computeShortages(planId: string, db: Database): ShortageReport {
-  const plan = db.getPlan(planId);
+export async function computeShortages(planId: string, db: Database): Promise<ShortageReport> {
+  const plan = await db.getPlan(planId);
   if (!plan) throw new Error(`Plan ${planId} not found`);
 
   const settings = db.getSettings();
   const W = settings.wasteFactor;
-  const products = new Map(db.listProducts().map((p) => [p.id, p]));
-  const rawMaterials = new Map(db.listRawMaterials().map((r) => [r.id, r]));
-  const components = new Map(db.listComponents().map((c) => [c.id, c]));
-  const suppliers = new Map(db.listSuppliers().map((s) => [s.id, s]));
+  const products = new Map((await db.listProducts()).map((p) => [p.id, p]));
+  const rawMaterials = new Map((await db.listRawMaterials()).map((r) => [r.id, r]));
+  const components = new Map((await db.listComponents()).map((c) => [c.id, c]));
+  const suppliers = new Map((await db.listSuppliers()).map((s) => [s.id, s]));
 
-  const rawSnapshot = db.getCurrentSnapshot('raw');
-  const compSnapshot = db.getCurrentSnapshot('component');
+  const rawSnapshot = await db.getCurrentSnapshot('raw');
+  const compSnapshot = await db.getCurrentSnapshot('component');
   const rawStockKgIndex = buildStockIndex(rawSnapshot, 'raw');
   const compStockUnitsIndex = buildStockIndex(compSnapshot, 'component');
 

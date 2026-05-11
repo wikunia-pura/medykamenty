@@ -3,13 +3,13 @@ import type { CostReport, CostBreakdownLine } from '../../shared/types';
 import { pricePerGram } from '../utils/units';
 import { nowIso } from '../utils/id';
 
-export function computeCost(planId: string, db: Database): CostReport {
-  const plan = db.getPlan(planId);
+export async function computeCost(planId: string, db: Database): Promise<CostReport> {
+  const plan = await db.getPlan(planId);
   if (!plan) throw new Error(`Plan ${planId} not found`);
 
-  const products = new Map(db.listProducts().map((p) => [p.id, p]));
-  const rawMaterials = new Map(db.listRawMaterials().map((r) => [r.id, r]));
-  const components = new Map(db.listComponents().map((c) => [c.id, c]));
+  const products = new Map((await db.listProducts()).map((p) => [p.id, p]));
+  const rawMaterials = new Map((await db.listRawMaterials()).map((r) => [r.id, r]));
+  const components = new Map((await db.listComponents()).map((c) => [c.id, c]));
 
   const perProduct: CostBreakdownLine[] = [];
   let totalPlanCost = 0;

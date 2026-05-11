@@ -99,4 +99,13 @@ export const IPC = {
   EVT_UPDATE_DOWNLOADED: 'update-downloaded',
   EVT_UPDATE_ERROR: 'update-error',
   EVT_DOWNLOAD_PROGRESS: 'download-progress',
+
+  // Auth (Supabase-backed)
+  AUTH_SIGN_IN: 'auth:sign-in',
+  AUTH_SIGN_OUT: 'auth:sign-out',
+  AUTH_GET_SESSION: 'auth:get-session',
+
+  // One-time local→cloud migration
+  MIGRATION_GET_STATUS: 'migration:get-status',
+  MIGRATION_RUN: 'migration:run',
 } as const;

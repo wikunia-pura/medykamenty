@@ -83,6 +83,12 @@ const CH = {
   APP_OPEN_EXTERNAL: 'app:open-external',
   APP_CHECK_UPDATES: 'app:check-updates',
   APP_DOWNLOAD_UPDATE: 'app:download-update',
+
+  AUTH_SIGN_IN: 'auth:sign-in',
+  AUTH_SIGN_OUT: 'auth:sign-out',
+  AUTH_GET_SESSION: 'auth:get-session',
+  MIGRATION_GET_STATUS: 'migration:get-status',
+  MIGRATION_RUN: 'migration:run',
 } as const;
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -229,6 +235,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Zoom (in-renderer only — uses webFrame, no IPC needed)
   getZoomFactor: () => webFrame.getZoomFactor(),
   setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
+
+  // Auth (Supabase)
+  authSignIn: (email: string, password: string) =>
+    ipcRenderer.invoke(CH.AUTH_SIGN_IN, email, password),
+  authSignOut: () => ipcRenderer.invoke(CH.AUTH_SIGN_OUT),
+  authGetSession: () => ipcRenderer.invoke(CH.AUTH_GET_SESSION),
+
+  // One-time local→cloud migration
+  migrationGetStatus: () => ipcRenderer.invoke(CH.MIGRATION_GET_STATUS),
+  migrationRun: () => ipcRenderer.invoke(CH.MIGRATION_RUN),
 
   platform: process.platform,
 });

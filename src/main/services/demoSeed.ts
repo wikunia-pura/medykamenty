@@ -18,9 +18,9 @@ export interface DemoSeedResult {
 // Names of raw materials and components match the test_data xlsx files, so the
 // matcher recognises them when the user later runs Stock Import on the real
 // xlsx (it will refresh prices and create a fresh snapshot).
-export function seedDemo(db: Database): DemoSeedResult {
+export async function seedDemo(db: Database): Promise<DemoSeedResult> {
   // Wipe everything except settings.
-  db.importAll(
+  await db.importAll(
     {
       schemaVersion: 1,
       suppliers: [],
@@ -35,27 +35,27 @@ export function seedDemo(db: Database): DemoSeedResult {
   );
 
   // ---- Suppliers ----
-  const surochem = db.createSupplier({
+  const surochem = await db.createSupplier({
     name: 'Surochem Sp. z o.o.',
     email: 'zamowienia@surochem.example',
     phone: '+48 22 555 01 01',
     notes: 'Surfaktanty: Rocamina, Plantapon, APG.',
     preferredEmailLanguage: 'pl',
   });
-  const cosmaterials = db.createSupplier({
+  const cosmaterials = await db.createSupplier({
     name: 'Cosmetic Materials Polska',
     email: 'sales@cosmaterials.example',
     phone: '+48 22 555 02 02',
     notes: 'Tłuszcze, masła, ekstrakty.',
     preferredEmailLanguage: 'pl',
   });
-  const glikole = db.createSupplier({
+  const glikole = await db.createSupplier({
     name: 'Glikole Polskie',
     email: 'biuro@glikole.example',
     notes: 'Glikol propylenowy farmaceutyczny — szybkie dostawy.',
     preferredEmailLanguage: 'pl',
   });
-  const pakelo = db.createSupplier({
+  const pakelo = await db.createSupplier({
     name: 'Pakelo Opakowania',
     email: 'biuro@pakelo.example',
     phone: '+48 22 555 04 04',
@@ -64,7 +64,7 @@ export function seedDemo(db: Database): DemoSeedResult {
   });
 
   // ---- Raw materials (names mirror MP Firma xlsx) ----
-  const rocamina = db.createRawMaterial({
+  const rocamina = await db.createRawMaterial({
     name: 'Rocamina',
     unit: 'kg',
     supplierIds: [surochem.id],
@@ -75,7 +75,7 @@ export function seedDemo(db: Database): DemoSeedResult {
     lastPurchasePriceNet: 12.6,
     currency: 'PLN',
   });
-  const plantapon = db.createRawMaterial({
+  const plantapon = await db.createRawMaterial({
     name: 'Plantapon',
     unit: 'kg',
     supplierIds: [surochem.id],
@@ -86,14 +86,14 @@ export function seedDemo(db: Database): DemoSeedResult {
     lastPurchasePriceNet: 18.46,
     currency: 'PLN',
   });
-  const apiscalp = db.createRawMaterial({
+  const apiscalp = await db.createRawMaterial({
     name: 'Apiscalp',
     unit: 'kg',
     supplierIds: [],
     factorySupplied: true,
     notes: 'Dostarczany przez fabrykę — pomijany w raporcie zapotrzebowania.',
   });
-  const sheaButter = db.createRawMaterial({
+  const sheaButter = await db.createRawMaterial({
     name: 'Shea butter care',
     unit: 'kg',
     supplierIds: [cosmaterials.id],
@@ -104,7 +104,7 @@ export function seedDemo(db: Database): DemoSeedResult {
     lastPurchasePriceNet: 19.75,
     currency: 'PLN',
   });
-  const tegoCare = db.createRawMaterial({
+  const tegoCare = await db.createRawMaterial({
     name: 'Tego care',
     unit: 'kg',
     supplierIds: [cosmaterials.id],
@@ -115,7 +115,7 @@ export function seedDemo(db: Database): DemoSeedResult {
     lastPurchasePriceNet: 113.17,
     currency: 'PLN',
   });
-  const sulfidal = db.createRawMaterial({
+  const sulfidal = await db.createRawMaterial({
     name: 'Sulfidal',
     unit: 'kg',
     supplierIds: [cosmaterials.id],
@@ -126,7 +126,7 @@ export function seedDemo(db: Database): DemoSeedResult {
     lastPurchasePriceNet: 386.73,
     currency: 'PLN',
   });
-  const glikol = db.createRawMaterial({
+  const glikol = await db.createRawMaterial({
     name: 'Glikol propylenowy farmaceutyczny',
     unit: 'kg',
     supplierIds: [glikole.id],
@@ -140,7 +140,7 @@ export function seedDemo(db: Database): DemoSeedResult {
   });
 
   // ---- Packaging components ----
-  const tubaE = db.createComponent({
+  const tubaE = await db.createComponent({
     name: 'Tuba Cutis E krem nowa',
     type: 'tube',
     supplierIds: [pakelo.id],
@@ -150,7 +150,7 @@ export function seedDemo(db: Database): DemoSeedResult {
     lastPurchasePriceNet: 0.92,
     currency: 'PLN',
   });
-  const kartonikE = db.createComponent({
+  const kartonikE = await db.createComponent({
     name: 'Kartonik produktowy Cutis E krem nowy',
     type: 'box',
     supplierIds: [pakelo.id],
@@ -160,7 +160,7 @@ export function seedDemo(db: Database): DemoSeedResult {
     lastPurchasePriceNet: 0.52,
     currency: 'PLN',
   });
-  const ulotkaE = db.createComponent({
+  const ulotkaE = await db.createComponent({
     name: 'Ulotka przyproduktowa Cutis E',
     type: 'leaflet',
     supplierIds: [pakelo.id],
@@ -174,7 +174,7 @@ export function seedDemo(db: Database): DemoSeedResult {
   // ---- Product with recipe ----
   // Sum of percentages = 90; the missing 10 % is "water to 100 %", ignored
   // (matches the realistic shampoo/cream recipe pattern from the brief).
-  const product = db.createProduct({
+  const product = await db.createProduct({
     name: 'Cutis E Krem (100 ml) — Demo',
     sku: 'DEMO-CUTIS-E-KREM-100',
     capacityMl: 100,
@@ -202,7 +202,7 @@ export function seedDemo(db: Database): DemoSeedResult {
   // ---- Stock snapshots that mirror test_data xlsx (so shortage flow works
   // immediately, even before the user runs the real Stock Import) ----
   const importedAt = nowIso();
-  db.addStockSnapshot({
+  await db.addStockSnapshot({
     id: newId(),
     importedAt,
     sourceFile: 'demo-magazyn-surowce.xlsx',
@@ -281,7 +281,7 @@ export function seedDemo(db: Database): DemoSeedResult {
     ],
   });
 
-  db.addStockSnapshot({
+  await db.addStockSnapshot({
     id: newId(),
     importedAt,
     sourceFile: 'demo-magazyn-komponenty.xlsx',
@@ -321,7 +321,7 @@ export function seedDemo(db: Database): DemoSeedResult {
   });
 
   // ---- Pre-built plan so the user can jump straight to "Compute shortages" ----
-  db.createPlan({
+  await db.createPlan({
     name: 'Plan demo — 1000 szt. Cutis E Krem',
     items: [{ productId: product.id, qtyUnits: 1000 }],
     bulkMass: [],

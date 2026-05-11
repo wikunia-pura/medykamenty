@@ -15,6 +15,8 @@ import { maxProducible } from '../services/reverseCalculator';
 import { isAiAvailable, getModel } from '../aiConfig';
 import { rewriteEmail, suggestMatch } from '../services/llmClient';
 import { seedDemo } from '../services/demoSeed';
+import * as authService from '../authService';
+import { getMigrationStatus, runMigration } from '../migrationService';
 
 export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWindow | null): void {
   // ---- Suppliers ----
@@ -82,8 +84,8 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
         const snapshot = await parseStockXlsx(filePath, kind);
         const candidates =
           kind === 'raw'
-            ? db.listRawMaterials().map((r) => ({ id: r.id, name: r.name, mpFirmaSymbol: r.mpFirmaSymbol }))
-            : db.listComponents().map((c) => ({ id: c.id, name: c.name, mpFirmaSymbol: c.mpFirmaSymbol }));
+            ? (await db.listRawMaterials()).map((r) => ({ id: r.id, name: r.name, mpFirmaSymbol: r.mpFirmaSymbol }))
+            : (await db.listComponents()).map((c) => ({ id: c.id, name: c.name, mpFirmaSymbol: c.mpFirmaSymbol }));
 
         for (const row of snapshot.rows) {
           const result = matchOne({ name: row.name, mpFirmaSymbol: row.mpFirmaSymbol }, candidates);
@@ -95,8 +97,8 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
             matched++;
             // refresh last purchase price (netPrice = Netto S, unit net price)
             if (typeof row.netPrice === 'number' && row.netPrice > 0) {
-              if (kind === 'raw') db.setRawMaterialLastPrice(result.id, row.netPrice, row.currency);
-              else db.setComponentLastPrice(result.id, row.netPrice, row.currency);
+              if (kind === 'raw') await db.setRawMaterialLastPrice(result.id, row.netPrice, row.currency);
+              else await db.setComponentLastPrice(result.id, row.netPrice, row.currency);
             }
           } else if (result.ambiguous) {
             ambiguous++;
@@ -104,7 +106,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
             unmatched++;
           }
         }
-        db.addStockSnapshot(snapshot);
+        await db.addStockSnapshot(snapshot);
         snapshotIds.push(snapshot.id);
         if (kind === 'raw') rawCount = snapshot.rows.length;
         else componentCount = snapshot.rows.length;
@@ -134,9 +136,9 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   );
 
   ipcMain.handle(IPC.STOCK_LIST_SNAPSHOTS, () => db.listStockSnapshots());
-  ipcMain.handle(IPC.STOCK_GET_CURRENT, () => {
-    const rawSnap = db.getCurrentSnapshot('raw');
-    const compSnap = db.getCurrentSnapshot('component');
+  ipcMain.handle(IPC.STOCK_GET_CURRENT, async () => {
+    const rawSnap = await db.getCurrentSnapshot('raw');
+    const compSnap = await db.getCurrentSnapshot('component');
     return {
       raw: rawSnap?.rows ?? [],
       components: compSnap?.rows ?? [],
@@ -150,8 +152,8 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   });
   ipcMain.handle(
     IPC.STOCK_RESOLVE_MATCH,
-    (_e, snapshotId: string, rowKey: string, targetKind: 'raw' | 'component', targetId: string) => {
-      db.updateSnapshotRowMatch(snapshotId, rowKey, targetKind, targetId);
+    async (_e, snapshotId: string, rowKey: string, targetKind: 'raw' | 'component', targetId: string) => {
+      await db.updateSnapshotRowMatch(snapshotId, rowKey, targetKind, targetId);
       return { ok: true };
     },
   );
@@ -178,10 +180,10 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.PLAN_UPDATE, (_e, id: string, patch) => db.updatePlan(id, patch));
   ipcMain.handle(IPC.PLAN_DELETE, (_e, id: string) => db.deletePlan(id));
   ipcMain.handle(IPC.PLAN_DUPLICATE, (_e, id: string) => db.duplicatePlan(id));
-  ipcMain.handle(IPC.PLAN_COMPUTE_SHORTAGES, (_e, planId: string) => {
-    const report = computeShortages(planId, db);
-    db.updatePlan(planId, { status: 'computed', computedAt: report.computedAt });
-    db.addShortageReport(planId, report);
+  ipcMain.handle(IPC.PLAN_COMPUTE_SHORTAGES, async (_e, planId: string) => {
+    const report = await computeShortages(planId, db);
+    await db.updatePlan(planId, { status: 'computed', computedAt: report.computedAt });
+    await db.addShortageReport(planId, report);
     return report;
   });
 
@@ -245,7 +247,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       filters: [{ name: 'JSON', extensions: ['json'] }],
     });
     if (result.canceled || !result.filePath) return { ok: false };
-    const data = db.exportAll();
+    const data = await db.exportAll();
     fs.writeFileSync(result.filePath, JSON.stringify(data, null, 2), 'utf-8');
     return { ok: true, path: result.filePath };
   });
@@ -260,7 +262,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     if (result.canceled || result.filePaths.length === 0) return { ok: false };
     const raw = fs.readFileSync(result.filePaths[0], 'utf-8');
     const parsed = JSON.parse(raw) as StoreSchema;
-    const out = db.importAll(parsed, mode);
+    const out = await db.importAll(parsed, mode);
     return { ok: true, applied: out.applied };
   });
 
@@ -326,8 +328,8 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.DEMO_SEED, () => seedDemo(db));
 
   // ---- Wipe ----
-  ipcMain.handle(IPC.DATA_WIPE, () => {
-    db.importAll(
+  ipcMain.handle(IPC.DATA_WIPE, async () => {
+    await db.importAll(
       {
         schemaVersion: 1,
         suppliers: [],
@@ -385,6 +387,19 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       });
     });
   });
+
+  // ---- Auth (Supabase) ----
+  ipcMain.handle(IPC.AUTH_SIGN_IN, async (_e, email: string, password: string) =>
+    authService.signIn(email, password),
+  );
+  ipcMain.handle(IPC.AUTH_SIGN_OUT, async () => {
+    await authService.signOut();
+  });
+  ipcMain.handle(IPC.AUTH_GET_SESSION, async () => authService.getSession());
+
+  // ---- One-time local→cloud migration ----
+  ipcMain.handle(IPC.MIGRATION_GET_STATUS, () => getMigrationStatus());
+  ipcMain.handle(IPC.MIGRATION_RUN, async () => runMigration(db));
 
   ipcMain.handle(IPC.APP_DOWNLOAD_UPDATE, async () => {
     if (process.platform === 'darwin') {

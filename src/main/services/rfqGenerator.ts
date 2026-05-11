@@ -54,10 +54,10 @@ export async function generateEmailsForReport(
   opts: GenerateOptions,
   db: Database,
 ): Promise<EmailBatch> {
-  const entry = db.getShortageReport(reportId);
+  const entry = await db.getShortageReport(reportId);
   if (!entry) throw new Error(`Shortage report ${reportId} not found`);
 
-  const suppliers = new Map(db.listSuppliers().map((s) => [s.id, s]));
+  const suppliers = new Map((await db.listSuppliers()).map((s) => [s.id, s]));
   const records: RFQEmailRecord[] = [];
 
   for (const group of entry.report.groups) {
@@ -107,7 +107,7 @@ export async function generateEmailsForReport(
     emails: records,
   };
 
-  db.addEmailBatch(batch);
+  await db.addEmailBatch(batch);
   return batch;
 }
 
@@ -117,7 +117,7 @@ export async function regenerateBatchEmail(
   opts: { language: Lang; useAI: boolean },
   db: Database,
 ): Promise<EmailBatch> {
-  const batch = db.getEmailBatch(batchId);
+  const batch = await db.getEmailBatch(batchId);
   if (!batch) throw new Error(`Email batch ${batchId} not found`);
   const email = batch.emails.find((e) => e.id === emailId);
   if (!email) throw new Error(`Email ${emailId} not found in batch ${batchId}`);
@@ -146,7 +146,7 @@ export async function regenerateBatchEmail(
     }
   }
 
-  const updated = db.updateBatchEmail(batchId, emailId, {
+  const updated = await db.updateBatchEmail(batchId, emailId, {
     body,
     subject,
     language: opts.language,

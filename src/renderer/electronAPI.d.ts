@@ -184,6 +184,45 @@ export interface ElectronAPI {
   getZoomFactor(): number;
   setZoomFactor(factor: number): void;
 
+  // Auth (Supabase)
+  authSignIn(
+    email: string,
+    password: string,
+  ): Promise<
+    { ok: true; session: { email: string; userId: string } } | { ok: false; error: string }
+  >;
+  authSignOut(): Promise<void>;
+  authGetSession(): Promise<{ email: string; userId: string } | null>;
+
+  // One-time local→cloud migration
+  migrationGetStatus(): Promise<{
+    hasLocalData: boolean;
+    migrated: boolean;
+    counts: {
+      suppliers: number;
+      rawMaterials: number;
+      components: number;
+      products: number;
+      stockSnapshots: number;
+      productionPlans: number;
+      shortageReports: number;
+      emailBatches: number;
+    };
+  }>;
+  migrationRun(): Promise<
+    | { ok: true; counts: {
+        suppliers: number;
+        rawMaterials: number;
+        components: number;
+        products: number;
+        stockSnapshots: number;
+        productionPlans: number;
+        shortageReports: number;
+        emailBatches: number;
+      } }
+    | { ok: false; error: string }
+  >;
+
   platform: NodeJS.Platform;
 }
 

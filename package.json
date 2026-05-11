@@ -1,6 +1,6 @@
 {
   "name": "cutis",
-  "version": "1.2.2",
+  "version": "2.0.0",
   "description": "Production planning desktop app for Cutis cosmetics",
   "main": "dist/main/main/main.js",
   "scripts": {
@@ -108,12 +108,14 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",
+    "@supabase/supabase-js": "^2.45.0",
     "electron-log": "^5.4.3",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.7.3",
     "exceljs": "^4.4.0",
     "js-yaml": "^4.1.0",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
@@ -122,6 +124,7 @@
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@types/uuid": "^9.0.8",
+    "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
     "cross-env": "^10.1.0",
