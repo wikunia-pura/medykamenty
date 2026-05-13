@@ -1,4 +1,4 @@
-import { ipcMain, dialog, shell, app, BrowserWindow } from 'electron';
+import { ipcMain, dialog, shell, app, net, BrowserWindow } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { autoUpdater } from 'electron-updater';
@@ -404,10 +404,36 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.APP_DOWNLOAD_UPDATE, async () => {
     if (process.platform === 'darwin') {
       // Ad-hoc signed builds cannot be auto-installed by electron-updater on macOS.
-      // Open the GitHub release page instead so the user grabs the new DMG manually.
-      const url = 'https://github.com/wikunia-pura/medykamenty/releases/latest';
-      await shell.openExternal(url);
-      return { ok: true, openedRelease: true };
+      // Resolve the latest DMG asset via GitHub API and open it directly so the
+      // user's browser starts downloading the installer instead of landing on
+      // the release page.
+      const releasesPage = 'https://github.com/wikunia-pura/medykamenty/releases/latest';
+      try {
+        const apiUrl = 'https://api.github.com/repos/wikunia-pura/medykamenty/releases/latest';
+        const response = await net.fetch(apiUrl, {
+          headers: { Accept: 'application/vnd.github+json' },
+        });
+        if (!response.ok) {
+          throw new Error(`GitHub API ${response.status}`);
+        }
+        const release = (await response.json()) as { assets?: { name?: string; browser_download_url?: string }[] };
+        const dmgAsset = release.assets?.find(
+          (a) => typeof a?.name === 'string' && a.name.toLowerCase().endsWith('.dmg'),
+        );
+        if (dmgAsset?.browser_download_url) {
+          await shell.openExternal(dmgAsset.browser_download_url);
+          return { ok: true };
+        }
+        throw new Error('No DMG asset found in latest release');
+      } catch (err) {
+        log.warn('Failed to resolve latest DMG, falling back to releases page:', err);
+        await shell.openExternal(releasesPage);
+        return {
+          ok: true,
+          openedRelease: true,
+          error: err instanceof Error ? err.message : 'Unknown error',
+        };
+      }
     }
     try {
       await autoUpdater.downloadUpdate();
