@@ -161,6 +161,7 @@ export interface T {
   about: string;
   appVersion: string;
   checkForUpdates: string;
+  download: string;
   // Misc
   version: string;
   selectProduct: string;
@@ -433,6 +434,7 @@ const pl: T = {
   about: 'Informacje',
   appVersion: 'Wersja aplikacji',
   checkForUpdates: 'Sprawdź aktualizacje',
+  download: 'Pobierz',
   version: 'wersja',
   selectProduct: 'Wybierz produkt',
   selectSupplier: 'Wybierz dostawcę',
@@ -698,6 +700,7 @@ const en: T = {
   about: 'About',
   appVersion: 'App version',
   checkForUpdates: 'Check for updates',
+  download: 'Download',
   version: 'version',
   selectProduct: 'Select product',
   selectSupplier: 'Select supplier',

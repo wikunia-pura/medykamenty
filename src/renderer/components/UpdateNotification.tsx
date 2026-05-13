@@ -22,7 +22,7 @@ const UpdateNotification: React.FC = () => {
           onClick={() => window.electronAPI.downloadUpdate()}
           style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)' }}
         >
-          {t.checkForUpdates}
+          {t.download}
         </button>
         <button
           className="btn ghost"
