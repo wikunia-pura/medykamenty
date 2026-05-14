@@ -10,6 +10,7 @@ import type {
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import NoProductsEmptyState from '../components/NoProductsEmptyState';
+import NoPlansEmptyState from '../components/NoPlansEmptyState';
 import type { ViewKey } from './types';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import { IconEdit, IconTrash, IconPlus, IconDuplicate } from '../components/Icons';
@@ -262,6 +263,28 @@ const ProductionPlanView: React.FC<Props> = ({
     );
   }
 
+  if (plans.length === 0) {
+    return (
+      <div className="main">
+        <div className="page-header">
+          <HeaderNav />
+          <h1>{t.productionPlan}</h1>
+        </div>
+        <NoPlansEmptyState hint={t.addFirstPlanHint} onAddPlan={onAdd} />
+        {editing && (
+          <PlanEditorModal
+            editing={editing}
+            products={products}
+            setEditing={setEditing}
+            onCancel={() => setEditing(null)}
+            onSave={onSave}
+          />
+        )}
+        {loaderMessage && <LoadingOverlay message={loaderMessage} />}
+      </div>
+    );
+  }
+
   return (
     <div className="main">
       <div className="page-header">
@@ -334,7 +357,16 @@ const ProductionPlanView: React.FC<Props> = ({
                 const cellFor = (id: string): React.ReactNode => {
                   switch (id) {
                     case 'name':
-                      return <td key={id} className="col-name col-wrap">{p.name}</td>;
+                      return (
+                        <td
+                          key={id}
+                          className="col-name col-wrap clickable"
+                          onClick={() => setEditing(p)}
+                          title={t.edit}
+                        >
+                          {p.name}
+                        </td>
+                      );
                     case 'status': {
                       const planReports = reportsByPlan.get(p.id) ?? [];
                       const planBatches = batchesByPlan.get(p.id) ?? [];

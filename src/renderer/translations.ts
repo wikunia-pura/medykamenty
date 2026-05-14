@@ -365,6 +365,7 @@ export interface T {
   selectPlanFirst: string;
   noPlansYet: string;
   addPlanCta: string;
+  addFirstPlanHint: string;
   noProductsYet: string;
   defineProductsFirstHint: string;
   goToProductsCta: string;
@@ -702,7 +703,7 @@ const pl: T = {
   wipeDataSuccess: 'Dane wyczyszczone. Możesz teraz dodać własnych dostawców, surowce i produkty albo zaimportować backup.',
   adoptAsRaw: 'Dodaj jako surowiec',
   adoptAsComponent: 'Dodaj jako komponent',
-  adoptAllUnmatched: '+ Dodaj wszystkie nierozpoznane ({n})',
+  adoptAllUnmatched: 'Dodaj wszystkie nierozpoznane ({n})',
   adoptAllConfirm: 'Utworzyć {n} nowych pozycji w katalogu na podstawie nierozpoznanych wierszy? Domyślne wartości: jednostka „kg" dla surowców, typ „other" dla komponentów; bez dostawcy. Możesz później dopiąć szczegóły w widokach Surowce/Komponenty.',
   resolveRowTitle: 'Nierozpoznana pozycja',
   resolveRowSubtitleRaw: 'Surowiec z importu — wybierz, jak go dopasować do katalogu.',
@@ -760,6 +761,7 @@ const pl: T = {
   selectPlanFirst: 'Wybierz plan, aby obliczyć zapotrzebowanie',
   noPlansYet: 'Brak planów produkcji',
   addPlanCta: 'Dodaj plan produkcji',
+  addFirstPlanHint: 'Utwórz pierwszy plan produkcji, aby zaplanować surowce i komponenty.',
   noProductsYet: 'Brak produktów',
   defineProductsFirstHint:
     'Najpierw zdefiniuj produkty (z recepturami), aby móc utworzyć plan produkcji.',
@@ -1096,7 +1098,7 @@ const en: T = {
   wipeDataSuccess: 'Data wiped. You can now add your own suppliers, materials and products, or import a backup.',
   adoptAsRaw: 'Add as raw material',
   adoptAsComponent: 'Add as component',
-  adoptAllUnmatched: '+ Add all unmatched ({n})',
+  adoptAllUnmatched: 'Add all unmatched ({n})',
   adoptAllConfirm: 'Create {n} new catalog entries from unmatched rows? Defaults: unit "kg" for raw materials, type "other" for components; no supplier. You can fill in details later in Raw materials/Components.',
   resolveRowTitle: 'Unrecognized item',
   resolveRowSubtitleRaw: 'Raw material from import — choose how to map it to the catalog.',
@@ -1154,6 +1156,7 @@ const en: T = {
   selectPlanFirst: 'Select a plan to compute shortages',
   noPlansYet: 'No production plans yet',
   addPlanCta: 'Add production plan',
+  addFirstPlanHint: 'Create your first production plan to schedule raw materials and components.',
   noProductsYet: 'No products yet',
   defineProductsFirstHint:
     'Define products (with recipes) first before you can create a production plan.',

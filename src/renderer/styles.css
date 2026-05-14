@@ -2272,6 +2272,17 @@ body.dark-mode .callout-hint {
 body.dark-mode .row-clickable:hover td {
   background: rgba(100, 126, 245, 0.12) !important;
 }
+.row-clickable td.col-name,
+.table td.col-name.clickable {
+  color: var(--primary);
+}
+.table td.col-name.clickable {
+  cursor: pointer;
+}
+.row-clickable:hover td.col-name,
+.table td.col-name.clickable:hover {
+  text-decoration: underline;
+}
 
 /* SearchableSelect footer action (e.g. "Add new" inside a dropdown) */
 .searchable-select-footer-action {

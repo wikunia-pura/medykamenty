@@ -549,11 +549,11 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
           </div>
           {unmatched > 0 && (
             <button
-              className="btn btn-sm soft-success"
+              className="btn soft-success"
               disabled={adoptBusy}
               onClick={() => adoptAllUnmatched(kind)}
             >
-              <IconPlus size={13} />{' '}
+              <IconPlus size={14} />{' '}
               {adoptBusy ? t.loading : t.adoptAllUnmatched.replace('{n}', String(unmatched))}
             </button>
           )}
