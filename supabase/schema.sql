@@ -67,6 +67,25 @@ create table if not exists public.email_batches (
   data          jsonb       not null
 );
 
+-- Aliases learned from stock import: future occurrences of `alias` will auto-match
+-- to `target_id`. Stored normalized (lowercase, diacritics stripped, spaces collapsed)
+-- so lookup is a plain `=` on `alias_normalized`.
+create table if not exists public.raw_material_aliases (
+  id                uuid        primary key,
+  target_id         uuid        not null references public.raw_materials(id) on delete cascade,
+  alias             text        not null,
+  alias_normalized  text        not null,
+  created_at        timestamptz not null default now()
+);
+
+create table if not exists public.component_aliases (
+  id                uuid        primary key,
+  target_id         uuid        not null references public.components(id) on delete cascade,
+  alias             text        not null,
+  alias_normalized  text        not null,
+  created_at        timestamptz not null default now()
+);
+
 -- ============================================================
 -- Indexes (just the ones the app actually orders/filters by)
 -- ============================================================
@@ -83,20 +102,34 @@ create index if not exists idx_email_batches_generated
 create index if not exists idx_production_plans_updated
   on public.production_plans (updated_at desc);
 
+create unique index if not exists ux_raw_material_aliases_norm
+  on public.raw_material_aliases (alias_normalized);
+
+create unique index if not exists ux_component_aliases_norm
+  on public.component_aliases (alias_normalized);
+
+create index if not exists idx_raw_material_aliases_target
+  on public.raw_material_aliases (target_id);
+
+create index if not exists idx_component_aliases_target
+  on public.component_aliases (target_id);
+
 -- ============================================================
 -- Row-Level Security
 -- Model: any signed-in user can read/write everything (shared data).
 -- Anonymous users have no access.
 -- ============================================================
 
-alter table public.suppliers         enable row level security;
-alter table public.raw_materials     enable row level security;
-alter table public.components        enable row level security;
-alter table public.products          enable row level security;
-alter table public.stock_snapshots   enable row level security;
-alter table public.production_plans  enable row level security;
-alter table public.shortage_reports  enable row level security;
-alter table public.email_batches     enable row level security;
+alter table public.suppliers             enable row level security;
+alter table public.raw_materials         enable row level security;
+alter table public.components            enable row level security;
+alter table public.products              enable row level security;
+alter table public.stock_snapshots       enable row level security;
+alter table public.production_plans      enable row level security;
+alter table public.shortage_reports      enable row level security;
+alter table public.email_batches         enable row level security;
+alter table public.raw_material_aliases  enable row level security;
+alter table public.component_aliases     enable row level security;
 
 drop policy if exists "authenticated_all" on public.suppliers;
 drop policy if exists "authenticated_all" on public.raw_materials;
@@ -106,6 +139,8 @@ drop policy if exists "authenticated_all" on public.stock_snapshots;
 drop policy if exists "authenticated_all" on public.production_plans;
 drop policy if exists "authenticated_all" on public.shortage_reports;
 drop policy if exists "authenticated_all" on public.email_batches;
+drop policy if exists "authenticated_all" on public.raw_material_aliases;
+drop policy if exists "authenticated_all" on public.component_aliases;
 
 create policy "authenticated_all" on public.suppliers
   for all to authenticated using (true) with check (true);
@@ -129,4 +164,10 @@ create policy "authenticated_all" on public.shortage_reports
   for all to authenticated using (true) with check (true);
 
 create policy "authenticated_all" on public.email_batches
+  for all to authenticated using (true) with check (true);
+
+create policy "authenticated_all" on public.raw_material_aliases
+  for all to authenticated using (true) with check (true);
+
+create policy "authenticated_all" on public.component_aliases
   for all to authenticated using (true) with check (true);

@@ -8,6 +8,7 @@ import type {
   PackagingComponent,
 } from '../../shared/types';
 import MultiSelect from '../components/MultiSelect';
+import LoadingOverlay from '../components/LoadingOverlay';
 import ProductEditorModal from '../components/ProductEditorModal';
 import { IconRefresh, IconChevronDown } from '../components/Icons';
 
@@ -88,6 +89,7 @@ const MaxProducibleView: React.FC = () => {
   const [results, setResults] = useState<MaxProducibleResult[]>(() => loadState().results);
   const [expandedIds, setExpandedIds] = useState<string[]>(() => loadState().expandedIds);
   const [busy, setBusy] = useState(false);
+  const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
 
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [productModalReadOnly, setProductModalReadOnly] = useState(false);
@@ -101,10 +103,21 @@ const MaxProducibleView: React.FC = () => {
     setProducts(ps);
     setRawMaterials(rm);
     setComponents(cs);
+    const existingIds = new Set(ps.map((p) => p.id));
+    setProductIds((prev) => prev.filter((id) => existingIds.has(id)));
+    setResults((prev) => prev.filter((r) => existingIds.has(r.productId)));
+    setExpandedIds((prev) => prev.filter((id) => existingIds.has(id)));
   };
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      setLoaderMessage(t.loading);
+      try {
+        await reload();
+      } finally {
+        setLoaderMessage(null);
+      }
+    })();
   }, []);
 
   const openProductPreview = (productId: string) => {
@@ -147,6 +160,7 @@ const MaxProducibleView: React.FC = () => {
   const compute = async () => {
     if (productIds.length === 0) return;
     setBusy(true);
+    setLoaderMessage(t.loaderComputing);
     try {
       const next = await Promise.all(
         productIds.map((id) => window.electronAPI.maxProducible(id)),
@@ -154,6 +168,7 @@ const MaxProducibleView: React.FC = () => {
       setResults(next);
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -372,6 +387,8 @@ const MaxProducibleView: React.FC = () => {
           onEnterEdit={() => setProductModalReadOnly(false)}
         />
       )}
+
+      {loaderMessage && <LoadingOverlay message={loaderMessage} />}
     </div>
   );
 };

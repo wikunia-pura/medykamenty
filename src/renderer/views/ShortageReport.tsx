@@ -11,6 +11,7 @@ import type {
 } from '../../shared/types';
 import type { ViewKey } from './types';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LoadingOverlay from '../components/LoadingOverlay';
 import NoPlansEmptyState from '../components/NoPlansEmptyState';
 import { IconMail, IconPlus, IconTrash, IconEdit, IconEye, IconArrowLeft } from '../components/Icons';
 import SearchableSelect from '../components/SearchableSelect';
@@ -61,8 +62,11 @@ const ShortageReportView: React.FC<Props> = ({
   const [history, setHistory] = useState<ShortageReportEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [reassigningKey, setReassigningKey] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ShortageReportEntry | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [editingPlan, setEditingPlan] = useState<Partial<ProductionPlan> | null>(null);
   const [planModalReadOnly, setPlanModalReadOnly] = useState(false);
@@ -94,16 +98,21 @@ const ShortageReportView: React.FC<Props> = ({
 
   useEffect(() => {
     void (async () => {
-      const [ps, ss, pr] = await Promise.all([
-        window.electronAPI.listPlans(),
-        window.electronAPI.listSuppliers(),
-        window.electronAPI.listProducts(),
-      ]);
-      setPlans(ps);
-      setSuppliers(ss);
-      setProducts(pr);
-      if (!selectedPlanId && ps[0]) onSelectPlan(ps[0].id);
-      await loadHistory();
+      setLoaderMessage(t.loading);
+      try {
+        const [ps, ss, pr] = await Promise.all([
+          window.electronAPI.listPlans(),
+          window.electronAPI.listSuppliers(),
+          window.electronAPI.listProducts(),
+        ]);
+        setPlans(ps);
+        setSuppliers(ss);
+        setProducts(pr);
+        if (!selectedPlanId && ps[0]) onSelectPlan(ps[0].id);
+        await loadHistory();
+      } finally {
+        setLoaderMessage(null);
+      }
     })();
   }, []);
 
@@ -156,6 +165,7 @@ const ShortageReportView: React.FC<Props> = ({
     if (!selectedPlanId) return;
     const plan = plans.find((p) => p.id === selectedPlanId);
     setBusy(true);
+    setLoaderMessage(t.loaderComputing);
     setError(null);
     try {
       const r = await window.electronAPI.computeShortages(selectedPlanId);
@@ -173,6 +183,7 @@ const ShortageReportView: React.FC<Props> = ({
       setError((err as Error).message);
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -276,6 +287,29 @@ const ShortageReportView: React.FC<Props> = ({
     await loadHistory();
   };
 
+  const onConfirmDeleteAll = async () => {
+    setConfirmDeleteAll(false);
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setLoaderMessage(t.deleteAllInProgress);
+    const total = history.length;
+    try {
+      for (const e of history) {
+        await window.electronAPI.deleteShortageReport(e.id);
+      }
+      setInfo(t.deleteAllSuccess.replace('{n}', String(total)));
+      setFocusAndCache(null);
+      await loadHistory();
+    } catch (err) {
+      setError((err as Error).message);
+      await loadHistory();
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+  };
+
   const fmt = (n: number, unit: ShortageLine['unit']) =>
     n.toFixed(unit === 'pcs' ? 0 : 2);
 
@@ -290,8 +324,11 @@ const ShortageReportView: React.FC<Props> = ({
   // ----- Focused view (compute / edit / preview a single report) -----
   if (focus) {
     const { report, mode, reportName } = focus;
-    const livePlanName =
-      plans.find((p) => p.id === focus.planId)?.name ?? focus.planName;
+    const linkedPlan = focus.planId
+      ? plans.find((p) => p.id === focus.planId)
+      : undefined;
+    const planMissing = !!focus.planId && !linkedPlan;
+    const livePlanName = linkedPlan?.name ?? focus.planName;
     return (
       <div className="main">
         <div className="focus-bar">
@@ -333,10 +370,20 @@ const ShortageReportView: React.FC<Props> = ({
                   type="button"
                   className="link-button"
                   onClick={() => openPlanModal(focus.planId)}
-                  title={t.openPlan}
+                  title={planMissing ? t.linkedPlanDeleted : t.openPlan}
+                  disabled={planMissing}
                 >
                   {livePlanName}
                 </button>
+                {planMissing && (
+                  <span
+                    className="tag danger"
+                    style={{ marginLeft: 6 }}
+                    title={t.linkedPlanDeleted}
+                  >
+                    {t.linkedPlanDeletedTag}
+                  </span>
+                )}
               </span>
             )}
             <span className={`tag ${mode === 'edit' ? 'warn' : ''}`}>
@@ -367,6 +414,12 @@ const ShortageReportView: React.FC<Props> = ({
         </div>
 
         {error && <div className="card error-text">{error}</div>}
+
+        {planMissing && (
+          <div className="card" style={{ borderColor: 'var(--warning)' }}>
+            <strong className="warn-text">{t.linkedPlanDeleted}</strong>
+          </div>
+        )}
 
         {report.warnings.length > 0 && (
           <div className="card" style={{ borderColor: 'var(--warning)' }}>
@@ -551,9 +604,20 @@ const ShortageReportView: React.FC<Props> = ({
       {history.length > 0 && (
         <div className="card">
           <div className="card-header">
-            <div className="card-title">{t.olderReportsTitle}</div>
-            <div className="hint">{t.olderReportsHint}</div>
+            <div>
+              <div className="card-title">{t.olderReportsTitle}</div>
+              <div className="hint">{t.olderReportsHint}</div>
+            </div>
+            <button
+              className="btn btn-sm soft-danger"
+              onClick={() => setConfirmDeleteAll(true)}
+              disabled={busy}
+              title={t.deleteAll}
+            >
+              <IconTrash size={13} /> {t.deleteAll}
+            </button>
           </div>
+          {info && <div className="hint" style={{ marginBottom: 8 }}>{info}</div>}
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -569,9 +633,9 @@ const ShortageReportView: React.FC<Props> = ({
                 {history.map((e) => {
                   const missing = missingLines(e);
                   const groups = e.report.groups.length;
-                  const top = missing.slice(0, 8);
-                  const livePlanName =
-                    plans.find((p) => p.id === e.planId)?.name ?? e.planName;
+                  const linkedPlan = plans.find((p) => p.id === e.planId);
+                  const livePlanName = linkedPlan?.name ?? e.planName;
+                  const planMissing = !!e.planId && !linkedPlan;
                   return (
                   <tr
                     key={e.id}
@@ -581,17 +645,28 @@ const ShortageReportView: React.FC<Props> = ({
                   >
                     <td className="col-name col-wrap">{e.reportName}</td>
                     <td className="col-wrap">
-                      <button
-                        type="button"
-                        className="link-button"
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          openPlanModal(e.planId);
-                        }}
-                        title={t.openPlan}
-                      >
-                        {livePlanName}
-                      </button>
+                      <div className="cell-with-end-tag">
+                        {planMissing && (
+                          <span
+                            className="tag danger"
+                            title={t.linkedPlanDeleted}
+                          >
+                            {t.linkedPlanDeletedTag}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            openPlanModal(e.planId);
+                          }}
+                          title={planMissing ? t.linkedPlanDeleted : t.openPlan}
+                          disabled={planMissing}
+                        >
+                          {livePlanName}
+                        </button>
+                      </div>
                     </td>
                     <td className="hint">{new Date(e.computedAt).toLocaleString()}</td>
                     <td>
@@ -617,7 +692,7 @@ const ShortageReportView: React.FC<Props> = ({
                             {missing.length === 1 ? 'pozycja' : 'pozycji'}
                           </div>
                           <ul className="shortage-tooltip-list">
-                            {top.map((line) => (
+                            {missing.map((line) => (
                               <li key={`${line.itemKind}-${line.itemId}`}>
                                 <span className="shortage-tooltip-name">
                                   {line.itemName}
@@ -628,12 +703,6 @@ const ShortageReportView: React.FC<Props> = ({
                               </li>
                             ))}
                           </ul>
-                          {missing.length > top.length && (
-                            <div className="shortage-tooltip-more hint">
-                              + {missing.length - top.length}{' '}
-                              {missing.length - top.length === 1 ? 'pozycja' : 'pozycji'}
-                            </div>
-                          )}
                         </HoverTooltip>
                       )}
                     </td>
@@ -657,19 +726,19 @@ const ShortageReportView: React.FC<Props> = ({
                           <IconEdit size={13} /> {t.edit}
                         </button>
                         <button
+                          className="btn btn-sm soft-danger"
+                          onClick={() => setConfirmDelete(e)}
+                          title={t.delete}
+                        >
+                          <IconTrash size={13} /> {t.delete}
+                        </button>
+                        <button
                           className="btn btn-sm soft-success"
                           onClick={() => onNavigateToEmails(e.id)}
                           disabled={e.report.groups.length === 0}
                           title={t.generateEmails}
                         >
                           <IconMail size={13} /> {t.generateEmails}
-                        </button>
-                        <button
-                          className="btn btn-sm soft-danger"
-                          onClick={() => setConfirmDelete(e)}
-                          title={t.delete}
-                        >
-                          <IconTrash size={13} /> {t.delete}
                         </button>
                       </div>
                     </td>
@@ -689,6 +758,15 @@ const ShortageReportView: React.FC<Props> = ({
           ).toLocaleString()})?`}
           onConfirm={onConfirmDelete}
           onCancel={() => setConfirmDelete(null)}
+          danger
+        />
+      )}
+
+      {confirmDeleteAll && (
+        <ConfirmDialog
+          message={t.deleteAllConfirm.replace('{n}', String(history.length))}
+          onConfirm={onConfirmDeleteAll}
+          onCancel={() => setConfirmDeleteAll(false)}
           danger
         />
       )}
@@ -723,6 +801,8 @@ const ShortageReportView: React.FC<Props> = ({
           </button>
         );
       })()}
+
+      {loaderMessage && <LoadingOverlay message={loaderMessage} />}
     </div>
   );
 };

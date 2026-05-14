@@ -8,11 +8,14 @@ import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
 import NumberInput from '../components/NumberInput';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LoadingOverlay from '../components/LoadingOverlay';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
 import { IconTrash, IconPlus, IconCheck, IconEdit } from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import { useEscapeKey } from '../utils/useEscapeKey';
+import UnmatchedRowModal, { type ResolveAction } from '../components/UnmatchedRowModal';
+import BulkUnmatchedModal from '../components/BulkUnmatchedModal';
 
 interface Props {
   onNavigate?: (key: ViewKey) => void;
@@ -27,9 +30,21 @@ function detectKind(name: string): 'raw' | 'component' {
   return 'raw';
 }
 
+const RAW_EXPANDED_KEY = 'stockImport.rawExpanded';
+const COMP_EXPANDED_KEY = 'stockImport.compExpanded';
+
+function readExpanded(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
 const StockImport: React.FC<Props> = ({ onNavigate }) => {
   const t = useT();
   const [busy, setBusy] = useState(false);
+  const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [rawRows, setRawRows] = useState<StockRow[]>([]);
   const [compRows, setCompRows] = useState<StockRow[]>([]);
@@ -37,8 +52,8 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
   const [components, setComponents] = useState<PackagingComponent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedFile[]>([]);
-  const [rawExpanded, setRawExpanded] = useState(false);
-  const [compExpanded, setCompExpanded] = useState(false);
+  const [rawExpanded, setRawExpanded] = useState<boolean>(() => readExpanded(RAW_EXPANDED_KEY));
+  const [compExpanded, setCompExpanded] = useState<boolean>(() => readExpanded(COMP_EXPANDED_KEY));
   const [rawSnapshot, setRawSnapshot] = useState<SnapshotInfo>(null);
   const [compSnapshot, setCompSnapshot] = useState<SnapshotInfo>(null);
   const [adoptBusy, setAdoptBusy] = useState(false);
@@ -58,6 +73,18 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
   const [confirmDeleteSnapshot, setConfirmDeleteSnapshot] = useState<
     'raw' | 'component' | null
   >(null);
+  // Queue of unmatched rows for the resolve-row modal. Single-row clicks push a
+  // 1-element queue. The modal shows the head of the queue and advances on
+  // each resolve/skip.
+  const [resolveQueue, setResolveQueue] = useState<{ row: StockRow; kind: 'raw' | 'component' }[]>(
+    [],
+  );
+  // Open state for the bulk list modal: shows every unmatched row at once and
+  // lets the user pick a target/action per row before pressing "Apply all".
+  const [bulkResolve, setBulkResolve] = useState<{
+    rows: StockRow[];
+    kind: 'raw' | 'component';
+  } | null>(null);
 
   const STOCK_COLUMNS: ColumnDef[] = useMemo(
     () => [
@@ -94,7 +121,8 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
     setCompSnapshot(stock.componentSnapshot);
   };
 
-  const adoptRow = async (row: StockRow, kind: 'raw' | 'component') => {
+  // Creates a brand-new catalog entry from the row and links the snapshot to it.
+  const adoptRowAsNew = async (row: StockRow, kind: 'raw' | 'component') => {
     const snapshotId = kind === 'raw' ? rawSnapshot?.id : compSnapshot?.id;
     if (!snapshotId) return;
     if (kind === 'raw') {
@@ -126,11 +154,85 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
     }
   };
 
-  const adoptOne = async (row: StockRow, kind: 'raw' | 'component') => {
+  const openResolveModalFor = (row: StockRow, kind: 'raw' | 'component') => {
     setError(null);
+    setResolveQueue([{ row, kind }]);
+  };
+
+  const adoptAllUnmatched = (kind: 'raw' | 'component') => {
+    const rows = kind === 'raw' ? rawRows : compRows;
+    const unmatched = rows.filter(
+      (r) => !r.matchAmbiguous && !r.matchedRawMaterialId && !r.matchedComponentId,
+    );
+    if (unmatched.length === 0) return;
+    setError(null);
+    setBulkResolve({ rows: unmatched, kind });
+  };
+
+  const advanceQueue = () => {
+    setResolveQueue((prev) => prev.slice(1));
+  };
+
+  // Applies a single resolution decision against its snapshot. Reused by both
+  // the single-row modal and the bulk-apply loop.
+  const applyDecision = async (
+    row: StockRow,
+    kind: 'raw' | 'component',
+    action: ResolveAction,
+  ) => {
+    const snapshotId = kind === 'raw' ? rawSnapshot?.id : compSnapshot?.id;
+    if (!snapshotId) throw new Error('No snapshot to resolve against');
+    if (action.type === 'add-new') {
+      await adoptRowAsNew(row, kind);
+      return;
+    }
+    if (action.type === 'save-alias') {
+      if (kind === 'raw') {
+        await window.electronAPI.addRawMaterialAlias(action.targetId, row.name);
+      } else {
+        await window.electronAPI.addComponentAlias(action.targetId, row.name);
+      }
+    } else if (action.type === 'rename-existing') {
+      // Rename catalog entry to the import name, and keep the previous catalog
+      // name as an alias so future imports of the old name still match.
+      if (kind === 'raw') {
+        const existing = await window.electronAPI.getRawMaterial(action.targetId);
+        if (existing) {
+          const oldName = existing.name;
+          await window.electronAPI.updateRawMaterial(action.targetId, { name: row.name });
+          if (oldName && oldName !== row.name) {
+            try {
+              await window.electronAPI.addRawMaterialAlias(action.targetId, oldName);
+            } catch {
+              /* alias may already exist */
+            }
+          }
+        }
+      } else {
+        const existing = await window.electronAPI.getComponent(action.targetId);
+        if (existing) {
+          const oldName = existing.name;
+          await window.electronAPI.updateComponent(action.targetId, { name: row.name });
+          if (oldName && oldName !== row.name) {
+            try {
+              await window.electronAPI.addComponentAlias(action.targetId, oldName);
+            } catch {
+              /* alias may already exist */
+            }
+          }
+        }
+      }
+    }
+    await window.electronAPI.resolveStockMatch(snapshotId, row.rowKey, kind, action.targetId);
+  };
+
+  const handleResolve = async (action: ResolveAction) => {
+    if (resolveQueue.length === 0) return;
+    const head = resolveQueue[0];
     setAdoptBusy(true);
     try {
-      await adoptRow(row, kind);
+      await applyDecision(head.row, head.kind, action);
+      advanceQueue();
       await loadCurrent();
     } catch (err) {
       setError((err as Error).message);
@@ -139,25 +241,29 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
     }
   };
 
-  const adoptAllUnmatched = async (kind: 'raw' | 'component') => {
-    const rows = kind === 'raw' ? rawRows : compRows;
-    const unmatched = rows.filter(
-      (r) => !r.matchAmbiguous && !r.matchedRawMaterialId && !r.matchedComponentId,
-    );
-    if (unmatched.length === 0) return;
-    if (!confirm(t.adoptAllConfirm.replace('{n}', String(unmatched.length)))) return;
+  const handleBulkApply = async (
+    decisions: { row: StockRow; action: ResolveAction }[],
+  ) => {
+    if (!bulkResolve) return;
     setError(null);
     setAdoptBusy(true);
+    setLoaderMessage(t.loaderProcessing);
     try {
-      for (const row of unmatched) {
-        await adoptRow(row, kind);
+      for (const d of decisions) {
+        await applyDecision(d.row, bulkResolve.kind, d.action);
       }
+      setBulkResolve(null);
       await loadCurrent();
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setAdoptBusy(false);
+      setLoaderMessage(null);
     }
+  };
+
+  const handleCancelQueue = () => {
+    setResolveQueue([]);
   };
 
   const onDeleteRow = async () => {
@@ -194,8 +300,31 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
   };
 
   useEffect(() => {
-    void loadCurrent();
+    void (async () => {
+      setLoaderMessage(t.loading);
+      try {
+        await loadCurrent();
+      } finally {
+        setLoaderMessage(null);
+      }
+    })();
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RAW_EXPANDED_KEY, rawExpanded ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [rawExpanded]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COMP_EXPANDED_KEY, compExpanded ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [compExpanded]);
 
   const onFilesSelected = (files: { name: string; path: string }[]) => {
     setError(null);
@@ -219,6 +348,7 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
     if (staged.length === 0) return;
     setError(null);
     setBusy(true);
+    setLoaderMessage(t.loaderImporting);
     setSummary(null);
     try {
       const rawFiles = staged.filter((f) => f.kind === 'raw');
@@ -260,6 +390,7 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
       setError((err as Error).message);
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -334,7 +465,7 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
         <button
           className="match-badge danger as-button"
           disabled={adoptBusy}
-          onClick={() => void adoptOne(r, kind)}
+          onClick={() => openResolveModalFor(r, kind)}
           title={kind === 'raw' ? t.adoptAsRaw : t.adoptAsComponent}
           aria-label={kind === 'raw' ? t.adoptAsRaw : t.adoptAsComponent}
         >
@@ -420,7 +551,7 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
             <button
               className="btn btn-sm soft-success"
               disabled={adoptBusy}
-              onClick={() => void adoptAllUnmatched(kind)}
+              onClick={() => adoptAllUnmatched(kind)}
             >
               <IconPlus size={13} />{' '}
               {adoptBusy ? t.loading : t.adoptAllUnmatched.replace('{n}', String(unmatched))}
@@ -506,12 +637,20 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
     const unmatched = rows.filter(isUnmatched).length;
     return (
       <div className="card">
-        <div className="card-header">
+        <div
+          className={`card-header card-header-toggle${expanded ? '' : ' is-collapsed'}`}
+          onClick={() => setExpanded((v) => !v)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setExpanded((v) => !v);
+            }
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <h2
-              style={{ margin: 0, cursor: 'pointer', userSelect: 'none' }}
-              onClick={() => setExpanded((v) => !v)}
-            >
+            <h2 style={{ margin: 0, userSelect: 'none' }}>
               <span style={{ display: 'inline-block', width: 18 }}>
                 {expanded ? '▾' : '▸'}
               </span>
@@ -529,7 +668,10 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
           </div>
           <button
             className="btn btn-sm danger"
-            onClick={() => setConfirmDeleteSnapshot(kind)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmDeleteSnapshot(kind);
+            }}
             title={t.stockDeleteSnapshot}
           >
             <IconTrash size={13} /> {t.stockDeleteSnapshot}
@@ -661,6 +803,26 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
         />
       )}
 
+      {resolveQueue.length > 0 && (
+        <UnmatchedRowModal
+          row={resolveQueue[0].row}
+          kind={resolveQueue[0].kind}
+          busy={adoptBusy}
+          onResolve={(action) => void handleResolve(action)}
+          onCancel={handleCancelQueue}
+        />
+      )}
+
+      {bulkResolve && (
+        <BulkUnmatchedModal
+          rows={bulkResolve.rows}
+          kind={bulkResolve.kind}
+          busy={adoptBusy}
+          onApply={(decisions) => void handleBulkApply(decisions)}
+          onCancel={() => setBulkResolve(null)}
+        />
+      )}
+
       {confirmDeleteSnapshot && (
         <ConfirmDialog
           message={t.stockDeleteSnapshotConfirm.replace(
@@ -687,6 +849,8 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
           <span className="floating-next-arrow">→</span>
         </button>
       )}
+
+      {loaderMessage && <LoadingOverlay message={loaderMessage} />}
     </div>
   );
 };

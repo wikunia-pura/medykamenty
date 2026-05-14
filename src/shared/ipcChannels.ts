@@ -12,6 +12,7 @@ export const IPC = {
   RAW_CREATE: 'rawMaterials:create',
   RAW_UPDATE: 'rawMaterials:update',
   RAW_DELETE: 'rawMaterials:delete',
+  RAW_XLSX_IMPORT: 'rawMaterials:xlsx-import',
 
   // Components
   COMP_LIST: 'components:list',
@@ -27,6 +28,9 @@ export const IPC = {
   PRODUCTS_UPDATE: 'products:update',
   PRODUCTS_DELETE: 'products:delete',
   PRODUCTS_DUPLICATE: 'products:duplicate',
+  PRODUCTS_RECIPES_XLSX_ANALYZE: 'products:recipes-xlsx-analyze',
+  PRODUCTS_RECIPES_XLSX_COMMIT: 'products:recipes-xlsx-commit',
+  PRODUCTS_RECIPES_XLSX_EXPORT: 'products:recipes-xlsx-export',
 
   // Stock
   STOCK_SELECT_FILES: 'stock:select-files',
@@ -38,6 +42,15 @@ export const IPC = {
   STOCK_DELETE_ROW: 'stock:delete-row',
   STOCK_DELETE_SNAPSHOT: 'stock:delete-snapshot',
   STOCK_DELETE_KIND: 'stock:delete-kind',
+  STOCK_SUGGEST_MATCHES: 'stock:suggest-matches',
+
+  // Catalog aliases (smart fuzzy mappings learned from stock import)
+  RAW_ALIAS_LIST: 'rawMaterials:alias-list',
+  RAW_ALIAS_ADD: 'rawMaterials:alias-add',
+  RAW_ALIAS_DELETE: 'rawMaterials:alias-delete',
+  COMP_ALIAS_LIST: 'components:alias-list',
+  COMP_ALIAS_ADD: 'components:alias-add',
+  COMP_ALIAS_DELETE: 'components:alias-delete',
 
   // Plan
   PLAN_LIST: 'plan:list',

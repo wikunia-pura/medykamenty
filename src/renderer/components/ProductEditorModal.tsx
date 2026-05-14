@@ -139,6 +139,36 @@ const ProductEditorModal: React.FC<Props> = ({
               />
             </div>
             <div className="form-row">
+              <label>{t.moqUnits}</label>
+              <NumberInput
+                className="input"
+                step="1"
+                value={editing.moqUnits}
+                onChange={(v) => setEditing({ ...editing, moqUnits: v })}
+                disabled={readOnly}
+              />
+            </div>
+            <div className="form-row">
+              <label>{t.sachetMassKg}</label>
+              <NumberInput
+                className="input"
+                step="0.01"
+                value={editing.sachetMassKg}
+                onChange={(v) => setEditing({ ...editing, sachetMassKg: v })}
+                disabled={readOnly}
+              />
+            </div>
+            <div className="form-row">
+              <label>{t.sachetsCount}</label>
+              <NumberInput
+                className="input"
+                step="1"
+                value={editing.sachetsCount}
+                onChange={(v) => setEditing({ ...editing, sachetsCount: v })}
+                disabled={readOnly}
+              />
+            </div>
+            <div className="form-row">
               <label>{t.notes}</label>
               <textarea
                 value={editing.notes ?? ''}

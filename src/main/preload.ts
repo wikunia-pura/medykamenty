@@ -15,6 +15,7 @@ const CH = {
   RAW_CREATE: 'rawMaterials:create',
   RAW_UPDATE: 'rawMaterials:update',
   RAW_DELETE: 'rawMaterials:delete',
+  RAW_XLSX_IMPORT: 'rawMaterials:xlsx-import',
 
   COMP_LIST: 'components:list',
   COMP_GET: 'components:get',
@@ -28,6 +29,9 @@ const CH = {
   PRODUCTS_UPDATE: 'products:update',
   PRODUCTS_DELETE: 'products:delete',
   PRODUCTS_DUPLICATE: 'products:duplicate',
+  PRODUCTS_RECIPES_XLSX_ANALYZE: 'products:recipes-xlsx-analyze',
+  PRODUCTS_RECIPES_XLSX_COMMIT: 'products:recipes-xlsx-commit',
+  PRODUCTS_RECIPES_XLSX_EXPORT: 'products:recipes-xlsx-export',
 
   STOCK_SELECT_FILES: 'stock:select-files',
   STOCK_IMPORT: 'stock:import',
@@ -38,6 +42,14 @@ const CH = {
   STOCK_DELETE_ROW: 'stock:delete-row',
   STOCK_DELETE_SNAPSHOT: 'stock:delete-snapshot',
   STOCK_DELETE_KIND: 'stock:delete-kind',
+  STOCK_SUGGEST_MATCHES: 'stock:suggest-matches',
+
+  RAW_ALIAS_LIST: 'rawMaterials:alias-list',
+  RAW_ALIAS_ADD: 'rawMaterials:alias-add',
+  RAW_ALIAS_DELETE: 'rawMaterials:alias-delete',
+  COMP_ALIAS_LIST: 'components:alias-list',
+  COMP_ALIAS_ADD: 'components:alias-add',
+  COMP_ALIAS_DELETE: 'components:alias-delete',
 
   PLAN_LIST: 'plan:list',
   PLAN_GET: 'plan:get',
@@ -105,6 +117,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createRawMaterial: (input: any) => ipcRenderer.invoke(CH.RAW_CREATE, input),
   updateRawMaterial: (id: string, patch: any) => ipcRenderer.invoke(CH.RAW_UPDATE, id, patch),
   deleteRawMaterial: (id: string) => ipcRenderer.invoke(CH.RAW_DELETE, id),
+  importRawMaterialsXlsx: (mode: 'merge' | 'overwrite') =>
+    ipcRenderer.invoke(CH.RAW_XLSX_IMPORT, mode),
 
   // Components
   listComponents: () => ipcRenderer.invoke(CH.COMP_LIST),
@@ -120,6 +134,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateProduct: (id: string, patch: any) => ipcRenderer.invoke(CH.PRODUCTS_UPDATE, id, patch),
   deleteProduct: (id: string) => ipcRenderer.invoke(CH.PRODUCTS_DELETE, id),
   duplicateProduct: (id: string) => ipcRenderer.invoke(CH.PRODUCTS_DUPLICATE, id),
+  analyzeRecipesXlsx: (mode: 'merge' | 'overwrite') =>
+    ipcRenderer.invoke(CH.PRODUCTS_RECIPES_XLSX_ANALYZE, mode),
+  commitRecipesXlsx: (
+    filePath: string,
+    mode: 'merge' | 'overwrite',
+    resolutions: unknown,
+  ) =>
+    ipcRenderer.invoke(CH.PRODUCTS_RECIPES_XLSX_COMMIT, {
+      filePath,
+      mode,
+      resolutions,
+    }),
+  exportRecipesXlsx: () => ipcRenderer.invoke(CH.PRODUCTS_RECIPES_XLSX_EXPORT),
 
   // Stock
   selectStockFiles: () => ipcRenderer.invoke(CH.STOCK_SELECT_FILES),
@@ -141,6 +168,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(CH.STOCK_DELETE_SNAPSHOT, snapshotId),
   deleteStockSnapshotsByKind: (kind: 'raw' | 'component') =>
     ipcRenderer.invoke(CH.STOCK_DELETE_KIND, kind),
+  suggestStockMatches: (
+    kind: 'raw' | 'component',
+    source: { name: string; mpFirmaSymbol?: string },
+    limit?: number,
+  ) => ipcRenderer.invoke(CH.STOCK_SUGGEST_MATCHES, kind, source, limit),
+
+  // Catalog aliases
+  listRawMaterialAliases: () => ipcRenderer.invoke(CH.RAW_ALIAS_LIST),
+  addRawMaterialAlias: (targetId: string, alias: string) =>
+    ipcRenderer.invoke(CH.RAW_ALIAS_ADD, targetId, alias),
+  deleteRawMaterialAlias: (id: string) => ipcRenderer.invoke(CH.RAW_ALIAS_DELETE, id),
+  listComponentAliases: () => ipcRenderer.invoke(CH.COMP_ALIAS_LIST),
+  addComponentAlias: (targetId: string, alias: string) =>
+    ipcRenderer.invoke(CH.COMP_ALIAS_ADD, targetId, alias),
+  deleteComponentAlias: (id: string) => ipcRenderer.invoke(CH.COMP_ALIAS_DELETE, id),
 
   // Plans
   listPlans: () => ipcRenderer.invoke(CH.PLAN_LIST),

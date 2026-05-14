@@ -5,9 +5,23 @@ import { autoUpdater } from 'electron-updater';
 import Database from '../database';
 import log from '../utils/logger';
 import { IPC } from '../../shared/ipcChannels';
-import type { StoreSchema, StockKind, Lang } from '../../shared/types';
+import type {
+  StoreSchema,
+  StockKind,
+  Lang,
+  RawMaterialsImportMode,
+  RecipeImportMode,
+  RecipeImportResolutions,
+} from '../../shared/types';
 import { parseStockXlsx } from '../services/xlsxStockImporter';
+import { importRawMaterialsXlsx } from '../services/xlsxRawMaterialsImporter';
+import {
+  analyzeRecipesXlsx,
+  commitRecipesXlsx,
+  exportRecipesXlsx,
+} from '../services/recipesXlsxService';
 import { matchOne } from '../services/matcher';
+import { suggestMatches, normalize as normalizeAlias } from '../services/smartMatcher';
 import { computeShortages } from '../services/shortageCalculator';
 import { computeCost } from '../services/costCalculator';
 import { generateEmailsForReport, regenerateBatchEmail } from '../services/rfqGenerator';
@@ -33,6 +47,24 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.RAW_UPDATE, (_e, id: string, patch) => db.updateRawMaterial(id, patch));
   ipcMain.handle(IPC.RAW_DELETE, (_e, id: string) => db.deleteRawMaterial(id));
 
+  ipcMain.handle(IPC.RAW_XLSX_IMPORT, async (_e, mode: RawMaterialsImportMode) => {
+    const win = getMainWindow();
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Wybierz plik z surowcami (xlsx)',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { ok: false };
+    try {
+      const summary = await importRawMaterialsXlsx(result.filePaths[0], mode, db);
+      db.updateSettings({ lastImportDir: path.dirname(result.filePaths[0]) });
+      return { ok: true, summary };
+    } catch (err) {
+      log.error('[raw-materials-import] failed:', err);
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
   // ---- Components ----
   ipcMain.handle(IPC.COMP_LIST, () => db.listComponents());
   ipcMain.handle(IPC.COMP_GET, (_e, id: string) => db.getComponent(id));
@@ -47,6 +79,61 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.PRODUCTS_UPDATE, (_e, id: string, patch) => db.updateProduct(id, patch));
   ipcMain.handle(IPC.PRODUCTS_DELETE, (_e, id: string) => db.deleteProduct(id));
   ipcMain.handle(IPC.PRODUCTS_DUPLICATE, (_e, id: string) => db.duplicateProduct(id));
+
+  // Two-phase recipe import. The analyze call shows the file picker and
+  // returns the list of catalog items the file references but the catalog
+  // can't resolve, so the renderer can prompt the user per item. The commit
+  // call carries the user's decisions and performs the actual import.
+  ipcMain.handle(IPC.PRODUCTS_RECIPES_XLSX_ANALYZE, async (_e, mode: RecipeImportMode) => {
+    const win = getMainWindow();
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Wybierz plik z recepturami (xlsx)',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { ok: false };
+    try {
+      const analysis = await analyzeRecipesXlsx(result.filePaths[0], mode, db);
+      db.updateSettings({ lastImportDir: path.dirname(result.filePaths[0]) });
+      return { ok: true, analysis };
+    } catch (err) {
+      log.error('[recipes-analyze] failed:', err);
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle(
+    IPC.PRODUCTS_RECIPES_XLSX_COMMIT,
+    async (
+      _e,
+      args: { filePath: string; mode: RecipeImportMode; resolutions: RecipeImportResolutions },
+    ) => {
+      try {
+        const summary = await commitRecipesXlsx(args.filePath, args.mode, args.resolutions, db);
+        return { ok: true, summary };
+      } catch (err) {
+        log.error('[recipes-commit] failed:', err);
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(IPC.PRODUCTS_RECIPES_XLSX_EXPORT, async () => {
+    const win = getMainWindow();
+    const result = await dialog.showSaveDialog(win!, {
+      title: 'Eksportuj receptury (xlsx)',
+      defaultPath: `Plik z recepturami ${new Date().toISOString().slice(0, 10)}.xlsx`,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false };
+    try {
+      await exportRecipesXlsx(result.filePath, db);
+      return { ok: true, path: result.filePath };
+    } catch (err) {
+      log.error('[recipes-export] failed:', err);
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
   // ---- Stock ----
   ipcMain.handle(IPC.STOCK_SELECT_FILES, async () => {
@@ -87,7 +174,28 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
             ? (await db.listRawMaterials()).map((r) => ({ id: r.id, name: r.name, mpFirmaSymbol: r.mpFirmaSymbol }))
             : (await db.listComponents()).map((c) => ({ id: c.id, name: c.name, mpFirmaSymbol: c.mpFirmaSymbol }));
 
+        // Lookup table from user-trained aliases: normalized alias → target id.
+        const aliases =
+          kind === 'raw' ? await db.listRawMaterialAliases() : await db.listComponentAliases();
+        const aliasMap = new Map<string, string>();
+        for (const a of aliases) {
+          aliasMap.set(normalizeAlias(a.alias), a.targetId);
+        }
+
         for (const row of snapshot.rows) {
+          const aliasHit = aliasMap.get(normalizeAlias(row.name));
+          if (aliasHit) {
+            if (kind === 'raw') row.matchedRawMaterialId = aliasHit;
+            else row.matchedComponentId = aliasHit;
+            row.matchConfidence = 1;
+            row.matchAmbiguous = false;
+            matched++;
+            if (typeof row.netPrice === 'number' && row.netPrice > 0) {
+              if (kind === 'raw') await db.setRawMaterialLastPrice(aliasHit, row.netPrice, row.currency);
+              else await db.setComponentLastPrice(aliasHit, row.netPrice, row.currency);
+            }
+            continue;
+          }
           const result = matchOne({ name: row.name, mpFirmaSymbol: row.mpFirmaSymbol }, candidates);
           row.matchConfidence = result.confidence;
           row.matchAmbiguous = result.ambiguous;
@@ -172,6 +280,48 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.STOCK_DELETE_KIND, (_e, kind: StockKind) =>
     db.deleteSnapshotsByKind(kind),
   );
+  ipcMain.handle(
+    IPC.STOCK_SUGGEST_MATCHES,
+    async (
+      _e,
+      kind: StockKind,
+      source: { name: string; mpFirmaSymbol?: string },
+      limit?: number,
+    ) => {
+      // Build candidate list with stored aliases attached so the matcher can
+      // score a row against alias names too (e.g. "Spirual" stored as alias on
+      // "Spirualit" should bump the latter to the top).
+      const aliases =
+        kind === 'raw' ? await db.listRawMaterialAliases() : await db.listComponentAliases();
+      const aliasByTarget = new Map<string, string[]>();
+      for (const a of aliases) {
+        const arr = aliasByTarget.get(a.targetId) ?? [];
+        arr.push(a.alias);
+        aliasByTarget.set(a.targetId, arr);
+      }
+      const baseCandidates =
+        kind === 'raw'
+          ? (await db.listRawMaterials()).map((r) => ({ id: r.id, name: r.name, mpFirmaSymbol: r.mpFirmaSymbol }))
+          : (await db.listComponents()).map((c) => ({ id: c.id, name: c.name, mpFirmaSymbol: c.mpFirmaSymbol }));
+      const candidates = baseCandidates.map((c) => ({
+        ...c,
+        aliases: aliasByTarget.get(c.id),
+      }));
+      return suggestMatches(source, candidates, { limit: limit ?? 3 });
+    },
+  );
+
+  // ---- Catalog aliases (raw materials + components) ----
+  ipcMain.handle(IPC.RAW_ALIAS_LIST, () => db.listRawMaterialAliases());
+  ipcMain.handle(IPC.RAW_ALIAS_ADD, (_e, targetId: string, alias: string) =>
+    db.addRawMaterialAlias(targetId, alias),
+  );
+  ipcMain.handle(IPC.RAW_ALIAS_DELETE, (_e, id: string) => db.deleteRawMaterialAlias(id));
+  ipcMain.handle(IPC.COMP_ALIAS_LIST, () => db.listComponentAliases());
+  ipcMain.handle(IPC.COMP_ALIAS_ADD, (_e, targetId: string, alias: string) =>
+    db.addComponentAlias(targetId, alias),
+  );
+  ipcMain.handle(IPC.COMP_ALIAS_DELETE, (_e, id: string) => db.deleteComponentAlias(id));
 
   // ---- Plan ----
   ipcMain.handle(IPC.PLAN_LIST, () => db.listPlans());

@@ -10,6 +10,7 @@ import type {
 } from '../../shared/types';
 import type { ViewKey } from './types';
 import NoPlansEmptyState from '../components/NoPlansEmptyState';
+import LoadingOverlay from '../components/LoadingOverlay';
 import MultiSelect from '../components/MultiSelect';
 import HoverTooltip from '../components/HoverTooltip';
 import PlanEditorModal from '../components/PlanEditorModal';
@@ -72,6 +73,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
   const [reports, setReports] = useState<CostReport[]>(() => loadState().reports);
   const [expandedIds, setExpandedIds] = useState<string[]>(() => loadState().expandedIds);
   const [busy, setBusy] = useState(false);
+  const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [editingPlan, setEditingPlan] = useState<Partial<ProductionPlan> | null>(null);
@@ -90,10 +92,21 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
     setProducts(pr);
     setRawMaterials(rm);
     setComponents(cs);
+    const existingIds = new Set(ps.map((p) => p.id));
+    setPlanIds((prev) => prev.filter((id) => existingIds.has(id)));
+    setReports((prev) => prev.filter((r) => existingIds.has(r.planId)));
+    setExpandedIds((prev) => prev.filter((id) => existingIds.has(id)));
   };
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      setLoaderMessage(t.loading);
+      try {
+        await reload();
+      } finally {
+        setLoaderMessage(null);
+      }
+    })();
   }, []);
 
   const openPlanPreview = (planId: string) => {
@@ -164,6 +177,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
   const compute = async () => {
     if (planIds.length === 0) return;
     setBusy(true);
+    setLoaderMessage(t.loaderComputing);
     setError(null);
     try {
       const next = await Promise.all(
@@ -174,6 +188,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
       setError((err as Error).message);
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -389,7 +404,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
                                   {t.missingPricesTooltipExplain}
                                 </div>
                                 <ul className="shortage-tooltip-list">
-                                  {line.missingPriceItems.slice(0, 10).map((m) => (
+                                  {line.missingPriceItems.map((m) => (
                                     <li key={`${m.kind}-${m.itemId}`}>
                                       <span className="shortage-tooltip-name">
                                         {m.itemName}
@@ -400,11 +415,6 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
                                     </li>
                                   ))}
                                 </ul>
-                                {line.missingPriceItems.length > 10 && (
-                                  <div className="shortage-tooltip-more hint">
-                                    + {line.missingPriceItems.length - 10}
-                                  </div>
-                                )}
                               </HoverTooltip>
                             )}
                           </td>
@@ -443,6 +453,8 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
           onEnterEdit={() => setProductModalReadOnly(false)}
         />
       )}
+
+      {loaderMessage && <LoadingOverlay message={loaderMessage} />}
     </div>
   );
 };

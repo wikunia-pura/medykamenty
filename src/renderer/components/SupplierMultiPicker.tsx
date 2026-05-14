@@ -102,6 +102,14 @@ const SupplierMultiPicker: React.FC<Props> = ({
     onChange(next, nextPreferred);
   };
 
+  const removeChip = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const next = selectedIds.filter((s) => s !== id);
+    const nextPreferred =
+      preferredId && next.includes(preferredId) ? preferredId : next[0];
+    onChange(next, nextPreferred);
+  };
+
   const setPreferred = (id: string) => {
     if (!selectedIds.includes(id)) {
       onChange([...selectedIds, id], id);
@@ -130,12 +138,20 @@ const SupplierMultiPicker: React.FC<Props> = ({
               {selectedSummary.map((s) => (
                 <span
                   key={s.id}
-                  className={`supplier-chip${s.id === preferredId ? ' preferred' : ''}`}
+                  className={`supplier-chip removable${s.id === preferredId ? ' preferred' : ''}`}
                 >
                   {s.id === preferredId && (
                     <IconStar size={10} className="supplier-chip-star" />
                   )}
-                  {s.name}
+                  <span className="supplier-chip-label">{s.name}</span>
+                  <button
+                    type="button"
+                    className="supplier-chip-remove"
+                    onClick={(e) => removeChip(e, s.id)}
+                    aria-label="remove"
+                  >
+                    <IconClose size={10} />
+                  </button>
                 </span>
               ))}
             </span>

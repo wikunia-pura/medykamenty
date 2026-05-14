@@ -9,6 +9,8 @@ export interface Supplier {
   name: string;
   email: string;
   phone?: string;
+  contactPerson?: string;
+  paymentTerms?: string;
   notes?: string;
   preferredEmailLanguage?: Lang;
   createdAt: ISODate;
@@ -33,6 +35,10 @@ export interface RawMaterial {
   updatedAt: ISODate;
 }
 
+// Primary packaging belongs to the "Komponenty" section in the recipe Excel:
+//   tube, bottle, jar, label, cap, pump, pipette, box (kartonik produktowy), leaflet.
+// Secondary packaging belongs to "Pozostałe komponenty":
+//   outer_carton, tape, barrel, bag, confection (Konfekcja), other.
 export type ComponentType =
   | 'tube'
   | 'bottle'
@@ -43,7 +49,24 @@ export type ComponentType =
   | 'pipette'
   | 'box'
   | 'leaflet'
+  | 'outer_carton'
+  | 'tape'
+  | 'barrel'
+  | 'bag'
+  | 'confection'
   | 'other';
+
+export const SECONDARY_COMPONENT_TYPES: readonly ComponentType[] = [
+  'outer_carton',
+  'tape',
+  'barrel',
+  'bag',
+  'confection',
+] as const;
+
+export function isSecondaryComponent(type: ComponentType): boolean {
+  return (SECONDARY_COMPONENT_TYPES as readonly string[]).includes(type);
+}
 
 export interface PackagingComponent {
   id: UUID;
@@ -78,12 +101,34 @@ export interface Product {
   capacityMl: number;
   densityGPerMl: number;
   conversionLaborCost?: number;
+  // MOQ as full retail units of this product (separate from raw-material MOQ).
+  // Imported from "MOQ [szt.]" in the recipe Excel.
+  moqUnits?: number;
+  // Mass (kg) of bulk to set aside for sample sachets. Sourced from
+  // "Masa na saszetki [kg]" in the recipe Excel.
+  sachetMassKg?: number;
+  // Number of sachets that the `sachetMassKg` produces (varies per product —
+  // e.g. 22 kg → 10 000 sachets). User-supplied, not present in the Excel.
+  sachetsCount?: number;
   ingredients: RecipeIngredient[];
   packaging: RecipePackaging[];
   notes?: string;
   archived: boolean;
   createdAt: ISODate;
   updatedAt: ISODate;
+}
+
+export interface CatalogAlias {
+  id: UUID;
+  targetId: UUID;
+  alias: string;
+  createdAt: ISODate;
+}
+
+export interface MatchSuggestion {
+  id: UUID;
+  name: string;
+  confidence: number;
 }
 
 export interface StockRow {
@@ -174,6 +219,93 @@ export interface ImportSummary {
   matched: number;
   ambiguous: number;
   unmatched: number;
+}
+
+export type RawMaterialsImportMode = 'merge' | 'overwrite';
+
+export interface RawMaterialsImportSummary {
+  mode: RawMaterialsImportMode;
+  rawCreated: number;
+  rawUpdated: number;
+  rawSkipped: number;
+  rawDeleted: number;
+  suppliersCreated: number;
+  suppliersUpdated: number;
+  warnings: string[];
+}
+
+export type RecipeImportMode = 'merge' | 'overwrite';
+
+export interface RecipeImportProductResult {
+  productName: string;
+  // 'created' when no product matched by name, 'updated' for merge/overwrite of
+  // an existing one, 'skipped' if the row was unusable (e.g. no name).
+  action: 'created' | 'updated' | 'skipped';
+  capacityMl?: number;
+  ingredientCount: number;
+  packagingCount: number;
+  // Names of components that defaulted to qtyPerUnit=1 but represent secondary
+  // packaging (outer cartons, tape, barrels, bags). The user needs to revise
+  // these manually because qty-per-unit is a ratio for those, not 1:1.
+  qtyReviewNeeded: string[];
+  warnings: string[];
+}
+
+export interface RecipeImportSummary {
+  fileName: string;
+  mode: RecipeImportMode;
+  productsCreated: number;
+  productsUpdated: number;
+  productsSkipped: number;
+  rawMaterialsCreated: number;
+  componentsCreated: number;
+  perProduct: RecipeImportProductResult[];
+  globalWarnings: string[];
+}
+
+// Item from a recipe XLSX that didn't resolve to an existing catalog entry.
+// The user picks an action per item before the import commits.
+export interface RecipeImportUnresolvedItem {
+  // Verbatim name from the file (already trimmed).
+  name: string;
+  // Component section hint when kind==='component'.
+  section?: 'primary' | 'secondary';
+  // MY/RETTER hint when kind==='raw' — drives factorySupplied on add-new.
+  channel?: 'MY' | 'RETTER';
+  // Products that reference this item — shown so the user understands the
+  // scope of the decision.
+  productNames: string[];
+  suggestions: MatchSuggestion[];
+}
+
+export interface RecipeImportAnalysis {
+  fileName: string;
+  // Echoed back so commit() doesn't have to re-pick the file.
+  filePath: string;
+  mode: RecipeImportMode;
+  blockCount: number;
+  unresolvedRaws: RecipeImportUnresolvedItem[];
+  unresolvedComponents: RecipeImportUnresolvedItem[];
+}
+
+// User decision for a single unresolved item. Differs from stock import:
+// no `use-once` and no `skip` — products are a durable list and require
+// every referenced raw / component, so every link has to be permanent
+// (alias / rename / new entry).
+export type RecipeResolveAction =
+  | { type: 'save-alias'; targetId: string }
+  | { type: 'rename-existing'; targetId: string }
+  | { type: 'add-new' };
+
+export interface RecipeImportResolutionEntry {
+  // Match against analysis.unresolvedRaws[i].name verbatim.
+  name: string;
+  action: RecipeResolveAction;
+}
+
+export interface RecipeImportResolutions {
+  rawMaterials: RecipeImportResolutionEntry[];
+  components: RecipeImportResolutionEntry[];
 }
 
 export interface ShortageLine {

@@ -4,6 +4,7 @@ import { HeaderNav } from '../navigation';
 import type { AppSettings, Lang } from '../../shared/types';
 import Toggle from '../components/Toggle';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LoadingOverlay from '../components/LoadingOverlay';
 import SearchableSelect from '../components/SearchableSelect';
 import NumberInput from '../components/NumberInput';
 
@@ -16,6 +17,7 @@ interface Props {
 const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
   const t = useT();
   const [busy, setBusy] = useState<string | null>(null);
+  const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [wipeMessage, setWipeMessage] = useState<string | null>(null);
@@ -29,29 +31,34 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
 
   const exportData = async () => {
     setBusy('export');
+    setLoaderMessage(t.loaderExporting);
     setInfo(null);
     try {
       const r = await window.electronAPI.exportBackup();
       if (r.ok && r.path) setInfo(`${t.exportData}: ${r.path}`);
     } finally {
       setBusy(null);
+      setLoaderMessage(null);
     }
   };
 
   const importData = async (mode: 'merge' | 'replace') => {
     setBusy(`import-${mode}`);
+    setLoaderMessage(t.loaderImporting);
     setInfo(null);
     try {
       const r = await window.electronAPI.importBackup(mode);
       if (r.ok) setInfo(`${t.importData}: ${r.applied ?? 0}`);
     } finally {
       setBusy(null);
+      setLoaderMessage(null);
     }
   };
 
   const runDemo = async () => {
     setConfirmDemo(false);
     setBusy('demo');
+    setLoaderMessage(t.loaderSeeding);
     setDemoMessage(null);
     try {
       await window.electronAPI.seedDemo();
@@ -60,12 +67,14 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
       setDemoMessage((err as Error).message);
     } finally {
       setBusy(null);
+      setLoaderMessage(null);
     }
   };
 
   const runWipe = async () => {
     setConfirmWipe(false);
     setBusy('wipe');
+    setLoaderMessage(t.loaderWiping);
     setWipeMessage(null);
     try {
       await window.electronAPI.wipeData();
@@ -74,6 +83,7 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
       setWipeMessage((err as Error).message);
     } finally {
       setBusy(null);
+      setLoaderMessage(null);
     }
   };
 
@@ -274,6 +284,8 @@ const SettingsView: React.FC<Props> = ({ settings, onChange, aiAvailable }) => {
           danger
         />
       )}
+
+      {loaderMessage && <LoadingOverlay message={loaderMessage} />}
     </div>
   );
 };

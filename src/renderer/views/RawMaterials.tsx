@@ -1,15 +1,30 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
-import type { RawMaterial, Supplier, Unit } from '../../shared/types';
+import type {
+  RawMaterial,
+  RawMaterialsImportMode,
+  RawMaterialsImportSummary,
+  Supplier,
+  Unit,
+} from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
+import BlockedByDialog from '../components/BlockedByDialog';
+import LoadingOverlay from '../components/LoadingOverlay';
 import SupplierMultiPicker from '../components/SupplierMultiPicker';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
 import NumberInput from '../components/NumberInput';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
-import { IconEdit, IconTrash, IconPlus, IconStar } from '../components/Icons';
+import {
+  IconEdit,
+  IconTrash,
+  IconPlus,
+  IconStar,
+  IconImport,
+  IconClose,
+} from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
 import { useEscapeKey } from '../utils/useEscapeKey';
@@ -29,12 +44,21 @@ const RawMaterials: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [editing, setEditing] = useState<Partial<RawMaterial> | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<RawMaterial | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
+  const [xlsxSummary, setXlsxSummary] = useState<RawMaterialsImportSummary | null>(null);
+  // XLSX import: when not null, the mode-selection modal is open with this
+  // mode pre-selected. The actual file pick happens in the main process after
+  // the user confirms the mode.
+  const [xlsxImportMode, setXlsxImportMode] = useState<RawMaterialsImportMode | null>(null);
+  const [blockedBy, setBlockedBy] = useState<string[] | null>(null);
 
   useEscapeKey(() => setEditing(null), !!editing);
+  useEscapeKey(() => setXlsxSummary(null), !!xlsxSummary);
 
   const COLUMNS: ColumnDef[] = useMemo(
     () => [
@@ -113,7 +137,9 @@ const RawMaterials: React.FC = () => {
       case 'factory':
         return (
           <td key={id}>
-            {rm.factorySupplied ? <span className="tag warn">factory</span> : ''}
+            {rm.factorySupplied
+              ? <span className="tag success">{t.yes}</span>
+              : <span className="tag danger">{t.no}</span>}
           </td>
         );
       case 'notes':
@@ -133,7 +159,14 @@ const RawMaterials: React.FC = () => {
   };
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      setLoaderMessage(t.loading);
+      try {
+        await reload();
+      } finally {
+        setLoaderMessage(null);
+      }
+    })();
   }, []);
 
   const supplierName = (id?: string) => suppliers.find((s) => s.id === id)?.name ?? '—';
@@ -195,11 +228,13 @@ const RawMaterials: React.FC = () => {
       return;
     }
     setBusy(true);
+    setLoaderMessage(t.loaderExporting);
     try {
       const { content, filename } = exportRawMaterialsCsv(items, suppliers);
       await saveFile(filename, content, 'csv');
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -207,6 +242,7 @@ const RawMaterials: React.FC = () => {
     setError(null);
     setInfo(null);
     setBusy(true);
+    setLoaderMessage(t.loaderImporting);
     try {
       const r = await openFile('csv');
       if (!r.ok || !r.content) return;
@@ -219,6 +255,47 @@ const RawMaterials: React.FC = () => {
       }
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
+    }
+  };
+
+  const runImportXlsx = async (mode: RawMaterialsImportMode) => {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setLoaderMessage(t.loaderImporting);
+    try {
+      const res = await window.electronAPI.importRawMaterialsXlsx(mode);
+      // User canceling the OS file picker returns ok:false with no error.
+      if (res.ok && res.summary) {
+        setXlsxSummary(res.summary);
+        setXlsxImportMode(null);
+        await reload();
+      } else {
+        setXlsxImportMode(null);
+        if (res.error) setError(`${t.rawMaterialsImportFailed}: ${res.error}`);
+      }
+    } catch (err) {
+      setError(`${t.rawMaterialsImportFailed}: ${(err as Error).message}`);
+      setXlsxImportMode(null);
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+  };
+
+  const onConfirmImportXlsx = async () => {
+    if (!xlsxImportMode) return;
+    await runImportXlsx(xlsxImportMode);
+  };
+
+  // When the list is empty, merge and overwrite are equivalent — skip the
+  // dialog and import straight away.
+  const onClickImportXlsx = () => {
+    if (items.length === 0) {
+      void runImportXlsx('merge');
+    } else {
+      setXlsxImportMode('merge');
     }
   };
 
@@ -226,9 +303,46 @@ const RawMaterials: React.FC = () => {
     setConfirmDelete(null);
     const result = await window.electronAPI.deleteRawMaterial(rm.id);
     if (!result.ok) {
-      setError(`${t.error}: ${result.blockedBy?.join(', ') ?? ''}`);
+      setBlockedBy(result.blockedBy ?? []);
     } else {
       await reload();
+    }
+  };
+
+  const onDeleteAll = async () => {
+    setConfirmDeleteAll(false);
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setLoaderMessage(t.deleteAllInProgress);
+    const total = items.length;
+    let deleted = 0;
+    let blocked = 0;
+    const blockers: string[] = [];
+    try {
+      for (const rm of items) {
+        const result = await window.electronAPI.deleteRawMaterial(rm.id);
+        if (result.ok) deleted++;
+        else {
+          blocked++;
+          if (result.blockedBy) blockers.push(...result.blockedBy);
+        }
+      }
+      if (blocked === 0) {
+        setInfo(t.deleteAllSuccess.replace('{n}', String(deleted)));
+      } else {
+        setInfo(
+          t.deleteAllPartial
+            .replace('{n}', String(deleted))
+            .replace('{total}', String(total))
+            .replace('{blocked}', String(blocked)),
+        );
+        setBlockedBy(Array.from(new Set(blockers)));
+      }
+      await reload();
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -282,6 +396,14 @@ const RawMaterials: React.FC = () => {
               onImport={onImport}
               busy={busy}
             />
+            <button
+              className="btn btn-import"
+              onClick={onClickImportXlsx}
+              disabled={busy}
+              title={t.rawMaterialsImportXlsxHint}
+            >
+              <IconImport size={13} /> {t.rawMaterialsImportXlsx}
+            </button>
             <ColumnPicker
               columns={orderedColumns}
               isVisible={isVisible}
@@ -289,6 +411,14 @@ const RawMaterials: React.FC = () => {
               reorder={reorder}
               reset={resetColumns}
             />
+            <button
+              className="btn danger"
+              onClick={() => setConfirmDeleteAll(true)}
+              disabled={busy || items.length === 0}
+              title={t.deleteAll}
+            >
+              <IconTrash size={13} /> {t.deleteAll}
+            </button>
             <button className="btn primary toolbar-action-primary" onClick={onAdd}>
               <IconPlus size={14} /> {t.add}
             </button>
@@ -470,6 +600,195 @@ const RawMaterials: React.FC = () => {
           danger
         />
       )}
+
+      {confirmDeleteAll && (
+        <ConfirmDialog
+          message={t.deleteAllConfirm.replace('{n}', String(items.length))}
+          onConfirm={onDeleteAll}
+          onCancel={() => setConfirmDeleteAll(false)}
+          danger
+        />
+      )}
+
+      {xlsxImportMode !== null && (
+        <RawMaterialsImportModeDialog
+          mode={xlsxImportMode}
+          onChange={setXlsxImportMode}
+          onCancel={() => setXlsxImportMode(null)}
+          onConfirm={onConfirmImportXlsx}
+          busy={busy}
+        />
+      )}
+
+      {xlsxSummary && (
+        <XlsxImportSummaryModal
+          summary={xlsxSummary}
+          onClose={() => setXlsxSummary(null)}
+        />
+      )}
+
+      {blockedBy && (
+        <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />
+      )}
+
+      {loaderMessage && <LoadingOverlay message={loaderMessage} />}
+    </div>
+  );
+};
+
+// ---------- Mode picker ----------
+
+interface ModeDialogProps {
+  mode: RawMaterialsImportMode;
+  onChange: (m: RawMaterialsImportMode) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  busy: boolean;
+}
+
+const RawMaterialsImportModeDialog: React.FC<ModeDialogProps> = ({
+  mode,
+  onChange,
+  onCancel,
+  onConfirm,
+  busy,
+}) => {
+  const t = useT();
+  useEscapeKey(onCancel, !busy);
+  return (
+    <div className="modal-overlay" onClick={busy ? undefined : onCancel}>
+      <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
+        <ModalHeader
+          icon={<IconImport size={18} />}
+          tone="add"
+          title={t.rawMaterialsImportDialogTitle}
+          onClose={onCancel}
+        />
+        <div className="modal-body">
+          <label
+            className="form-row"
+            style={{ alignItems: 'flex-start', cursor: 'pointer' }}
+          >
+            <input
+              type="radio"
+              name="raw-import-mode"
+              checked={mode === 'merge'}
+              onChange={() => onChange('merge')}
+              disabled={busy}
+              style={{ marginTop: 4 }}
+            />
+            <div style={{ marginLeft: 8 }}>
+              <strong>{t.rawMaterialsImportModeMerge}</strong>
+              <div className="hint" style={{ marginTop: 4 }}>
+                {t.rawMaterialsImportModeMergeDesc}
+              </div>
+            </div>
+          </label>
+          <label
+            className="form-row"
+            style={{ alignItems: 'flex-start', cursor: 'pointer' }}
+          >
+            <input
+              type="radio"
+              name="raw-import-mode"
+              checked={mode === 'overwrite'}
+              onChange={() => onChange('overwrite')}
+              disabled={busy}
+              style={{ marginTop: 4 }}
+            />
+            <div style={{ marginLeft: 8 }}>
+              <strong>{t.rawMaterialsImportModeOverwrite}</strong>
+              <div className="hint" style={{ marginTop: 4 }}>
+                {t.rawMaterialsImportModeOverwriteDesc}
+              </div>
+            </div>
+          </label>
+        </div>
+        <div className="modal-footer">
+          <button className="btn" onClick={onCancel} disabled={busy}>
+            {t.cancel}
+          </button>
+          <button
+            className={`btn ${mode === 'overwrite' ? 'danger' : 'primary-filled'}`}
+            onClick={onConfirm}
+            disabled={busy}
+          >
+            {t.rawMaterialsImportConfirm}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+interface XlsxSummaryModalProps {
+  summary: RawMaterialsImportSummary;
+  onClose: () => void;
+}
+
+const XlsxImportSummaryModal: React.FC<XlsxSummaryModalProps> = ({ summary, onClose }) => {
+  const t = useT();
+  useEscapeKey(onClose);
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
+        <ModalHeader
+          icon={<IconImport size={18} />}
+          tone="add"
+          title={t.rawMaterialsImportSummary}
+          onClose={onClose}
+        />
+        <div className="modal-body">
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+            <li>
+              {t.rawMaterialsImportRawCreated}: <strong>{summary.rawCreated}</strong>
+            </li>
+            <li>
+              {t.rawMaterialsImportRawUpdated}: <strong>{summary.rawUpdated}</strong>
+            </li>
+            {summary.rawSkipped > 0 && (
+              <li>
+                {t.rawMaterialsImportRawSkipped}: <strong>{summary.rawSkipped}</strong>
+              </li>
+            )}
+            {summary.rawDeleted > 0 && (
+              <li>
+                {t.rawMaterialsImportRawDeleted}: <strong>{summary.rawDeleted}</strong>
+              </li>
+            )}
+            <li>
+              {t.rawMaterialsImportSuppliersCreated}:{' '}
+              <strong>{summary.suppliersCreated}</strong>
+            </li>
+            <li>
+              {t.rawMaterialsImportSuppliersUpdated}:{' '}
+              <strong>{summary.suppliersUpdated}</strong>
+            </li>
+          </ul>
+          {summary.warnings.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ marginBottom: 6 }}>
+                <strong>{t.rawMaterialsImportWarnings}</strong> ({summary.warnings.length})
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+                {summary.warnings.slice(0, 20).map((w, i) => (
+                  <li key={i} className="hint">
+                    {w}
+                  </li>
+                ))}
+                {summary.warnings.length > 20 && (
+                  <li className="hint">… +{summary.warnings.length - 20}</li>
+                )}
+              </ul>
+            </div>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn primary-filled" onClick={onClose}>
+            <IconClose size={13} /> {t.close}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

@@ -224,7 +224,13 @@ const App: React.FC = () => {
     if (!settings) return <div className="main">Loading…</div>;
     switch (view) {
       case 'dashboard':
-        return <Dashboard onNavigate={setView} onNavigateToReport={navigateToReport} />;
+        return (
+          <Dashboard
+            key={`dashboard-${sidebarTick}`}
+            onNavigate={setView}
+            onNavigateToReport={navigateToReport}
+          />
+        );
       case 'products':
         return <Products />;
       case 'rawMaterials':
@@ -244,6 +250,7 @@ const App: React.FC = () => {
             onInitialSearchConsumed={() => setPlanSearchQuery('')}
             onNavigateToReport={navigateToReport}
             onNavigateToBatch={navigateToBatch}
+            onNavigate={setView}
           />
         );
       case 'shortageReport':

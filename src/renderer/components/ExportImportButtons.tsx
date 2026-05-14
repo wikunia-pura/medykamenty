@@ -23,7 +23,7 @@ const ExportImportButtons: React.FC<Props> = ({
   return (
     <>
       <button
-        className="btn"
+        className="btn btn-export"
         onClick={onExport}
         disabled={busy || disableExport}
         title={exportLabel}
@@ -31,7 +31,7 @@ const ExportImportButtons: React.FC<Props> = ({
         <IconExport size={13} /> {exportLabel}
       </button>
       <button
-        className="btn"
+        className="btn btn-import"
         onClick={onImport}
         disabled={busy}
         title={importLabel}

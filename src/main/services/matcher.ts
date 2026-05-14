@@ -13,8 +13,18 @@ export interface MatchResult {
   alternatives?: { id: string; confidence: number }[];
 }
 
+// Strip invisible characters (zero-width space, ZWNJ, ZWJ, word joiner, BOM,
+// soft hyphen) before trim/lowercase/whitespace-collapse so two names that
+// look identical can't have different bytes. Kept in sync with the recipe
+// importer's `normalize` so both flows match the same way.
+const INVISIBLE_CHARS = /[​-‍⁠﻿­]/gu;
+
 function normalize(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, ' ');
+  return s
+    .replace(INVISIBLE_CHARS, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
 }
 
 // Levenshtein distance — for short strings (≤ ~100 chars) this is fast enough

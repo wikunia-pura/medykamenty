@@ -8,6 +8,12 @@ import type {
   ProductionPlan,
   AppSettings,
   ImportSummary,
+  RawMaterialsImportMode,
+  RawMaterialsImportSummary,
+  RecipeImportAnalysis,
+  RecipeImportMode,
+  RecipeImportResolutions,
+  RecipeImportSummary,
   ShortageReport,
   ShortageReportEntry,
   CostReport,
@@ -15,6 +21,8 @@ import type {
   MaxProducibleResult,
   Lang,
   StoreSchema,
+  CatalogAlias,
+  MatchSuggestion,
 } from '../shared/types';
 
 export interface ElectronAPI {
@@ -33,6 +41,11 @@ export interface ElectronAPI {
   ): Promise<RawMaterial>;
   updateRawMaterial(id: string, patch: Partial<RawMaterial>): Promise<RawMaterial>;
   deleteRawMaterial(id: string): Promise<{ ok: boolean; blockedBy?: string[] }>;
+  importRawMaterialsXlsx(mode: RawMaterialsImportMode): Promise<{
+    ok: boolean;
+    summary?: RawMaterialsImportSummary;
+    error?: string;
+  }>;
 
   // Components
   listComponents(): Promise<PackagingComponent[]>;
@@ -50,6 +63,15 @@ export interface ElectronAPI {
   updateProduct(id: string, patch: Partial<Product>): Promise<Product>;
   deleteProduct(id: string): Promise<{ ok: boolean }>;
   duplicateProduct(id: string): Promise<Product>;
+  analyzeRecipesXlsx(
+    mode: RecipeImportMode,
+  ): Promise<{ ok: boolean; analysis?: RecipeImportAnalysis; error?: string }>;
+  commitRecipesXlsx(
+    filePath: string,
+    mode: RecipeImportMode,
+    resolutions: RecipeImportResolutions,
+  ): Promise<{ ok: boolean; summary?: RecipeImportSummary; error?: string }>;
+  exportRecipesXlsx(): Promise<{ ok: boolean; path?: string; error?: string }>;
 
   // Stock
   selectStockFiles(): Promise<{ rawPath?: string; componentPath?: string }>;
@@ -77,6 +99,19 @@ export interface ElectronAPI {
   deleteStockSnapshotsByKind(
     kind: 'raw' | 'component',
   ): Promise<{ ok: boolean; deleted: number }>;
+  suggestStockMatches(
+    kind: 'raw' | 'component',
+    source: { name: string; mpFirmaSymbol?: string },
+    limit?: number,
+  ): Promise<MatchSuggestion[]>;
+
+  // Catalog aliases (smart fuzzy mappings)
+  listRawMaterialAliases(): Promise<CatalogAlias[]>;
+  addRawMaterialAlias(targetId: string, alias: string): Promise<CatalogAlias>;
+  deleteRawMaterialAlias(id: string): Promise<{ ok: boolean }>;
+  listComponentAliases(): Promise<CatalogAlias[]>;
+  addComponentAlias(targetId: string, alias: string): Promise<CatalogAlias>;
+  deleteComponentAlias(id: string): Promise<{ ok: boolean }>;
 
   // Plans
   listPlans(): Promise<ProductionPlan[]>;

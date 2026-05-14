@@ -3,6 +3,8 @@ import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
 import type { PackagingComponent, Supplier, ComponentType } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
+import BlockedByDialog from '../components/BlockedByDialog';
+import LoadingOverlay from '../components/LoadingOverlay';
 import SupplierMultiPicker from '../components/SupplierMultiPicker';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
@@ -40,10 +42,13 @@ const Components: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [editing, setEditing] = useState<Partial<PackagingComponent> | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<PackagingComponent | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
+  const [blockedBy, setBlockedBy] = useState<string[] | null>(null);
 
   useEscapeKey(() => setEditing(null), !!editing);
 
@@ -130,7 +135,14 @@ const Components: React.FC = () => {
   };
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      setLoaderMessage(t.loading);
+      try {
+        await reload();
+      } finally {
+        setLoaderMessage(null);
+      }
+    })();
   }, []);
 
   const supplierName = (id?: string) => suppliers.find((s) => s.id === id)?.name ?? '—';
@@ -188,11 +200,13 @@ const Components: React.FC = () => {
       return;
     }
     setBusy(true);
+    setLoaderMessage(t.loaderExporting);
     try {
       const { content, filename } = exportComponentsCsv(items, suppliers);
       await saveFile(filename, content, 'csv');
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -200,6 +214,7 @@ const Components: React.FC = () => {
     setError(null);
     setInfo(null);
     setBusy(true);
+    setLoaderMessage(t.loaderImporting);
     try {
       const r = await openFile('csv');
       if (!r.ok || !r.content) return;
@@ -212,6 +227,7 @@ const Components: React.FC = () => {
       }
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -219,9 +235,46 @@ const Components: React.FC = () => {
     setConfirmDelete(null);
     const result = await window.electronAPI.deleteComponent(c.id);
     if (!result.ok) {
-      setError(`${t.error}: ${result.blockedBy?.join(', ') ?? ''}`);
+      setBlockedBy(result.blockedBy ?? []);
     } else {
       await reload();
+    }
+  };
+
+  const onDeleteAll = async () => {
+    setConfirmDeleteAll(false);
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setLoaderMessage(t.deleteAllInProgress);
+    const total = items.length;
+    let deleted = 0;
+    let blocked = 0;
+    const blockers: string[] = [];
+    try {
+      for (const c of items) {
+        const result = await window.electronAPI.deleteComponent(c.id);
+        if (result.ok) deleted++;
+        else {
+          blocked++;
+          if (result.blockedBy) blockers.push(...result.blockedBy);
+        }
+      }
+      if (blocked === 0) {
+        setInfo(t.deleteAllSuccess.replace('{n}', String(deleted)));
+      } else {
+        setInfo(
+          t.deleteAllPartial
+            .replace('{n}', String(deleted))
+            .replace('{total}', String(total))
+            .replace('{blocked}', String(blocked)),
+        );
+        setBlockedBy(Array.from(new Set(blockers)));
+      }
+      await reload();
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -281,6 +334,14 @@ const Components: React.FC = () => {
               reorder={reorder}
               reset={resetColumns}
             />
+            <button
+              className="btn danger"
+              onClick={() => setConfirmDeleteAll(true)}
+              disabled={busy || items.length === 0}
+              title={t.deleteAll}
+            >
+              <IconTrash size={13} /> {t.deleteAll}
+            </button>
             <button className="btn primary toolbar-action-primary" onClick={onAdd}>
               <IconPlus size={14} /> {t.add}
             </button>
@@ -446,6 +507,21 @@ const Components: React.FC = () => {
           danger
         />
       )}
+
+      {confirmDeleteAll && (
+        <ConfirmDialog
+          message={t.deleteAllConfirm.replace('{n}', String(items.length))}
+          onConfirm={onDeleteAll}
+          onCancel={() => setConfirmDeleteAll(false)}
+          danger
+        />
+      )}
+
+      {blockedBy && (
+        <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />
+      )}
+
+      {loaderMessage && <LoadingOverlay message={loaderMessage} />}
     </div>
   );
 };

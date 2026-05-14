@@ -92,7 +92,7 @@ const ColumnPicker: React.FC<Props> = ({ columns, isVisible, toggle, reorder, re
       <button
         ref={triggerRef}
         type="button"
-        className="btn btn-sm"
+        className="btn columns-toggle"
         onClick={() => setOpen((v) => !v)}
         title={t.columnsConfigure}
       >

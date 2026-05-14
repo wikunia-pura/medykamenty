@@ -13,6 +13,7 @@ import type { ViewKey } from './types';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LoadingOverlay from '../components/LoadingOverlay';
 import HoverTooltip from '../components/HoverTooltip';
 import PlanEditorModal from '../components/PlanEditorModal';
 import {
@@ -76,11 +77,14 @@ const EmailGenerator: React.FC<Props> = ({
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [focus, setFocus] = useState<FocusState | null>(cache.focus);
   const [busy, setBusy] = useState(false);
+  const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [listQuery, setListQuery] = useState('');
   const [focusQuery, setFocusQuery] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<EmailBatch | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
   const [regenKey, setRegenKey] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [editingPlan, setEditingPlan] = useState<Partial<ProductionPlan> | null>(null);
@@ -145,9 +149,14 @@ const EmailGenerator: React.FC<Props> = ({
 
   useEffect(() => {
     void (async () => {
-      const { reports: r } = await loadAll();
-      const firstWithGroups = r.find((x) => x.report.groups.length > 0);
-      if (!selectedReportId && firstWithGroups) onSelectReport(firstWithGroups.id);
+      setLoaderMessage(t.loading);
+      try {
+        const { reports: r } = await loadAll();
+        const firstWithGroups = r.find((x) => x.report.groups.length > 0);
+        if (!selectedReportId && firstWithGroups) onSelectReport(firstWithGroups.id);
+      } finally {
+        setLoaderMessage(null);
+      }
     })();
   }, []);
 
@@ -159,6 +168,7 @@ const EmailGenerator: React.FC<Props> = ({
   const generate = async (reportId: string) => {
     if (!reportId) return;
     setBusy(true);
+    setLoaderMessage(t.loaderGenerating);
     setError(null);
     try {
       const batch = await window.electronAPI.generateEmails(reportId, {
@@ -174,6 +184,7 @@ const EmailGenerator: React.FC<Props> = ({
       setError((err as Error).message);
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -281,6 +292,29 @@ const EmailGenerator: React.FC<Props> = ({
     await loadAll();
   };
 
+  const onConfirmDeleteAll = async () => {
+    setConfirmDeleteAll(false);
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setLoaderMessage(t.deleteAllInProgress);
+    const total = batches.length;
+    try {
+      for (const b of batches) {
+        await window.electronAPI.deleteEmailBatch(b.id);
+      }
+      setInfo(t.deleteAllSuccess.replace('{n}', String(total)));
+      setFocusAndCache(null);
+      await loadAll();
+    } catch (err) {
+      setError((err as Error).message);
+      await loadAll();
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+  };
+
   // ----- Focus view: a single batch -----
   if (focus) {
     const { batch } = focus;
@@ -288,7 +322,13 @@ const EmailGenerator: React.FC<Props> = ({
     const filteredEmails = !focusQuery.trim()
       ? batch.emails
       : batch.emails.filter((e) => matchesQuery(e, focusQuery));
-    const livePlanName = plans.find((p) => p.id === batch.planId)?.name ?? batch.planName;
+    const linkedPlan = batch.planId ? plans.find((p) => p.id === batch.planId) : undefined;
+    const planMissing = !!batch.planId && !linkedPlan;
+    const livePlanName = linkedPlan?.name ?? batch.planName;
+    const linkedReport = batch.reportId
+      ? reports.find((r) => r.id === batch.reportId)
+      : undefined;
+    const reportMissing = !!batch.reportId && !linkedReport;
     return (
       <div className="main">
         <div className="focus-bar">
@@ -309,11 +349,20 @@ const EmailGenerator: React.FC<Props> = ({
                 type="button"
                 className="link-button"
                 onClick={() => onNavigateToReport?.(batch.planId, batch.reportId)}
-                title={t.goToShortageReport}
-                disabled={!onNavigateToReport}
+                title={reportMissing ? t.linkedReportDeleted : t.goToShortageReport}
+                disabled={!onNavigateToReport || reportMissing}
               >
                 {batch.reportName}
               </button>
+              {reportMissing && (
+                <span
+                  className="tag danger"
+                  style={{ marginLeft: 6 }}
+                  title={t.linkedReportDeleted}
+                >
+                  {t.linkedReportDeletedTag}
+                </span>
+              )}
             </span>
             <span className="focus-bar-meta">
               <span className="hint">{t.selectedPlan}:</span>{' '}
@@ -321,10 +370,20 @@ const EmailGenerator: React.FC<Props> = ({
                 type="button"
                 className="link-button"
                 onClick={() => openPlanModal(batch.planId)}
-                title={t.openPlan}
+                title={planMissing ? t.linkedPlanDeleted : t.openPlan}
+                disabled={planMissing}
               >
                 {livePlanName}
               </button>
+              {planMissing && (
+                <span
+                  className="tag danger"
+                  style={{ marginLeft: 6 }}
+                  title={t.linkedPlanDeleted}
+                >
+                  {t.linkedPlanDeletedTag}
+                </span>
+              )}
             </span>
             <span className="tag">
               {sentCount}/{batch.emails.length} {t.sentCount}
@@ -333,6 +392,21 @@ const EmailGenerator: React.FC<Props> = ({
         </div>
 
         {error && <div className="card error-text">{error}</div>}
+
+        {(reportMissing || planMissing) && (
+          <div className="card" style={{ borderColor: 'var(--warning)' }}>
+            {reportMissing && (
+              <div className="warn-text">
+                <strong>{t.linkedReportDeleted}</strong>
+              </div>
+            )}
+            {planMissing && (
+              <div className="warn-text">
+                <strong>{t.linkedPlanDeleted}</strong>
+              </div>
+            )}
+          </div>
+        )}
 
         {batch.emails.length > 0 && (
           <div style={{ marginBottom: 12 }}>
@@ -521,9 +595,20 @@ const EmailGenerator: React.FC<Props> = ({
       {batches.length > 0 && (
         <div className="card">
           <div className="card-header">
-            <div className="card-title">{t.olderEmailBatchesTitle}</div>
-            <div className="hint">{t.olderEmailBatchesHint}</div>
+            <div>
+              <div className="card-title">{t.olderEmailBatchesTitle}</div>
+              <div className="hint">{t.olderEmailBatchesHint}</div>
+            </div>
+            <button
+              className="btn btn-sm soft-danger"
+              onClick={() => setConfirmDeleteAll(true)}
+              disabled={busy}
+              title={t.deleteAll}
+            >
+              <IconTrash size={13} /> {t.deleteAll}
+            </button>
           </div>
+          {info && <div className="hint" style={{ marginBottom: 8 }}>{info}</div>}
           <div style={{ marginBottom: 12 }}>
             <SearchInput value={listQuery} onChange={setListQuery} block />
           </div>
@@ -546,9 +631,11 @@ const EmailGenerator: React.FC<Props> = ({
                     const sent = b.emails.filter((e) => !!e.sentAt).length;
                     const total = b.emails.length;
                     const allSent = total > 0 && sent === total;
-                    const top = b.emails.slice(0, 8);
-                    const livePlanName =
-                      plans.find((p) => p.id === b.planId)?.name ?? b.planName;
+                    const rowLinkedPlan = plans.find((p) => p.id === b.planId);
+                    const livePlanName = rowLinkedPlan?.name ?? b.planName;
+                    const rowPlanMissing = !!b.planId && !rowLinkedPlan;
+                    const rowReportMissing =
+                      !!b.reportId && !reports.some((r) => r.id === b.reportId);
                     return (
                       <tr
                         key={b.id}
@@ -557,34 +644,60 @@ const EmailGenerator: React.FC<Props> = ({
                         title={t.preview}
                       >
                         <td className="col-name col-wrap">
-                          {onNavigateToReport ? (
+                          <div className="cell-with-end-tag">
+                            {rowReportMissing && (
+                              <span
+                                className="tag danger"
+                                title={t.linkedReportDeleted}
+                              >
+                                {t.linkedReportDeletedTag}
+                              </span>
+                            )}
+                            {onNavigateToReport ? (
+                              <button
+                                type="button"
+                                className="link-button"
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  onNavigateToReport(b.planId, b.reportId);
+                                }}
+                                title={
+                                  rowReportMissing
+                                    ? t.linkedReportDeleted
+                                    : t.goToShortageReport
+                                }
+                                disabled={rowReportMissing}
+                              >
+                                {b.reportName}
+                              </button>
+                            ) : (
+                              <span>{b.reportName}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="col-wrap">
+                          <div className="cell-with-end-tag">
+                            {rowPlanMissing && (
+                              <span
+                                className="tag danger"
+                                title={t.linkedPlanDeleted}
+                              >
+                                {t.linkedPlanDeletedTag}
+                              </span>
+                            )}
                             <button
                               type="button"
                               className="link-button"
                               onClick={(ev) => {
                                 ev.stopPropagation();
-                                onNavigateToReport(b.planId, b.reportId);
+                                openPlanModal(b.planId);
                               }}
-                              title={t.goToShortageReport}
+                              title={rowPlanMissing ? t.linkedPlanDeleted : t.openPlan}
+                              disabled={rowPlanMissing}
                             >
-                              {b.reportName}
+                              {livePlanName}
                             </button>
-                          ) : (
-                            b.reportName
-                          )}
-                        </td>
-                        <td className="col-wrap">
-                          <button
-                            type="button"
-                            className="link-button"
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              openPlanModal(b.planId);
-                            }}
-                            title={t.openPlan}
-                          >
-                            {livePlanName}
-                          </button>
+                          </div>
                         </td>
                         <td className="hint">
                           {new Date(b.generatedAt).toLocaleString()}
@@ -608,7 +721,7 @@ const EmailGenerator: React.FC<Props> = ({
                               {t.suppliers} — {sent}/{total} {t.sentCount}
                             </div>
                             <ul className="shortage-tooltip-list">
-                              {top.map((e) => (
+                              {b.emails.map((e) => (
                                 <li key={e.id}>
                                   <span className="shortage-tooltip-name">
                                     {e.supplierName}
@@ -633,11 +746,6 @@ const EmailGenerator: React.FC<Props> = ({
                                 </li>
                               ))}
                             </ul>
-                            {b.emails.length > top.length && (
-                              <div className="shortage-tooltip-more hint">
-                                + {b.emails.length - top.length}
-                              </div>
-                            )}
                           </HoverTooltip>
                         </td>
                         <td
@@ -682,6 +790,15 @@ const EmailGenerator: React.FC<Props> = ({
         />
       )}
 
+      {confirmDeleteAll && (
+        <ConfirmDialog
+          message={t.deleteAllConfirm.replace('{n}', String(batches.length))}
+          onConfirm={onConfirmDeleteAll}
+          onCancel={() => setConfirmDeleteAll(false)}
+          danger
+        />
+      )}
+
       {editingPlan && (
         <PlanEditorModal
           editing={editingPlan}
@@ -693,6 +810,8 @@ const EmailGenerator: React.FC<Props> = ({
           onEnterEdit={() => setPlanModalReadOnly(false)}
         />
       )}
+
+      {loaderMessage && <LoadingOverlay message={loaderMessage} />}
     </div>
   );
 };

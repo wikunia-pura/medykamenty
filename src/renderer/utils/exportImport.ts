@@ -34,6 +34,8 @@ const SUPPLIER_COLUMNS = [
   'name',
   'email',
   'phone',
+  'contactPerson',
+  'paymentTerms',
   'preferredEmailLanguage',
   'notes',
 ];
@@ -46,6 +48,8 @@ export function exportSuppliersCsv(items: Supplier[]): {
     name: s.name,
     email: s.email,
     phone: s.phone ?? '',
+    contactPerson: s.contactPerson ?? '',
+    paymentTerms: s.paymentTerms ?? '',
     preferredEmailLanguage: s.preferredEmailLanguage ?? '',
     notes: s.notes ?? '',
   }));
@@ -72,6 +76,8 @@ export async function importSuppliersCsv(
       name,
       email: (r.email ?? '').trim(),
       phone: r.phone?.trim() || undefined,
+      contactPerson: r.contactPerson?.trim() || undefined,
+      paymentTerms: r.paymentTerms?.trim() || undefined,
       notes: r.notes?.trim() || undefined,
       preferredEmailLanguage:
         lang === 'pl' || lang === 'en' ? (lang as Lang) : undefined,

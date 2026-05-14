@@ -21,6 +21,24 @@ export interface T {
   add: string;
   edit: string;
   delete: string;
+  deleteAll: string;
+  deleteAllConfirm: string;
+  deleteAllSuccess: string;
+  deleteAllPartial: string;
+  deleteAllInProgress: string;
+  deleteBlockedTitle: string;
+  deleteBlockedByRawMaterials: string;
+  deleteBlockedByComponents: string;
+  deleteBlockedByProducts: string;
+  blockedByTitle: string;
+  blockedBySubtitle: string;
+  loaderImporting: string;
+  loaderExporting: string;
+  loaderComputing: string;
+  loaderGenerating: string;
+  loaderProcessing: string;
+  loaderWiping: string;
+  loaderSeeding: string;
   save: string;
   cancel: string;
   close: string;
@@ -61,6 +79,27 @@ export interface T {
   preferredSupplier: string;
   alternativeSuppliers: string;
   preferredEmailLanguage: string;
+  contactPerson: string;
+  paymentTerms: string;
+  packageSize: string;
+  // Raw materials XLSX import (Plik z surowcami)
+  rawMaterialsImportXlsx: string;
+  rawMaterialsImportXlsxHint: string;
+  rawMaterialsImportSummary: string;
+  rawMaterialsImportRawCreated: string;
+  rawMaterialsImportRawUpdated: string;
+  rawMaterialsImportRawSkipped: string;
+  rawMaterialsImportRawDeleted: string;
+  rawMaterialsImportSuppliersCreated: string;
+  rawMaterialsImportSuppliersUpdated: string;
+  rawMaterialsImportWarnings: string;
+  rawMaterialsImportFailed: string;
+  rawMaterialsImportDialogTitle: string;
+  rawMaterialsImportModeMerge: string;
+  rawMaterialsImportModeMergeDesc: string;
+  rawMaterialsImportModeOverwrite: string;
+  rawMaterialsImportModeOverwriteDesc: string;
+  rawMaterialsImportConfirm: string;
   // Products
   capacityMl: string;
   density: string;
@@ -69,8 +108,50 @@ export interface T {
   packaging: string;
   percentage: string;
   qtyPerUnit: string;
+  moqUnits: string;
+  sachetMassKg: string;
+  sachetsCount: string;
   recipeSumWarning: string;
   recipeSumError: string;
+  // Recipe XLSX import/export (Plik z recepturami)
+  recipesImportXlsx: string;
+  recipesExportXlsx: string;
+  recipesImportDialogTitle: string;
+  recipesImportModeMerge: string;
+  recipesImportModeMergeDesc: string;
+  recipesImportModeOverwrite: string;
+  recipesImportModeOverwriteDesc: string;
+  recipesImportConfirm: string;
+  recipesImportSummaryTitle: string;
+  recipesImportProductsCreated: string;
+  recipesImportProductsUpdated: string;
+  recipesImportProductsSkipped: string;
+  recipesImportRawCreated: string;
+  recipesImportComponentsCreated: string;
+  recipesImportQtyReviewNote: string;
+  recipesImportWarnings: string;
+  recipesImportPerProductTitle: string;
+  recipesImportActionCreated: string;
+  recipesImportActionUpdated: string;
+  recipesImportActionSkipped: string;
+  recipesExportSuccess: string;
+  recipesExportFailed: string;
+  recipesImportFailed: string;
+  // Recipe import — unresolved items modal (analyze → resolve → commit)
+  recipeUnresolvedTitle: string;
+  recipeUnresolvedSubtitle: string;
+  recipeUnresolvedSectionRaws: string;
+  recipeUnresolvedSectionComponents: string;
+  recipeUnresolvedColName: string;
+  recipeUnresolvedColUsedIn: string;
+  recipeUnresolvedAnalyzing: string;
+  recipeUnresolvedCommitting: string;
+  recipeUnresolvedApplyAll: string;
+  recipeUnresolvedCancelAbort: string;
+  recipeUnresolvedExpand: string;
+  recipeUnresolvedNoneTitle: string;
+  recipeUnresolvedNoneSubtitle: string;
+  recipeUnresolvedRequiresTarget: string;
   // Stock import
   selectXlsxFiles: string;
   importStockFiles: string;
@@ -222,6 +303,39 @@ export interface T {
   adoptAsComponent: string;
   adoptAllUnmatched: string;
   adoptAllConfirm: string;
+  // Unmatched row resolution modal (smart match)
+  resolveRowTitle: string;
+  resolveRowSubtitleRaw: string;
+  resolveRowSubtitleComponent: string;
+  resolveRowFromImport: string;
+  resolveRowSuggestions: string;
+  resolveRowNoSuggestions: string;
+  resolveRowSuggestionConfidence: string;
+  resolveRowActionUseOnce: string;
+  resolveRowActionUseOnceHint: string;
+  resolveRowActionSaveAlias: string;
+  resolveRowActionSaveAliasHint: string;
+  resolveRowActionRename: string;
+  resolveRowActionRenameHint: string;
+  resolveRowActionAddNew: string;
+  resolveRowActionAddNewHint: string;
+  resolveRowChooseSuggestion: string;
+  resolveRowPickAction: string;
+  resolveRowProgress: string;
+  resolveRowSkip: string;
+  resolveRowDone: string;
+  resolveRowAliasAdded: string;
+  resolveRowRenameConfirm: string;
+  // Bulk unmatched modal
+  bulkResolveTitle: string;
+  bulkSetAll: string;
+  bulkColMapTo: string;
+  bulkColAction: string;
+  bulkPickTarget: string;
+  bulkSkipRow: string;
+  bulkUnskip: string;
+  bulkSkipped: string;
+  bulkApplyAll: string;
   // Drop zone / actions
   dropZoneTitle: string;
   dropZoneSubtitle: string;
@@ -251,6 +365,9 @@ export interface T {
   selectPlanFirst: string;
   noPlansYet: string;
   addPlanCta: string;
+  noProductsYet: string;
+  defineProductsFirstHint: string;
+  goToProductsCta: string;
   // Shortage report history
   olderReportsTitle: string;
   olderReportsHint: string;
@@ -279,6 +396,10 @@ export interface T {
   navForward: string;
   navHistory: string;
   openPlan: string;
+  linkedPlanDeleted: string;
+  linkedReportDeleted: string;
+  linkedPlanDeletedTag: string;
+  linkedReportDeletedTag: string;
 }
 
 const pl: T = {
@@ -300,6 +421,27 @@ const pl: T = {
   add: 'Dodaj',
   edit: 'Edytuj',
   delete: 'Usuń',
+  deleteAll: 'Usuń wszystkie',
+  deleteAllConfirm:
+    'Tej operacji nie można cofnąć. Usunąć wszystkie pozycje ({n}) z tego widoku?',
+  deleteAllSuccess: 'Usunięto wszystkie pozycje ({n}).',
+  deleteAllPartial:
+    'Usunięto {n} z {total}. {blocked} nie można usunąć — są powiązane z innymi pozycjami.',
+  deleteAllInProgress: 'Usuwanie pozycji…',
+  deleteBlockedTitle: 'Nie można usunąć — pozycja jest powiązana z:',
+  deleteBlockedByRawMaterials: 'Surowce',
+  deleteBlockedByComponents: 'Komponenty',
+  deleteBlockedByProducts: 'Produkty',
+  blockedByTitle: 'Nie można usunąć',
+  blockedBySubtitle:
+    'Pozycja jest używana w innych miejscach ({n}). Usuń lub odepnij powiązania, aby kontynuować.',
+  loaderImporting: 'Importowanie…',
+  loaderExporting: 'Eksportowanie…',
+  loaderComputing: 'Obliczanie…',
+  loaderGenerating: 'Generowanie…',
+  loaderProcessing: 'Przetwarzanie…',
+  loaderWiping: 'Czyszczenie danych…',
+  loaderSeeding: 'Wczytywanie danych demo…',
   save: 'Zapisz',
   cancel: 'Anuluj',
   close: 'Zamknij',
@@ -339,6 +481,29 @@ const pl: T = {
   preferredSupplier: 'Preferowany dostawca',
   alternativeSuppliers: 'Alternatywni dostawcy',
   preferredEmailLanguage: 'Domyślny język maili',
+  contactPerson: 'Osoba kontaktowa',
+  paymentTerms: 'Warunki płatności',
+  packageSize: 'Wielkość opakowania [kg]',
+  rawMaterialsImportXlsx: 'Importuj plik z surowcami (xlsx)',
+  rawMaterialsImportXlsxHint:
+    'Wczyta arkusz z listą surowców (kolumny: nazwa, dostawca, kontakt, mail, telefon, wielkość opakowania, warunki płatności, ONetto, uwagi). Aplikacja utworzy/zaktualizuje dostawców i surowce; ręcznie wpisane pola pozostaną nietknięte.',
+  rawMaterialsImportSummary: 'Import zakończony',
+  rawMaterialsImportRawCreated: 'Surowce utworzone',
+  rawMaterialsImportRawUpdated: 'Surowce zaktualizowane',
+  rawMaterialsImportRawSkipped: 'Surowce pominięte',
+  rawMaterialsImportRawDeleted: 'Surowce usunięte',
+  rawMaterialsImportSuppliersCreated: 'Dostawcy utworzeni',
+  rawMaterialsImportSuppliersUpdated: 'Dostawcy zaktualizowani',
+  rawMaterialsImportWarnings: 'Ostrzeżenia',
+  rawMaterialsImportFailed: 'Nie udało się zaimportować pliku',
+  rawMaterialsImportDialogTitle: 'Import surowców z pliku XLSX',
+  rawMaterialsImportModeMerge: 'Scal (aktualizuj istniejące)',
+  rawMaterialsImportModeMergeDesc:
+    'Aktualizuje surowce, które już są w bazie (zachowuje ręcznie wprowadzone pola, odświeża cenę, walutę, MOQ i preferowanego dostawcę), dodaje nowe. Surowce spoza pliku pozostają nietknięte.',
+  rawMaterialsImportModeOverwrite: 'Zastąp (plik = źródło prawdy)',
+  rawMaterialsImportModeOverwriteDesc:
+    'Plik staje się źródłem prawdy: usuwa z bazy surowce, których nie ma w pliku, oraz nadpisuje pola z pliku dla pozostałych (cena, waluta, MOQ, dostawca, notatki). Dostawcy są zachowywani w obu trybach.',
+  rawMaterialsImportConfirm: 'Importuj',
   capacityMl: 'Pojemność (ml)',
   density: 'Gęstość (g/ml)',
   laborCost: 'Koszt konfekcji (zł/szt.)',
@@ -346,8 +511,53 @@ const pl: T = {
   packaging: 'Komponenty',
   percentage: 'Udział (%)',
   qtyPerUnit: 'Ilość / opakowanie',
+  moqUnits: 'MOQ produktu (szt.)',
+  sachetMassKg: 'Masa na saszetki (kg)',
+  sachetsCount: 'Liczba saszetek (z masy)',
   recipeSumWarning: 'Suma % poniżej 100 — woda dolewana do 100% jest pomijana w kalkulacji.',
   recipeSumError: 'Suma % przekracza 100 — popraw recepturę.',
+  recipesImportXlsx: 'Importuj receptury (xlsx)',
+  recipesExportXlsx: 'Eksportuj receptury (xlsx)',
+  recipesImportDialogTitle: 'Import receptur z pliku XLSX',
+  recipesImportModeMerge: 'Scal (aktualizuj istniejące)',
+  recipesImportModeMergeDesc:
+    'Aktualizuje receptury produktów, które już są w bazie (zastępuje surowce i komponenty), dodaje nowe produkty. Produkty spoza pliku pozostają nietknięte.',
+  recipesImportModeOverwrite: 'Zastąp (plik = źródło prawdy)',
+  recipesImportModeOverwriteDesc:
+    'Plik staje się źródłem prawdy: usuwa z bazy wszystkie produkty, których nie ma w pliku, oraz nadpisuje istniejące. Brakujące surowce i komponenty są tworzone w katalogu w obu trybach.',
+  recipesImportConfirm: 'Importuj',
+  recipesImportSummaryTitle: 'Podsumowanie importu',
+  recipesImportProductsCreated: 'Utworzone produkty',
+  recipesImportProductsUpdated: 'Zaktualizowane produkty',
+  recipesImportProductsSkipped: 'Pominięte produkty',
+  recipesImportRawCreated: 'Nowe surowce w katalogu',
+  recipesImportComponentsCreated: 'Nowe komponenty w katalogu',
+  recipesImportQtyReviewNote:
+    'Kartony zbiorcze, taśmy, beczki i worki dostały ilość 1/szt. — uzupełnij faktyczne ilości w edytorze produktu.',
+  recipesImportWarnings: 'Ostrzeżenia',
+  recipesImportPerProductTitle: 'Szczegóły per produkt',
+  recipesImportActionCreated: 'utworzony',
+  recipesImportActionUpdated: 'zaktualizowany',
+  recipesImportActionSkipped: 'pominięty',
+  recipesExportSuccess: 'Wyeksportowano receptury do pliku',
+  recipesExportFailed: 'Eksport nie powiódł się',
+  recipesImportFailed: 'Import nie powiódł się',
+  recipeUnresolvedTitle: 'Nierozpoznane pozycje z pliku ({n})',
+  recipeUnresolvedSubtitle:
+    'Plik odwołuje się do surowców lub komponentów, których nie ma w katalogu. Wybierz, co zrobić z każdą pozycją zanim zaimportujemy produkty.',
+  recipeUnresolvedSectionRaws: 'Surowce',
+  recipeUnresolvedSectionComponents: 'Komponenty',
+  recipeUnresolvedColName: 'Z pliku',
+  recipeUnresolvedColUsedIn: 'Użyte w produktach',
+  recipeUnresolvedAnalyzing: 'Analizuję plik…',
+  recipeUnresolvedCommitting: 'Importuję produkty…',
+  recipeUnresolvedApplyAll: 'Zastosuj i zaimportuj',
+  recipeUnresolvedCancelAbort: 'Anuluj import',
+  recipeUnresolvedExpand: 'Rozwiń pojedynczo',
+  recipeUnresolvedNoneTitle: 'Wszystko jest już w katalogu',
+  recipeUnresolvedNoneSubtitle: 'Możesz od razu kontynuować import.',
+  recipeUnresolvedRequiresTarget:
+    'Aby zapisać alias lub zmienić nazwę, najpierw wybierz dopasowanie z katalogu.',
   selectXlsxFiles: 'Wybierz pliki xlsx',
   importStockFiles: 'Importuj stany',
   rawXlsxLabel: 'Eksport surowców (xlsx)',
@@ -494,6 +704,37 @@ const pl: T = {
   adoptAsComponent: 'Dodaj jako komponent',
   adoptAllUnmatched: '+ Dodaj wszystkie nierozpoznane ({n})',
   adoptAllConfirm: 'Utworzyć {n} nowych pozycji w katalogu na podstawie nierozpoznanych wierszy? Domyślne wartości: jednostka „kg" dla surowców, typ „other" dla komponentów; bez dostawcy. Możesz później dopiąć szczegóły w widokach Surowce/Komponenty.',
+  resolveRowTitle: 'Nierozpoznana pozycja',
+  resolveRowSubtitleRaw: 'Surowiec z importu — wybierz, jak go dopasować do katalogu.',
+  resolveRowSubtitleComponent: 'Komponent z importu — wybierz, jak go dopasować do katalogu.',
+  resolveRowFromImport: 'Z importu',
+  resolveRowSuggestions: 'Podobne w bazie',
+  resolveRowNoSuggestions: 'Nie znalazłem żadnych zbliżonych pozycji w bazie.',
+  resolveRowSuggestionConfidence: 'podobieństwo',
+  resolveRowActionUseOnce: 'Użyj tylko w tym imporcie',
+  resolveRowActionUseOnceHint: 'Powiąż ten wiersz z wybraną pozycją katalogu, ale bez zapisu na stałe.',
+  resolveRowActionSaveAlias: 'Zapisz alias na stałe',
+  resolveRowActionSaveAliasHint: 'Zapamiętaj „{import}" jako alias „{catalog}". Kolejne importy z tą nazwą będą dopasowane automatycznie.',
+  resolveRowActionRename: 'Zmień nazwę w bazie',
+  resolveRowActionRenameHint: 'Przepisz nazwę katalogową „{catalog}" na „{import}" (z importu). Dotychczasowa nazwa zostanie zapisana jako alias, więc stare powiązania działają dalej.',
+  resolveRowActionAddNew: 'Dodaj jako nową pozycję',
+  resolveRowActionAddNewHint: 'Utwórz nowy wpis w katalogu z nazwą z importu.',
+  resolveRowChooseSuggestion: 'Wybierz pozycję z bazy, do której pasuje ten wiersz.',
+  resolveRowPickAction: 'Wybierz akcję.',
+  resolveRowProgress: 'Pozycja {n} z {total}',
+  resolveRowSkip: 'Pomiń',
+  resolveRowDone: 'Gotowe',
+  resolveRowAliasAdded: 'Zapisano alias.',
+  resolveRowRenameConfirm: 'Zmienić nazwę katalogową „{catalog}" na „{import}"? Stara nazwa zostanie zachowana jako alias.',
+  bulkResolveTitle: 'Nierozpoznane pozycje ({n})',
+  bulkSetAll: 'Ustaw wszystkim:',
+  bulkColMapTo: 'Dopasuj do (z bazy)',
+  bulkColAction: 'Akcja',
+  bulkPickTarget: '— wybierz —',
+  bulkSkipRow: 'Pomiń ten wiersz (zostaje nierozpoznany)',
+  bulkUnskip: 'Przywróć',
+  bulkSkipped: 'Pominięte',
+  bulkApplyAll: 'Zastosuj wszystkie ({n})',
   dropZoneTitle: 'Przeciągnij i upuść pliki xlsx',
   dropZoneSubtitle: 'lub kliknij, aby wybrać. Akceptujemy eksporty MP Firma — surowce i komponenty.',
   dropZoneDragOver: 'Upuść pliki tutaj',
@@ -519,6 +760,10 @@ const pl: T = {
   selectPlanFirst: 'Wybierz plan, aby obliczyć zapotrzebowanie',
   noPlansYet: 'Brak planów produkcji',
   addPlanCta: 'Dodaj plan produkcji',
+  noProductsYet: 'Brak produktów',
+  defineProductsFirstHint:
+    'Najpierw zdefiniuj produkty (z recepturami), aby móc utworzyć plan produkcji.',
+  goToProductsCta: 'Przejdź do produktów',
   olderReportsTitle: 'Wcześniejsze raporty',
   olderReportsHint: 'Historia obliczonych zapotrzebowań',
   computedAtLabel: 'Obliczono',
@@ -545,6 +790,10 @@ const pl: T = {
   navForward: 'Naprzód',
   navHistory: 'Nawigacja',
   openPlan: 'Otwórz plan',
+  linkedPlanDeleted: 'Powiązany plan został usunięty i nie jest już dostępny.',
+  linkedReportDeleted: 'Powiązany raport zapotrzebowania został usunięty i nie jest już dostępny.',
+  linkedPlanDeletedTag: 'plan usunięty',
+  linkedReportDeletedTag: 'raport usunięty',
 };
 
 const en: T = {
@@ -566,6 +815,27 @@ const en: T = {
   add: 'Add',
   edit: 'Edit',
   delete: 'Delete',
+  deleteAll: 'Delete all',
+  deleteAllConfirm:
+    'This cannot be undone. Delete all items ({n}) from this view?',
+  deleteAllSuccess: 'Deleted all items ({n}).',
+  deleteAllPartial:
+    'Deleted {n} of {total}. {blocked} could not be deleted — they are referenced by other entries.',
+  deleteAllInProgress: 'Deleting items…',
+  deleteBlockedTitle: 'Cannot delete — this item is referenced by:',
+  deleteBlockedByRawMaterials: 'Raw materials',
+  deleteBlockedByComponents: 'Components',
+  deleteBlockedByProducts: 'Products',
+  blockedByTitle: 'Cannot delete',
+  blockedBySubtitle:
+    'This item is referenced elsewhere ({n}). Remove or detach the references first to continue.',
+  loaderImporting: 'Importing…',
+  loaderExporting: 'Exporting…',
+  loaderComputing: 'Computing…',
+  loaderGenerating: 'Generating…',
+  loaderProcessing: 'Processing…',
+  loaderWiping: 'Wiping data…',
+  loaderSeeding: 'Loading demo data…',
   save: 'Save',
   cancel: 'Cancel',
   close: 'Close',
@@ -605,6 +875,29 @@ const en: T = {
   preferredSupplier: 'Preferred supplier',
   alternativeSuppliers: 'Alternative suppliers',
   preferredEmailLanguage: 'Default email language',
+  contactPerson: 'Contact person',
+  paymentTerms: 'Payment terms',
+  packageSize: 'Package size [kg]',
+  rawMaterialsImportXlsx: 'Import raw materials file (xlsx)',
+  rawMaterialsImportXlsxHint:
+    'Loads a worksheet listing raw materials (columns: name, supplier, contact, email, phone, package size, payment terms, ONetto purchase price, notes). The app creates/updates suppliers and raw materials; manually edited fields are preserved.',
+  rawMaterialsImportSummary: 'Import complete',
+  rawMaterialsImportRawCreated: 'Raw materials created',
+  rawMaterialsImportRawUpdated: 'Raw materials updated',
+  rawMaterialsImportRawSkipped: 'Raw materials skipped',
+  rawMaterialsImportRawDeleted: 'Raw materials deleted',
+  rawMaterialsImportSuppliersCreated: 'Suppliers created',
+  rawMaterialsImportSuppliersUpdated: 'Suppliers updated',
+  rawMaterialsImportWarnings: 'Warnings',
+  rawMaterialsImportFailed: 'Failed to import file',
+  rawMaterialsImportDialogTitle: 'Import raw materials from XLSX',
+  rawMaterialsImportModeMerge: 'Merge (update existing)',
+  rawMaterialsImportModeMergeDesc:
+    'Updates raw materials already in the database (keeps manually entered fields, refreshes price, currency, MOQ and preferred supplier), and adds new ones. Materials not in the file are left untouched.',
+  rawMaterialsImportModeOverwrite: 'Replace (file = source of truth)',
+  rawMaterialsImportModeOverwriteDesc:
+    'The file becomes the source of truth: deletes raw materials missing from the file and overwrites file-driven fields (price, currency, MOQ, supplier, notes) for the rest. Suppliers are preserved in both modes.',
+  rawMaterialsImportConfirm: 'Import',
   capacityMl: 'Capacity (ml)',
   density: 'Density (g/ml)',
   laborCost: 'Confection cost (PLN/unit)',
@@ -612,8 +905,53 @@ const en: T = {
   packaging: 'Components',
   percentage: 'Share (%)',
   qtyPerUnit: 'Qty / package',
+  moqUnits: 'Product MOQ (units)',
+  sachetMassKg: 'Sachet mass (kg)',
+  sachetsCount: 'Sachets count (from mass)',
   recipeSumWarning: 'Sum below 100% — water filling to 100% is ignored in cost calculation.',
   recipeSumError: 'Sum exceeds 100% — fix the recipe.',
+  recipesImportXlsx: 'Import recipes (xlsx)',
+  recipesExportXlsx: 'Export recipes (xlsx)',
+  recipesImportDialogTitle: 'Import recipes from XLSX',
+  recipesImportModeMerge: 'Merge (update existing)',
+  recipesImportModeMergeDesc:
+    'Updates recipes for products that already exist in the database (replaces raw materials and components), adds new products. Products not present in the file are left untouched.',
+  recipesImportModeOverwrite: 'Replace (file = source of truth)',
+  recipesImportModeOverwriteDesc:
+    'File becomes the source of truth: removes any products from the database that are not in the file, and overwrites existing ones. Missing raw materials and components are auto-created in either mode.',
+  recipesImportConfirm: 'Import',
+  recipesImportSummaryTitle: 'Import summary',
+  recipesImportProductsCreated: 'Products created',
+  recipesImportProductsUpdated: 'Products updated',
+  recipesImportProductsSkipped: 'Products skipped',
+  recipesImportRawCreated: 'New raw materials in catalog',
+  recipesImportComponentsCreated: 'New components in catalog',
+  recipesImportQtyReviewNote:
+    'Outer cartons, tape, barrels and bags were assigned qty = 1/unit — please correct actual quantities in the product editor.',
+  recipesImportWarnings: 'Warnings',
+  recipesImportPerProductTitle: 'Per-product details',
+  recipesImportActionCreated: 'created',
+  recipesImportActionUpdated: 'updated',
+  recipesImportActionSkipped: 'skipped',
+  recipesExportSuccess: 'Recipes exported to file',
+  recipesExportFailed: 'Export failed',
+  recipesImportFailed: 'Import failed',
+  recipeUnresolvedTitle: 'Unrecognized items from the file ({n})',
+  recipeUnresolvedSubtitle:
+    'The file references raw materials or components that aren’t in the catalog. Decide what to do with each one before we import the products.',
+  recipeUnresolvedSectionRaws: 'Raw materials',
+  recipeUnresolvedSectionComponents: 'Components',
+  recipeUnresolvedColName: 'From file',
+  recipeUnresolvedColUsedIn: 'Used in products',
+  recipeUnresolvedAnalyzing: 'Analyzing file…',
+  recipeUnresolvedCommitting: 'Importing products…',
+  recipeUnresolvedApplyAll: 'Apply and import',
+  recipeUnresolvedCancelAbort: 'Cancel import',
+  recipeUnresolvedExpand: 'Expand one-by-one',
+  recipeUnresolvedNoneTitle: 'Everything already exists in the catalog',
+  recipeUnresolvedNoneSubtitle: 'You can continue with the import straight away.',
+  recipeUnresolvedRequiresTarget:
+    'To save an alias or rename, pick a catalog match first.',
   selectXlsxFiles: 'Select xlsx files',
   importStockFiles: 'Import stock',
   rawXlsxLabel: 'Raw materials export (xlsx)',
@@ -760,6 +1098,37 @@ const en: T = {
   adoptAsComponent: 'Add as component',
   adoptAllUnmatched: '+ Add all unmatched ({n})',
   adoptAllConfirm: 'Create {n} new catalog entries from unmatched rows? Defaults: unit "kg" for raw materials, type "other" for components; no supplier. You can fill in details later in Raw materials/Components.',
+  resolveRowTitle: 'Unrecognized item',
+  resolveRowSubtitleRaw: 'Raw material from import — choose how to map it to the catalog.',
+  resolveRowSubtitleComponent: 'Component from import — choose how to map it to the catalog.',
+  resolveRowFromImport: 'From import',
+  resolveRowSuggestions: 'Similar in catalog',
+  resolveRowNoSuggestions: 'No close matches found in the catalog.',
+  resolveRowSuggestionConfidence: 'similarity',
+  resolveRowActionUseOnce: 'Use just for this import',
+  resolveRowActionUseOnceHint: 'Link this row to the selected catalog entry, no permanent mapping.',
+  resolveRowActionSaveAlias: 'Save alias permanently',
+  resolveRowActionSaveAliasHint: 'Remember “{import}” as an alias of “{catalog}”. Future imports with that name will be matched automatically.',
+  resolveRowActionRename: 'Rename in catalog',
+  resolveRowActionRenameHint: 'Rename the catalog entry “{catalog}” to “{import}” (from the import). The old name will be kept as an alias so existing links keep working.',
+  resolveRowActionAddNew: 'Add as new entry',
+  resolveRowActionAddNewHint: 'Create a brand-new catalog entry using the import name.',
+  resolveRowChooseSuggestion: 'Pick a catalog entry to map this row to.',
+  resolveRowPickAction: 'Pick an action.',
+  resolveRowProgress: 'Item {n} of {total}',
+  resolveRowSkip: 'Skip',
+  resolveRowDone: 'Done',
+  resolveRowAliasAdded: 'Alias saved.',
+  resolveRowRenameConfirm: 'Rename catalog entry “{catalog}” to “{import}”? The old name will be kept as an alias.',
+  bulkResolveTitle: 'Unrecognized items ({n})',
+  bulkSetAll: 'Set all to:',
+  bulkColMapTo: 'Map to (catalog)',
+  bulkColAction: 'Action',
+  bulkPickTarget: '— pick —',
+  bulkSkipRow: 'Skip this row (leave unmatched)',
+  bulkUnskip: 'Restore',
+  bulkSkipped: 'Skipped',
+  bulkApplyAll: 'Apply all ({n})',
   dropZoneTitle: 'Drag & drop xlsx files',
   dropZoneSubtitle: 'or click to browse. Accepts MP Firma exports — raw materials and components.',
   dropZoneDragOver: 'Drop files here',
@@ -785,6 +1154,10 @@ const en: T = {
   selectPlanFirst: 'Select a plan to compute shortages',
   noPlansYet: 'No production plans yet',
   addPlanCta: 'Add production plan',
+  noProductsYet: 'No products yet',
+  defineProductsFirstHint:
+    'Define products (with recipes) first before you can create a production plan.',
+  goToProductsCta: 'Go to products',
   olderReportsTitle: 'Earlier reports',
   olderReportsHint: 'History of computed shortages',
   computedAtLabel: 'Computed',
@@ -811,6 +1184,10 @@ const en: T = {
   navForward: 'Forward',
   navHistory: 'Navigation',
   openPlan: 'Open plan',
+  linkedPlanDeleted: 'The linked plan has been deleted and is no longer available.',
+  linkedReportDeleted: 'The linked shortage report has been deleted and is no longer available.',
+  linkedPlanDeletedTag: 'plan deleted',
+  linkedReportDeletedTag: 'report deleted',
 };
 
 export const translations: Record<Lang, T> = { pl, en };

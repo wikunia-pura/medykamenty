@@ -14,7 +14,9 @@ import type {
   EmailBatch,
   RFQEmailRecord,
   StoreSchema,
+  CatalogAlias,
 } from '../shared/types';
+import { normalize as normalizeAlias } from './services/smartMatcher';
 import {
   DEFAULT_WASTE_FACTOR,
   DEFAULT_CURRENCY,
@@ -286,6 +288,78 @@ export default class Database {
       lastPurchasePriceNet: price,
       currency: currency ?? existing.currency,
     });
+  }
+
+  // =============================== Aliases ===============================
+  // User-trained mapping: when an import row's name matches a stored alias
+  // (normalized) we auto-link it to the target catalog entry. Both raw
+  // material and component aliases share the same shape; the helpers below
+  // dispatch on the table name.
+
+  private async listAliasesFor(table: 'raw_material_aliases' | 'component_aliases'): Promise<CatalogAlias[]> {
+    const { data, error } = await getSupabase()
+      .from(table)
+      .select('id, target_id, alias, created_at');
+    if (error) {
+      // Schema not yet migrated → degrade gracefully so the rest of the import
+      // still works. The user will see no auto-aliases until they run the SQL.
+      if (/Could not find the table|does not exist|PGRST205/i.test(error.message)) {
+        return [];
+      }
+      throw new Error(`${table}.list: ${error.message}`);
+    }
+    return (data ?? []).map((r: { id: string; target_id: string; alias: string; created_at: string }) => ({
+      id: r.id,
+      targetId: r.target_id,
+      alias: r.alias,
+      createdAt: r.created_at,
+    }));
+  }
+
+  private async addAliasIn(
+    table: 'raw_material_aliases' | 'component_aliases',
+    targetId: string,
+    alias: string,
+  ): Promise<CatalogAlias> {
+    const trimmed = alias.trim();
+    if (!trimmed) throw new Error('alias is empty');
+    const normalized = normalizeAlias(trimmed);
+    if (!normalized) throw new Error('alias normalizes to empty string');
+    const id = newId();
+    const createdAt = nowIso();
+    const { error } = await getSupabase()
+      .from(table)
+      .insert({ id, target_id: targetId, alias: trimmed, alias_normalized: normalized, created_at: createdAt });
+    if (error) throw new Error(`${table}.add: ${error.message}`);
+    return { id, targetId, alias: trimmed, createdAt };
+  }
+
+  private async deleteAliasIn(
+    table: 'raw_material_aliases' | 'component_aliases',
+    id: string,
+  ): Promise<{ ok: boolean }> {
+    const { error } = await getSupabase().from(table).delete().eq('id', id);
+    if (error) throw new Error(`${table}.delete: ${error.message}`);
+    return { ok: true };
+  }
+
+  listRawMaterialAliases(): Promise<CatalogAlias[]> {
+    return this.listAliasesFor('raw_material_aliases');
+  }
+  addRawMaterialAlias(targetId: string, alias: string): Promise<CatalogAlias> {
+    return this.addAliasIn('raw_material_aliases', targetId, alias);
+  }
+  deleteRawMaterialAlias(id: string): Promise<{ ok: boolean }> {
+    return this.deleteAliasIn('raw_material_aliases', id);
+  }
+  listComponentAliases(): Promise<CatalogAlias[]> {
+    return this.listAliasesFor('component_aliases');
+  }
+  addComponentAlias(targetId: string, alias: string): Promise<CatalogAlias> {
+    return this.addAliasIn('component_aliases', targetId, alias);
+  }
+  deleteComponentAlias(id: string): Promise<{ ok: boolean }> {
+    return this.deleteAliasIn('component_aliases', id);
   }
 
   // =============================== Products ===============================

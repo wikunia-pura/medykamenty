@@ -8,6 +8,9 @@ import type {
   EmailBatch,
 } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LoadingOverlay from '../components/LoadingOverlay';
+import NoProductsEmptyState from '../components/NoProductsEmptyState';
+import type { ViewKey } from './types';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import { IconEdit, IconTrash, IconPlus, IconDuplicate } from '../components/Icons';
 import ExportImportButtons from '../components/ExportImportButtons';
@@ -31,6 +34,7 @@ interface Props {
   onInitialSearchConsumed?: () => void;
   onNavigateToReport?: (planId: string, reportId: string) => void;
   onNavigateToBatch?: (batchId: string) => void;
+  onNavigate?: (key: ViewKey) => void;
 }
 
 const ProductionPlanView: React.FC<Props> = ({
@@ -40,6 +44,7 @@ const ProductionPlanView: React.FC<Props> = ({
   onInitialSearchConsumed,
   onNavigateToReport,
   onNavigateToBatch,
+  onNavigate,
 }) => {
   const t = useT();
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
@@ -52,6 +57,7 @@ const ProductionPlanView: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
 
   const COLUMNS: ColumnDef[] = useMemo(
     () => [
@@ -123,7 +129,14 @@ const ProductionPlanView: React.FC<Props> = ({
   }, [batches]);
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      setLoaderMessage(t.loading);
+      try {
+        await reload();
+      } finally {
+        setLoaderMessage(null);
+      }
+    })();
   }, []);
 
   // Open the edit modal for a specific plan when navigated here from elsewhere
@@ -183,11 +196,13 @@ const ProductionPlanView: React.FC<Props> = ({
       return;
     }
     setBusy(true);
+    setLoaderMessage(t.loaderExporting);
     try {
       const { content, filename } = exportPlansJson(plans, products);
       await saveFile(filename, content, 'json');
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -195,6 +210,7 @@ const ProductionPlanView: React.FC<Props> = ({
     setError(null);
     setInfo(null);
     setBusy(true);
+    setLoaderMessage(t.loaderImporting);
     try {
       const r = await openFile('json');
       if (!r.ok || !r.content) return;
@@ -207,6 +223,7 @@ const ProductionPlanView: React.FC<Props> = ({
       }
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -231,6 +248,19 @@ const ProductionPlanView: React.FC<Props> = ({
   };
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? '?';
+
+  if (products.length === 0) {
+    return (
+      <div className="main">
+        <div className="page-header">
+          <HeaderNav />
+          <h1>{t.productionPlan}</h1>
+        </div>
+        <NoProductsEmptyState onGoToProducts={() => onNavigate?.('products')} />
+        {loaderMessage && <LoadingOverlay message={loaderMessage} />}
+      </div>
+    );
+  }
 
   return (
     <div className="main">
@@ -338,7 +368,6 @@ const ProductionPlanView: React.FC<Props> = ({
                       if (items.length === 0) {
                         return <td key={id} className="num"><span className="hint">0</span></td>;
                       }
-                      const top = items.slice(0, 10);
                       return (
                         <td key={id} className="num">
                           <HoverTooltip
@@ -350,7 +379,7 @@ const ProductionPlanView: React.FC<Props> = ({
                               {t.planItems} — {items.length}
                             </div>
                             <ul className="shortage-tooltip-list">
-                              {top.map((it, i) => (
+                              {items.map((it, i) => (
                                 <li key={`${it.productId}-${i}`}>
                                   <span className="shortage-tooltip-name">
                                     {productName(it.productId)}
@@ -361,11 +390,6 @@ const ProductionPlanView: React.FC<Props> = ({
                                 </li>
                               ))}
                             </ul>
-                            {items.length > top.length && (
-                              <div className="shortage-tooltip-more hint">
-                                + {items.length - top.length}
-                              </div>
-                            )}
                           </HoverTooltip>
                         </td>
                       );
@@ -375,7 +399,6 @@ const ProductionPlanView: React.FC<Props> = ({
                       if (bulk.length === 0) {
                         return <td key={id} className="num"><span className="hint">0</span></td>;
                       }
-                      const top = bulk.slice(0, 10);
                       return (
                         <td key={id} className="num">
                           <HoverTooltip
@@ -387,7 +410,7 @@ const ProductionPlanView: React.FC<Props> = ({
                               {t.bulkMass} — {bulk.length}
                             </div>
                             <ul className="shortage-tooltip-list">
-                              {top.map((bm, i) => (
+                              {bulk.map((bm, i) => (
                                 <li key={`${bm.productId ?? 'noid'}-${i}`}>
                                   <span className="shortage-tooltip-name">
                                     {productName(bm.productId)}
@@ -398,11 +421,6 @@ const ProductionPlanView: React.FC<Props> = ({
                                 </li>
                               ))}
                             </ul>
-                            {bulk.length > top.length && (
-                              <div className="shortage-tooltip-more hint">
-                                + {bulk.length - top.length}
-                              </div>
-                            )}
                           </HoverTooltip>
                         </td>
                       );
@@ -474,14 +492,7 @@ const ProductionPlanView: React.FC<Props> = ({
         />
       )}
 
-      {plans.length === 0 && products.length === 0 && (
-        <div className="card hint">
-          Najpierw zdefiniuj produkty (z recepturami) zanim utworzysz plan produkcji.
-        </div>
-      )}
-      <div className="hint" style={{ marginTop: 8 }}>
-        {t.products}: {productName.length === 0 ? products.length : products.length}
-      </div>
+      {loaderMessage && <LoadingOverlay message={loaderMessage} />}
     </div>
   );
 };

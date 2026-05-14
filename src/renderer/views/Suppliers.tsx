@@ -3,6 +3,8 @@ import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
 import type { Supplier, Lang } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
+import BlockedByDialog from '../components/BlockedByDialog';
+import LoadingOverlay from '../components/LoadingOverlay';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import { IconEdit, IconTrash, IconPlus } from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
@@ -24,10 +26,13 @@ const Suppliers: React.FC = () => {
   const [items, setItems] = useState<Supplier[]>([]);
   const [editing, setEditing] = useState<Partial<Supplier> | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Supplier | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
+  const [blockedBy, setBlockedBy] = useState<string[] | null>(null);
 
   useEscapeKey(() => setEditing(null), !!editing);
 
@@ -36,6 +41,8 @@ const Suppliers: React.FC = () => {
       { id: 'name', label: t.name, required: true },
       { id: 'email', label: t.email, defaultVisible: true },
       { id: 'phone', label: t.phone, defaultVisible: true },
+      { id: 'contactPerson', label: t.contactPerson, defaultVisible: true },
+      { id: 'paymentTerms', label: t.paymentTerms, defaultVisible: false },
       { id: 'language', label: t.preferredEmailLanguage, defaultVisible: true },
       { id: 'notes', label: t.notes, defaultVisible: false },
     ],
@@ -58,6 +65,10 @@ const Suppliers: React.FC = () => {
         return <th key={id} className="col-w-lg">{t.email}</th>;
       case 'phone':
         return <th key={id} className="col-w-md">{t.phone}</th>;
+      case 'contactPerson':
+        return <th key={id} className="col-w-md">{t.contactPerson}</th>;
+      case 'paymentTerms':
+        return <th key={id} className="col-w-md">{t.paymentTerms}</th>;
       case 'language':
         return <th key={id} className="col-w-sm">{t.preferredEmailLanguage}</th>;
       case 'notes':
@@ -75,6 +86,10 @@ const Suppliers: React.FC = () => {
         return <td key={id}>{s.email}</td>;
       case 'phone':
         return <td key={id}>{s.phone ?? ''}</td>;
+      case 'contactPerson':
+        return <td key={id}>{s.contactPerson ?? ''}</td>;
+      case 'paymentTerms':
+        return <td key={id}>{s.paymentTerms ?? ''}</td>;
       case 'language':
         return <td key={id}>{s.preferredEmailLanguage ?? ''}</td>;
       case 'notes':
@@ -89,7 +104,14 @@ const Suppliers: React.FC = () => {
   };
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      setLoaderMessage(t.loading);
+      try {
+        await reload();
+      } finally {
+        setLoaderMessage(null);
+      }
+    })();
   }, []);
 
   const filtered = useMemo(
@@ -113,6 +135,8 @@ const Suppliers: React.FC = () => {
       name: editing.name.trim(),
       email: editing.email?.trim() ?? '',
       phone: editing.phone?.trim() || undefined,
+      contactPerson: editing.contactPerson?.trim() || undefined,
+      paymentTerms: editing.paymentTerms?.trim() || undefined,
       notes: editing.notes?.trim() || undefined,
       preferredEmailLanguage: editing.preferredEmailLanguage as Lang | undefined,
     };
@@ -137,11 +161,13 @@ const Suppliers: React.FC = () => {
       return;
     }
     setBusy(true);
+    setLoaderMessage(t.loaderExporting);
     try {
       const { content, filename } = exportSuppliersCsv(items);
       await saveFile(filename, content, 'csv');
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -149,6 +175,7 @@ const Suppliers: React.FC = () => {
     setError(null);
     setInfo(null);
     setBusy(true);
+    setLoaderMessage(t.loaderImporting);
     try {
       const r = await openFile('csv');
       if (!r.ok || !r.content) return;
@@ -161,6 +188,7 @@ const Suppliers: React.FC = () => {
       }
     } finally {
       setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -168,9 +196,46 @@ const Suppliers: React.FC = () => {
     setConfirmDelete(null);
     const result = await window.electronAPI.deleteSupplier(s.id);
     if (!result.ok) {
-      setError(`${t.error}: ${result.blockedBy?.join(', ') ?? ''}`);
+      setBlockedBy(result.blockedBy ?? []);
     } else {
       await reload();
+    }
+  };
+
+  const onDeleteAll = async () => {
+    setConfirmDeleteAll(false);
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setLoaderMessage(t.deleteAllInProgress);
+    const total = items.length;
+    let deleted = 0;
+    let blocked = 0;
+    const blockers: string[] = [];
+    try {
+      for (const s of items) {
+        const result = await window.electronAPI.deleteSupplier(s.id);
+        if (result.ok) deleted++;
+        else {
+          blocked++;
+          if (result.blockedBy) blockers.push(...result.blockedBy);
+        }
+      }
+      if (blocked === 0) {
+        setInfo(t.deleteAllSuccess.replace('{n}', String(deleted)));
+      } else {
+        setInfo(
+          t.deleteAllPartial
+            .replace('{n}', String(deleted))
+            .replace('{total}', String(total))
+            .replace('{blocked}', String(blocked)),
+        );
+        setBlockedBy(Array.from(new Set(blockers)));
+      }
+      await reload();
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -198,6 +263,14 @@ const Suppliers: React.FC = () => {
               reorder={reorder}
               reset={resetColumns}
             />
+            <button
+              className="btn danger"
+              onClick={() => setConfirmDeleteAll(true)}
+              disabled={busy || items.length === 0}
+              title={t.deleteAll}
+            >
+              <IconTrash size={13} /> {t.deleteAll}
+            </button>
             <button className="btn primary toolbar-action-primary" onClick={onAdd}>
               <IconPlus size={14} /> {t.add}
             </button>
@@ -291,6 +364,22 @@ const Suppliers: React.FC = () => {
                 />
               </div>
               <div className="form-row">
+                <label>{t.contactPerson}</label>
+                <input
+                  className="input"
+                  value={editing.contactPerson ?? ''}
+                  onChange={(e) => setEditing({ ...editing, contactPerson: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.paymentTerms}</label>
+                <input
+                  className="input"
+                  value={editing.paymentTerms ?? ''}
+                  onChange={(e) => setEditing({ ...editing, paymentTerms: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
                 <label>{t.preferredEmailLanguage}</label>
                 <SearchableSelect
                   options={[
@@ -335,6 +424,21 @@ const Suppliers: React.FC = () => {
           danger
         />
       )}
+
+      {confirmDeleteAll && (
+        <ConfirmDialog
+          message={t.deleteAllConfirm.replace('{n}', String(items.length))}
+          onConfirm={onDeleteAll}
+          onCancel={() => setConfirmDeleteAll(false)}
+          danger
+        />
+      )}
+
+      {blockedBy && (
+        <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />
+      )}
+
+      {loaderMessage && <LoadingOverlay message={loaderMessage} />}
     </div>
   );
 };
