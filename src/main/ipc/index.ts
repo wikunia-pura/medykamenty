@@ -552,44 +552,53 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.MIGRATION_RUN, async () => runMigration(db));
 
   ipcMain.handle(IPC.APP_DOWNLOAD_UPDATE, async () => {
-    if (process.platform === 'darwin') {
-      // Ad-hoc signed builds cannot be auto-installed by electron-updater on macOS.
-      // Resolve the latest DMG asset via GitHub API and open it directly so the
-      // user's browser starts downloading the installer instead of landing on
-      // the release page.
-      const releasesPage = 'https://github.com/wikunia-pura/medykamenty/releases/latest';
-      try {
-        const apiUrl = 'https://api.github.com/repos/wikunia-pura/medykamenty/releases/latest';
-        const response = await net.fetch(apiUrl, {
-          headers: { Accept: 'application/vnd.github+json' },
-        });
-        if (!response.ok) {
-          throw new Error(`GitHub API ${response.status}`);
-        }
-        const release = (await response.json()) as { assets?: { name?: string; browser_download_url?: string }[] };
-        const dmgAsset = release.assets?.find(
-          (a) => typeof a?.name === 'string' && a.name.toLowerCase().endsWith('.dmg'),
-        );
-        if (dmgAsset?.browser_download_url) {
-          await shell.openExternal(dmgAsset.browser_download_url);
-          return { ok: true };
-        }
-        throw new Error('No DMG asset found in latest release');
-      } catch (err) {
-        log.warn('Failed to resolve latest DMG, falling back to releases page:', err);
-        await shell.openExternal(releasesPage);
-        return {
-          ok: true,
-          openedRelease: true,
-          error: err instanceof Error ? err.message : 'Unknown error',
-        };
-      }
+    // Neither our macOS nor Windows builds are properly code-signed for
+    // electron-updater's auto-install flow (macOS is ad-hoc signed, Windows
+    // is unsigned). Calling `autoUpdater.downloadUpdate()` either silently
+    // does nothing (no pending update cached) or fails on signature
+    // verification. So instead we resolve the right installer asset from
+    // the latest GitHub release and open it externally — the user's browser
+    // takes over and downloads it.
+    const releasesPage = 'https://github.com/wikunia-pura/medykamenty/releases/latest';
+    const ext =
+      process.platform === 'darwin'
+        ? '.dmg'
+        : process.platform === 'win32'
+          ? '.exe'
+          : null;
+    if (!ext) {
+      // Unknown platform (e.g. Linux build run locally) — just open the
+      // releases page and let the user pick.
+      await shell.openExternal(releasesPage);
+      return { ok: true, openedRelease: true };
     }
     try {
-      await autoUpdater.downloadUpdate();
-      return { ok: true };
+      const apiUrl = 'https://api.github.com/repos/wikunia-pura/medykamenty/releases/latest';
+      const response = await net.fetch(apiUrl, {
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      if (!response.ok) {
+        throw new Error(`GitHub API ${response.status}`);
+      }
+      const release = (await response.json()) as {
+        assets?: { name?: string; browser_download_url?: string }[];
+      };
+      const asset = release.assets?.find(
+        (a) => typeof a?.name === 'string' && a.name.toLowerCase().endsWith(ext),
+      );
+      if (asset?.browser_download_url) {
+        await shell.openExternal(asset.browser_download_url);
+        return { ok: true };
+      }
+      throw new Error(`No ${ext} asset found in latest release`);
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+      log.warn(`Failed to resolve latest ${ext}, falling back to releases page:`, err);
+      await shell.openExternal(releasesPage);
+      return {
+        ok: true,
+        openedRelease: true,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      };
     }
   });
 }
