@@ -236,7 +236,9 @@ const App: React.FC = () => {
       case 'rawMaterials':
         return <RawMaterials />;
       case 'components':
-        return <Components />;
+        return <Components key="components" kind="primary" />;
+      case 'outerPackaging':
+        return <Components key="outerPackaging" kind="secondary" />;
       case 'suppliers':
         return <Suppliers />;
       case 'stockImport':
@@ -271,7 +273,7 @@ const App: React.FC = () => {
             key={`emailGenerator-${sidebarTick}`}
             defaultLanguage={settings.defaultEmailLanguage}
             aiAvailable={aiAvailable}
-            useAiByDefault={settings.llm.useByDefault}
+            useAiByDefault={aiAvailable}
             selectedReportId={selectedReportId}
             onSelectReport={setSelectedReportId}
             autoGenerate={autoGenerateEmails}
@@ -287,7 +289,7 @@ const App: React.FC = () => {
       case 'maxProducible':
         return <MaxProducibleView />;
       case 'settings':
-        return <Settings settings={settings} onChange={onSettingsChanged} aiAvailable={aiAvailable} />;
+        return <Settings settings={settings} onChange={onSettingsChanged} />;
     }
   };
 

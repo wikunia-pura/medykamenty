@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type {
   Product,
   RawMaterial,
@@ -12,6 +12,8 @@ import RecipeEditor from './RecipeEditor';
 import NumberInput from './NumberInput';
 import { IconPlus, IconEdit, IconEye } from './Icons';
 import { useEscapeKey } from '../utils/useEscapeKey';
+
+type Tab = 'basics' | 'ingredients' | 'packaging' | 'packingScheme';
 
 interface Props {
   editing: Partial<Product>;
@@ -38,6 +40,10 @@ const ProductEditorModal: React.FC<Props> = ({
 }) => {
   const t = useT();
   useEscapeKey(onCancel);
+  const [activeTab, setActiveTab] = useState<Tab>('basics');
+  const ingredientCount = (editing.ingredients ?? []).length;
+  const packagingCount = (editing.packaging ?? []).length;
+  const tierCount = editing.packingScheme?.tiers.length ?? 0;
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
@@ -84,10 +90,43 @@ const ProductEditorModal: React.FC<Props> = ({
         )}
 
         <div className="modal-body">
+          <div className="modal-tabs">
+            <button
+              type="button"
+              className={`modal-tab ${activeTab === 'basics' ? 'active' : ''}`}
+              onClick={() => setActiveTab('basics')}
+            >
+              <span>{t.productTabBasics}</span>
+            </button>
+            <button
+              type="button"
+              className={`modal-tab ${activeTab === 'ingredients' ? 'active' : ''}`}
+              onClick={() => setActiveTab('ingredients')}
+            >
+              <span>{t.ingredients}</span>
+              <span className="modal-tab-count">{ingredientCount}</span>
+            </button>
+            <button
+              type="button"
+              className={`modal-tab ${activeTab === 'packaging' ? 'active' : ''}`}
+              onClick={() => setActiveTab('packaging')}
+            >
+              <span>{t.packaging}</span>
+              <span className="modal-tab-count">{packagingCount}</span>
+            </button>
+            <button
+              type="button"
+              className={`modal-tab ${activeTab === 'packingScheme' ? 'active' : ''}`}
+              onClick={() => setActiveTab('packingScheme')}
+            >
+              <span>{t.packingScheme}</span>
+              <span className="modal-tab-count">{tierCount}</span>
+            </button>
+            <div className="modal-tabs-spacer" />
+          </div>
+
+          {activeTab === 'basics' && (
           <div className="modal-section">
-            <div className="modal-section-header">
-              <h3 className="modal-section-title">Podstawowe dane</h3>
-            </div>
             <div className="form-row">
               <label>{t.name}</label>
               <input
@@ -177,25 +216,32 @@ const ProductEditorModal: React.FC<Props> = ({
               />
             </div>
           </div>
+          )}
 
-          <div className="modal-section">
-            <div className="modal-section-header">
-              <h3 className="modal-section-title">{t.ingredients} & {t.packaging}</h3>
+          {activeTab !== 'basics' && (
+            <div className="modal-section">
+              <RecipeEditor
+                rawMaterials={rawMaterials}
+                components={components}
+                ingredients={editing.ingredients ?? []}
+                packaging={editing.packaging ?? []}
+                packingScheme={editing.packingScheme}
+                productCapacityMl={editing.capacityMl ?? 0}
+                productDensityGPerMl={editing.densityGPerMl ?? 1}
+                section={activeTab}
+                onIngredientsChange={(next: RecipeIngredient[]) =>
+                  setEditing({ ...editing, ingredients: next })
+                }
+                onPackagingChange={(next: RecipePackaging[]) =>
+                  setEditing({ ...editing, packaging: next })
+                }
+                onPackingSchemeChange={(next) =>
+                  setEditing({ ...editing, packingScheme: next })
+                }
+                readOnly={readOnly}
+              />
             </div>
-            <RecipeEditor
-              rawMaterials={rawMaterials}
-              components={components}
-              ingredients={editing.ingredients ?? []}
-              packaging={editing.packaging ?? []}
-              onIngredientsChange={(next: RecipeIngredient[]) =>
-                setEditing({ ...editing, ingredients: next })
-              }
-              onPackagingChange={(next: RecipePackaging[]) =>
-                setEditing({ ...editing, packaging: next })
-              }
-              readOnly={readOnly}
-            />
-          </div>
+          )}
 
           {error && <div className="error-text">{error}</div>}
         </div>

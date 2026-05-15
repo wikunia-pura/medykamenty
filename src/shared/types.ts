@@ -80,8 +80,25 @@ export interface PackagingComponent {
   lastPurchasePriceNet?: number;
   currency?: string;
   notes?: string;
+  // For secondary (shipping) packaging: the total capacity of 1 unit of this
+  // component, expressed in `capacityUnit`. Examples: carton holds 50 slots
+  // ('units'), tape roll has 50 m ('m'), barrel holds 200 l ('l'), bag holds
+  // 25 kg ('kg'). Ignored for primary components.
+  capacity?: number;
+  capacityUnit?: PackingCapacityUnit;
+  // Cascade dependencies: "1 unit of this component consumes N units of
+  // <componentId>'s capacity-unit". Examples: 1 carton uses 10 m of tape →
+  // {componentId: tapeId, consumption: 10}; 1 barrel uses 1 bag →
+  // {componentId: bagId, consumption: 1}. No cycle support — validated at
+  // save time. Ignored for primary components.
+  dependencies?: ComponentDependency[];
   createdAt: ISODate;
   updatedAt: ISODate;
+}
+
+export interface ComponentDependency {
+  componentId: UUID;
+  consumption: number;
 }
 
 export interface RecipeIngredient {
@@ -92,6 +109,50 @@ export interface RecipeIngredient {
 export interface RecipePackaging {
   componentId: UUID;
   qtyPerUnit: number;
+}
+
+// "Schemat opakowania zbiorczego" — replaces the "Pozostałe komponenty" section
+// from the recipe Excel. A flat list of tiers; each tier expresses how much
+// of a given shared-packaging component one finished product consumes. The
+// component itself owns the *total* capacity (e.g. carton has 50 slots); the
+// tier owns the *per-product consumption* (e.g. this product takes 2 slots
+// → fits 25 per carton). Direct per-product cost is then
+// `comp.price × tier.consumption / comp.capacity`. Cross-packaging cascades
+// (carton consumes tape) live on the component via `dependencies`.
+export type PackingCapacityUnit = 'units' | 'kg' | 'l' | 'm';
+
+// Whether the tier is consumed per finished product unit or per kg / l of
+// bulk mass. Cartons / labels / tape rolls bind to finished products; barrels
+// and (sometimes) bags bind to the bulk batch — they're consumed regardless
+// of how many of those kg eventually become finished units, and they're also
+// consumed when a plan declares bulk-mass-only production (no finished units).
+export type PackingTierScope = 'per_unit' | 'per_bulk_mass';
+
+export interface PackingTier {
+  componentId: UUID;
+  // Amount of the referenced component's capacity-unit consumed per the
+  // scope unit (1 finished product OR 1 kg/l of bulk mass).
+  //   scope=per_unit + 'units'/'m': default 1 (one slot/meter per product),
+  //     manual override possible
+  //   scope=per_unit + 'kg'/'l': auto-derived per-product mass/volume
+  //     unless consumptionOverride is set
+  //   scope=per_bulk_mass + 'kg'/'l': default 1 (1 kg/l of bulk consumes 1
+  //     unit of bag/barrel capacity)
+  consumption: number;
+  // When true, the calculator uses `consumption` verbatim. When false (or
+  // missing) and the scope+unit combination has an auto-derivation rule,
+  // the calculator auto-derives instead of trusting a stored value.
+  consumptionOverride?: boolean;
+  // Defaults to 'per_unit' when missing. 'per_bulk_mass' only makes sense
+  // for components with 'kg' or 'l' capacityUnit.
+  scope?: PackingTierScope;
+  // Free-form. Migration of legacy data sets this to flag tiers whose
+  // consumption is a placeholder and needs user review.
+  note?: string;
+}
+
+export interface PackingScheme {
+  tiers: PackingTier[];
 }
 
 export interface Product {
@@ -111,11 +172,113 @@ export interface Product {
   // e.g. 22 kg → 10 000 sachets). User-supplied, not present in the Excel.
   sachetsCount?: number;
   ingredients: RecipeIngredient[];
+  // Only primary packaging (1:1 per unit) lives here — tube, label, leaflet…
+  // Shared / shipping packaging lives in `packingScheme`.
   packaging: RecipePackaging[];
+  packingScheme?: PackingScheme;
   notes?: string;
   archived: boolean;
   createdAt: ISODate;
   updatedAt: ISODate;
+}
+
+// Pure helper used to migrate legacy products: existing data may have secondary
+// components (outer_carton, tape, …) sitting in `packaging[]` with
+// `qtyPerUnit = 1` (placeholder from earlier importer). Move them to
+// `packingScheme.tiers[]` with a placeholder consumption so the user reviews
+// the value (the capacity itself now lives on the component).
+// Idempotent: if scheme already contains entries for those components or
+// packaging[] has no secondaries, the input is returned unchanged.
+export function migrateLegacySecondaryPackaging(
+  product: Product,
+  componentTypeById: Map<UUID, ComponentType>,
+): Product {
+  const primary: RecipePackaging[] = [];
+  const movedTiers: PackingTier[] = [];
+  for (const pkg of product.packaging ?? []) {
+    const t = componentTypeById.get(pkg.componentId);
+    if (t && isSecondaryComponent(t)) {
+      movedTiers.push({
+        componentId: pkg.componentId,
+        // 1 of the component's capacity-unit consumed per product — sensible
+        // default (e.g. takes 1 slot in carton). User reviews via the note.
+        consumption: 1,
+        note: 'MIGRACJA — sprawdź zużycie',
+      });
+    } else {
+      primary.push(pkg);
+    }
+  }
+  if (movedTiers.length === 0) return product;
+  const existingScheme = product.packingScheme ?? { tiers: [] };
+  // Don't duplicate a tier for a component that's already in the scheme.
+  const existingCompIds = new Set(existingScheme.tiers.map((t) => t.componentId));
+  const dedupedNew = movedTiers.filter((t) => !existingCompIds.has(t.componentId));
+  if (dedupedNew.length === 0 && primary.length === (product.packaging?.length ?? 0)) {
+    return product;
+  }
+  return {
+    ...product,
+    packaging: primary,
+    packingScheme: { tiers: [...existingScheme.tiers, ...dedupedNew] },
+  };
+}
+
+// In-place normalization of products/components whose JSONB still has the
+// previous schema (capacity/capacityUnit on tier, defaultCapacity on
+// component). Run on every read so consumers always see the current shape.
+// Idempotent; pure with respect to inputs.
+export function normalizeProductSchema(product: Product): Product {
+  let changed = false;
+  let tiers = product.packingScheme?.tiers;
+  if (tiers && tiers.length > 0) {
+    const next: PackingTier[] = [];
+    for (const tier of tiers) {
+      const legacy = tier as PackingTier & {
+        capacity?: number;
+        capacityUnit?: PackingCapacityUnit;
+      };
+      if (legacy.consumption === undefined && legacy.capacity !== undefined) {
+        // Old shape: tier carried "capacity = N per product" (e.g. 50 = "50
+        // products fit in 1 carton"). New shape stores 1 / oldCapacity as
+        // consumption on the tier and pushes the total capacity to the
+        // component itself. Simpler default: consumption = 1, leaving the
+        // total capacity on the component for the user to set. Flag for
+        // review so they notice if the legacy value was meaningful.
+        next.push({
+          componentId: legacy.componentId,
+          consumption: 1,
+          note: legacy.note ?? 'MIGRACJA — sprawdź zużycie',
+        });
+        changed = true;
+      } else {
+        next.push(tier);
+      }
+    }
+    tiers = next;
+  }
+  if (!changed) return product;
+  return { ...product, packingScheme: tiers ? { tiers } : undefined };
+}
+
+export function normalizeComponentSchema(component: PackagingComponent): PackagingComponent {
+  const legacy = component as PackagingComponent & {
+    defaultCapacity?: number;
+    defaultCapacityUnit?: PackingCapacityUnit;
+  };
+  // Old shape had `defaultCapacity`/`defaultCapacityUnit`; new uses
+  // `capacity`/`capacityUnit`. Copy if missing on the new side.
+  if (
+    component.capacity === undefined &&
+    legacy.defaultCapacity !== undefined
+  ) {
+    return {
+      ...component,
+      capacity: legacy.defaultCapacity,
+      capacityUnit: legacy.defaultCapacityUnit ?? 'units',
+    };
+  }
+  return component;
 }
 
 export interface CatalogAlias {
@@ -244,10 +407,11 @@ export interface RecipeImportProductResult {
   capacityMl?: number;
   ingredientCount: number;
   packagingCount: number;
-  // Names of components that defaulted to qtyPerUnit=1 but represent secondary
-  // packaging (outer cartons, tape, barrels, bags). The user needs to revise
-  // these manually because qty-per-unit is a ratio for those, not 1:1.
-  qtyReviewNeeded: string[];
+  schemeTierCount: number;
+  // Names of components that landed in `packingScheme.tiers[]` with a
+  // placeholder capacity=1 — the user needs to review and set the real
+  // capacity (how many products fit in 1 carton, etc.).
+  schemeCapacityReviewNeeded: string[];
   warnings: string[];
 }
 

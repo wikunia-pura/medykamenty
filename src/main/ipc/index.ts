@@ -552,13 +552,22 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.MIGRATION_RUN, async () => runMigration(db));
 
   ipcMain.handle(IPC.APP_DOWNLOAD_UPDATE, async () => {
-    // Neither our macOS nor Windows builds are properly code-signed for
-    // electron-updater's auto-install flow (macOS is ad-hoc signed, Windows
-    // is unsigned). Calling `autoUpdater.downloadUpdate()` either silently
-    // does nothing (no pending update cached) or fails on signature
-    // verification. So instead we resolve the right installer asset from
-    // the latest GitHub release and open it externally — the user's browser
-    // takes over and downloads it.
+    // Windows: in-app download + install via electron-updater. The
+    // `update-downloaded` listener in setupAutoUpdater() calls
+    // `quitAndInstall()` once the NSIS installer is on disk.
+    if (process.platform === 'win32') {
+      try {
+        await autoUpdater.downloadUpdate();
+        return { ok: true, inApp: true };
+      } catch (err) {
+        log.warn('Windows in-app update failed, falling back to browser:', err);
+        // fall through to the browser-download path below
+      }
+    }
+
+    // macOS (ad-hoc signed) and Windows fallback: resolve the right
+    // installer asset from the latest GitHub release and open it
+    // externally — the user's browser takes over and downloads it.
     const releasesPage = 'https://github.com/wikunia-pura/medykamenty/releases/latest';
     const ext =
       process.platform === 'darwin'
@@ -567,8 +576,6 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
           ? '.exe'
           : null;
     if (!ext) {
-      // Unknown platform (e.g. Linux build run locally) — just open the
-      // releases page and let the user pick.
       await shell.openExternal(releasesPage);
       return { ok: true, openedRelease: true };
     }

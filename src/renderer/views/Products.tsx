@@ -76,8 +76,10 @@ const Products: React.FC = () => {
       { id: 'capacity', label: t.capacityMl, defaultVisible: true },
       { id: 'density', label: t.density, defaultVisible: true },
       { id: 'labor', label: t.laborCost, defaultVisible: false },
+      { id: 'moq', label: t.moqUnits, defaultVisible: true },
       { id: 'ingredients', label: t.ingredients, defaultVisible: true },
       { id: 'packaging', label: t.packaging, defaultVisible: true },
+      { id: 'packingScheme', label: t.packingScheme, defaultVisible: true },
       { id: 'notes', label: t.notes, defaultVisible: false },
     ],
     [t],
@@ -103,10 +105,14 @@ const Products: React.FC = () => {
         return <th key={id} className="num col-w-sm">{t.density}</th>;
       case 'labor':
         return <th key={id} className="num col-w-sm">{t.laborCost}</th>;
+      case 'moq':
+        return <th key={id} className="num col-w-sm">{t.moqUnits}</th>;
       case 'ingredients':
         return <th key={id} className="num col-w-sm">{t.ingredients}</th>;
       case 'packaging':
         return <th key={id} className="num col-w-sm">{t.packaging}</th>;
+      case 'packingScheme':
+        return <th key={id} className="num col-w-sm">{t.packingScheme}</th>;
       case 'notes':
         return <th key={id} className="col-w-lg">{t.notes}</th>;
       default:
@@ -131,6 +137,8 @@ const Products: React.FC = () => {
         return <td key={id} className="num">{p.densityGPerMl}</td>;
       case 'labor':
         return <td key={id} className="num">{p.conversionLaborCost ?? ''}</td>;
+      case 'moq':
+        return <td key={id} className="num">{p.moqUnits ?? ''}</td>;
       case 'ingredients': {
         const ing = p.ingredients ?? [];
         if (ing.length === 0) {
@@ -188,6 +196,51 @@ const Products: React.FC = () => {
                     </span>
                   </li>
                 ))}
+              </ul>
+            </HoverTooltip>
+          </td>
+        );
+      }
+      case 'packingScheme': {
+        const tiers = p.packingScheme?.tiers ?? [];
+        if (tiers.length === 0) {
+          return <td key={id} className="num"><span className="hint">0</span></td>;
+        }
+        const needsReview = tiers.some((tt) => !!tt.note);
+        return (
+          <td key={id} className="num">
+            <HoverTooltip
+              align="right"
+              triggerClassName={`count-bubble ${needsReview ? 'warn-text' : ''}`}
+              trigger={
+                <>
+                  {tiers.length}
+                  {needsReview && <span style={{ marginLeft: 4 }}>⚠</span>}
+                </>
+              }
+            >
+              <div className="shortage-tooltip-header">
+                {t.packingScheme} — {tiers.length}
+              </div>
+              <ul className="shortage-tooltip-list">
+                {tiers.map((tt, i) => {
+                  const comp = components.find((c) => c.id === tt.componentId);
+                  const unit = comp?.capacityUnit ?? 'units';
+                  const unitLabel = unit === 'units' ? t.unitUnits : unit;
+                  return (
+                    <li key={`${tt.componentId}-${i}`}>
+                      <span className="shortage-tooltip-name">
+                        {componentName(tt.componentId)}
+                        {tt.note && (
+                          <span className="warn-text" style={{ marginLeft: 6 }}>⚠</span>
+                        )}
+                      </span>
+                      <span className="list-tooltip-amount">
+                        {(tt.consumption ?? 0).toLocaleString()} {unitLabel}/szt.
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </HoverTooltip>
           </td>
@@ -261,6 +314,7 @@ const Products: React.FC = () => {
       sachetsCount: editing.sachetsCount,
       ingredients: editing.ingredients ?? [],
       packaging: editing.packaging ?? [],
+      packingScheme: editing.packingScheme,
       notes: editing.notes?.trim() || undefined,
       archived: !!editing.archived,
     };
@@ -749,9 +803,9 @@ const RecipeImportSummaryModal: React.FC<SummaryModalProps> = ({ summary, onClos
   const t = useT();
   useEscapeKey(onClose);
   const productsWithWarnings = summary.perProduct.filter(
-    (p) => p.warnings.length > 0 || p.qtyReviewNeeded.length > 0,
+    (p) => p.warnings.length > 0 || p.schemeCapacityReviewNeeded.length > 0,
   );
-  const showQtyNote = summary.perProduct.some((p) => p.qtyReviewNeeded.length > 0);
+  const showQtyNote = summary.perProduct.some((p) => p.schemeCapacityReviewNeeded.length > 0);
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -799,6 +853,7 @@ const RecipeImportSummaryModal: React.FC<SummaryModalProps> = ({ summary, onClos
                       <th>{t.name}</th>
                       <th className="num">{t.ingredients}</th>
                       <th className="num">{t.packaging}</th>
+                      <th className="num">{t.packingScheme}</th>
                       <th>{t.recipesImportWarnings}</th>
                     </tr>
                   </thead>
@@ -808,10 +863,11 @@ const RecipeImportSummaryModal: React.FC<SummaryModalProps> = ({ summary, onClos
                         <td>{p.productName}</td>
                         <td className="num">{p.ingredientCount}</td>
                         <td className="num">{p.packagingCount}</td>
+                        <td className="num">{p.schemeTierCount}</td>
                         <td>
-                          {p.qtyReviewNeeded.length > 0 && (
+                          {p.schemeCapacityReviewNeeded.length > 0 && (
                             <div className="hint" style={{ marginBottom: 4 }}>
-                              qty=1: {p.qtyReviewNeeded.join(', ')}
+                              capacity=1: {p.schemeCapacityReviewNeeded.join(', ')}
                             </div>
                           )}
                           {p.warnings.map((w, j) => (

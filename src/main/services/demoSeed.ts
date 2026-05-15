@@ -170,6 +170,46 @@ export async function seedDemo(db: Database): Promise<DemoSeedResult> {
     lastPurchasePriceNet: 0.5,
     currency: 'PLN',
   });
+  // Secondary packaging — shared shipping / bulk containers. These don't live
+  // in `Product.packaging[]` (1:1) but in `Product.packingScheme.tiers[]`
+  // where each tier records "1 unit covers N products / kg / l of batch".
+  const tasma = await db.createComponent({
+    name: 'Taśma pakowa 66m',
+    type: 'tape',
+    supplierIds: [pakelo.id],
+    preferredSupplierId: pakelo.id,
+    moq: 36,
+    leadTimeDays: 7,
+    lastPurchasePriceNet: 5.5,
+    currency: 'PLN',
+    capacity: 66,
+    capacityUnit: 'm',
+  });
+  const kartonZbiorczy = await db.createComponent({
+    name: 'Karton zbiorczy 50 szt.',
+    type: 'outer_carton',
+    supplierIds: [pakelo.id],
+    preferredSupplierId: pakelo.id,
+    moq: 200,
+    leadTimeDays: 21,
+    lastPurchasePriceNet: 2.4,
+    currency: 'PLN',
+    capacity: 50,
+    capacityUnit: 'units',
+    // 1 karton zbiorczy zużywa 2 m taśmy (3 razy oklejony)
+    dependencies: [{ componentId: tasma.id, consumption: 2 }],
+  });
+  const beczka = await db.createComponent({
+    name: 'Beczka 200l',
+    type: 'barrel',
+    supplierIds: [],
+    moq: 1,
+    leadTimeDays: 14,
+    lastPurchasePriceNet: 180,
+    currency: 'PLN',
+    capacity: 200,
+    capacityUnit: 'l',
+  });
 
   // ---- Product with recipe ----
   // Sum of percentages = 90; the missing 10 % is "water to 100 %", ignored
@@ -194,6 +234,15 @@ export async function seedDemo(db: Database): Promise<DemoSeedResult> {
       { componentId: kartonikE.id, qtyPerUnit: 1 },
       { componentId: ulotkaE.id, qtyPerUnit: 1 },
     ],
+    packingScheme: {
+      tiers: [
+        // Produkt zajmuje 1 slot w kartonie (karton mieści 50 slotów).
+        // Taśma wynika z dependency na kartonie — nie powtarzamy jej tu.
+        { componentId: kartonZbiorczy.id, consumption: 1 },
+        // Beczka kg/l: consumption auto-derive z capacityMl * density.
+        { componentId: beczka.id, consumption: 0 },
+      ],
+    },
     notes:
       'Receptura demo. Suma 90 % — pozostałe 10 % to woda dolewana do 100 % (pomijane w kalkulacji).',
     archived: false,
@@ -331,7 +380,7 @@ export async function seedDemo(db: Database): Promise<DemoSeedResult> {
   return {
     suppliers: 4,
     rawMaterials: 7,
-    components: 3,
+    components: 6,
     products: 1,
     plans: 1,
     stockSnapshots: 2,

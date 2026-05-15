@@ -1,7 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
-import type { PackagingComponent, Supplier, ComponentType } from '../../shared/types';
+import type {
+  ComponentDependency,
+  PackagingComponent,
+  PackingCapacityUnit,
+  Supplier,
+  ComponentType,
+} from '../../shared/types';
+import { isSecondaryComponent, SECONDARY_COMPONENT_TYPES } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import BlockedByDialog from '../components/BlockedByDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
@@ -10,8 +17,9 @@ import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
 import NumberInput from '../components/NumberInput';
 import ColumnPicker from '../components/ColumnPicker';
+import HoverTooltip from '../components/HoverTooltip';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
-import { IconEdit, IconTrash, IconPlus, IconStar } from '../components/Icons';
+import { IconEdit, IconTrash, IconPlus, IconStar, IconClose, IconEye } from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
 import { useEscapeKey } from '../utils/useEscapeKey';
@@ -23,7 +31,7 @@ import {
   formatStats,
 } from '../utils/exportImport';
 
-const TYPES: ComponentType[] = [
+const PRIMARY_TYPES: ComponentType[] = [
   'tube',
   'bottle',
   'jar',
@@ -36,11 +44,25 @@ const TYPES: ComponentType[] = [
   'other',
 ];
 
-const Components: React.FC = () => {
+const SECONDARY_TYPES: ComponentType[] = [...SECONDARY_COMPONENT_TYPES];
+
+export type ComponentsViewKind = 'primary' | 'secondary';
+
+interface Props {
+  kind?: ComponentsViewKind;
+}
+
+const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   const t = useT();
+  const TYPES = kind === 'secondary' ? SECONDARY_TYPES : PRIMARY_TYPES;
+  const defaultType: ComponentType = kind === 'secondary' ? 'outer_carton' : 'other';
+  const heading = kind === 'secondary' ? t.outerPackaging : t.components;
+  const prefsKey = kind === 'secondary' ? 'outerPackaging' : 'components';
   const [items, setItems] = useState<PackagingComponent[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [editing, setEditing] = useState<Partial<PackagingComponent> | null>(null);
+  const [editingReadOnly, setEditingReadOnly] = useState(false);
+  const [modalTab, setModalTab] = useState<'basics' | 'dependencies'>('basics');
   const [confirmDelete, setConfirmDelete] = useState<PackagingComponent | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
@@ -50,21 +72,38 @@ const Components: React.FC = () => {
   const [query, setQuery] = useState('');
   const [blockedBy, setBlockedBy] = useState<string[] | null>(null);
 
-  useEscapeKey(() => setEditing(null), !!editing);
+  const closeEditor = () => {
+    setEditing(null);
+    setEditingReadOnly(false);
+    setModalTab('basics');
+  };
+
+  useEscapeKey(closeEditor, !!editing);
 
   const COLUMNS: ColumnDef[] = useMemo(
     () => [
       { id: 'name', label: t.name, required: true },
       { id: 'symbol', label: t.symbol, defaultVisible: true },
-      { id: 'type', label: 'Typ', defaultVisible: true },
+      // Type is only useful for primary packaging (tube/bottle/jar/...).
+      // For secondary we no longer treat the type as a meaningful axis;
+      // capacity + dependencies carry the relevant information.
+      ...(kind === 'primary'
+        ? [{ id: 'type', label: 'Typ', defaultVisible: true } as ColumnDef]
+        : []),
       { id: 'suppliers', label: t.suppliers, defaultVisible: true },
       { id: 'moq', label: t.moq, defaultVisible: true },
       { id: 'leadTime', label: t.leadTime, defaultVisible: false },
       { id: 'price', label: t.price, defaultVisible: true },
+      ...(kind === 'secondary'
+        ? [
+            { id: 'capacity', label: t.packingCapacity, defaultVisible: true } as ColumnDef,
+            { id: 'consumes', label: t.componentDependencies, defaultVisible: true } as ColumnDef,
+          ]
+        : []),
       { id: 'currency', label: t.currency, defaultVisible: false },
       { id: 'notes', label: t.notes, defaultVisible: false },
     ],
-    [t],
+    [t, kind],
   );
   const {
     isVisible,
@@ -73,7 +112,7 @@ const Components: React.FC = () => {
     reset: resetColumns,
     orderedColumns,
     orderedVisibleIds,
-  } = useColumnPrefs('components', COLUMNS);
+  } = useColumnPrefs(prefsKey, COLUMNS);
 
   const headerFor = (id: string): React.ReactNode => {
     switch (id) {
@@ -91,6 +130,10 @@ const Components: React.FC = () => {
         return <th key={id} className="num col-w-sm">{t.leadTime}</th>;
       case 'price':
         return <th key={id} className="num col-w-sm">{t.price}</th>;
+      case 'capacity':
+        return <th key={id} className="num col-w-sm">{t.packingCapacity}</th>;
+      case 'consumes':
+        return <th key={id} className="num col-w-sm">{t.componentDependencies}</th>;
       case 'currency':
         return <th key={id} className="col-w-sm">{t.currency}</th>;
       case 'notes':
@@ -100,10 +143,27 @@ const Components: React.FC = () => {
     }
   };
 
+  const openPreview = (c: PackagingComponent) => {
+    setEditingReadOnly(true);
+    setModalTab('basics');
+    setEditing(c);
+  };
+
   const cellFor = (id: string, c: PackagingComponent): React.ReactNode => {
     switch (id) {
       case 'name':
-        return <td key={id} className="col-name col-wrap">{c.name}</td>;
+        return (
+          <td key={id} className="col-name col-wrap">
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => openPreview(c)}
+              title={t.preview}
+            >
+              {c.name}
+            </button>
+          </td>
+        );
       case 'symbol':
         return <td key={id}>{c.mpFirmaSymbol ?? ''}</td>;
       case 'type':
@@ -116,6 +176,53 @@ const Components: React.FC = () => {
         return <td key={id} className="num">{c.leadTimeDays ?? ''}</td>;
       case 'price':
         return <td key={id} className="num">{c.lastPurchasePriceNet ?? ''}</td>;
+      case 'capacity':
+        return (
+          <td key={id} className="num">
+            {c.capacity !== undefined
+              ? `${c.capacity.toLocaleString()} ${
+                  (c.capacityUnit ?? 'units') === 'units'
+                    ? t.unitUnits
+                    : c.capacityUnit
+                }`
+              : ''}
+          </td>
+        );
+      case 'consumes': {
+        const deps = c.dependencies ?? [];
+        if (deps.length === 0) {
+          return <td key={id} className="num"><span className="hint">0</span></td>;
+        }
+        return (
+          <td key={id} className="num">
+            <HoverTooltip
+              align="right"
+              triggerClassName="count-bubble"
+              trigger={deps.length}
+            >
+              <div className="shortage-tooltip-header">
+                {t.componentDependencies} — {deps.length}
+              </div>
+              <ul className="shortage-tooltip-list">
+                {deps.map((d, i) => {
+                  const target = items.find((x) => x.id === d.componentId);
+                  if (!target) return null;
+                  const unit = target.capacityUnit ?? 'units';
+                  const unitLabel = unit === 'units' ? t.unitUnits : unit;
+                  return (
+                    <li key={`${d.componentId}-${i}`}>
+                      <span className="shortage-tooltip-name">{target.name}</span>
+                      <span className="list-tooltip-amount">
+                        {d.consumption.toLocaleString()} {unitLabel}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </HoverTooltip>
+          </td>
+        );
+      }
       case 'currency':
         return <td key={id}>{c.currency ?? ''}</td>;
       case 'notes':
@@ -130,7 +237,12 @@ const Components: React.FC = () => {
       window.electronAPI.listComponents(),
       window.electronAPI.listSuppliers(),
     ]);
-    setItems(list);
+    // The catalog is split by kind so each view shows only its own
+    // components — keeps primary (tuba/etykieta/…) and secondary (karton
+    // zbiorczy/taśma/beczka/…) separate for cleaner management.
+    const matchesKind = (c: PackagingComponent) =>
+      kind === 'secondary' ? isSecondaryComponent(c.type) : !isSecondaryComponent(c.type);
+    setItems(list.filter(matchesKind));
     setSuppliers(ss);
   };
 
@@ -143,7 +255,7 @@ const Components: React.FC = () => {
         setLoaderMessage(null);
       }
     })();
-  }, []);
+  }, [kind]);
 
   const supplierName = (id?: string) => suppliers.find((s) => s.id === id)?.name ?? '—';
 
@@ -160,25 +272,40 @@ const Components: React.FC = () => {
   const onAdd = () =>
     setEditing({
       name: '',
-      type: 'other',
+      type: defaultType,
       supplierIds: [],
+      // defaultType for secondary is 'outer_carton' → 'units'. If the user
+      // picks 'barrel' from the type dropdown, the unit dropdown in the modal
+      // lets them switch to 'l'.
+      ...(kind === 'secondary' ? { capacityUnit: 'units' as const, dependencies: [] } : {}),
     });
+
+  // Build the same payload that onSave persists — extracted so doPropagate can
+  // save the component first (it can't call onSave because that closes the
+  // modal).
+  const buildEditingPayload = (e: Partial<PackagingComponent>) => ({
+    name: (e.name ?? '').trim(),
+    type: (e.type ?? defaultType) as ComponentType,
+    mpFirmaSymbol: e.mpFirmaSymbol?.trim() || undefined,
+    supplierIds: e.supplierIds ?? [],
+    preferredSupplierId: e.preferredSupplierId,
+    moq: e.moq,
+    leadTimeDays: e.leadTimeDays,
+    lastPurchasePriceNet: e.lastPurchasePriceNet,
+    currency: e.currency?.trim() || undefined,
+    notes: e.notes?.trim() || undefined,
+    // Only meaningful for secondary kind. Wipe on primary so a user toggling
+    // a row from secondary → primary doesn't leave dangling values.
+    capacity: kind === 'secondary' ? e.capacity : undefined,
+    capacityUnit:
+      kind === 'secondary' ? e.capacityUnit ?? 'units' : undefined,
+    dependencies: kind === 'secondary' ? (e.dependencies ?? []) : undefined,
+  });
 
   const onSave = async () => {
     if (!editing || !editing.name?.trim()) return;
     setError(null);
-    const payload = {
-      name: editing.name.trim(),
-      type: (editing.type ?? 'other') as ComponentType,
-      mpFirmaSymbol: editing.mpFirmaSymbol?.trim() || undefined,
-      supplierIds: editing.supplierIds ?? [],
-      preferredSupplierId: editing.preferredSupplierId,
-      moq: editing.moq,
-      leadTimeDays: editing.leadTimeDays,
-      lastPurchasePriceNet: editing.lastPurchasePriceNet,
-      currency: editing.currency?.trim() || undefined,
-      notes: editing.notes?.trim() || undefined,
-    };
+    const payload = buildEditingPayload(editing);
     try {
       if (editing.id) {
         await window.electronAPI.updateComponent(editing.id, payload);
@@ -314,7 +441,7 @@ const Components: React.FC = () => {
     <div className="main">
       <div className="page-header">
         <HeaderNav />
-        <h1>{t.components}</h1>
+        <h1>{heading}</h1>
         <span className="page-header-count">{items.length}</span>
       </div>
 
@@ -375,7 +502,11 @@ const Components: React.FC = () => {
                     <div className="btn-row">
                       <button
                         className="btn btn-sm soft-edit"
-                        onClick={() => setEditing(c)}
+                        onClick={() => {
+                          setEditingReadOnly(false);
+                          setModalTab('basics');
+                          setEditing(c);
+                        }}
                         title={t.edit}
                       >
                         <IconEdit size={13} /> {t.edit}
@@ -397,41 +528,115 @@ const Components: React.FC = () => {
       </div>
 
       {editing && (
-        <div className="modal-overlay" onClick={() => setEditing(null)}>
-          <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={closeEditor}
+        >
+          <div
+            className={`modal modal-md${editingReadOnly ? ' modal-readonly' : ''}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <ModalHeader
-              icon={editing.id ? <IconEdit size={18} /> : <IconPlus size={18} />}
-              tone={editing.id ? 'edit' : 'add'}
-              title={
-                editing.id
-                  ? `${t.edit}: ${editing.name ?? ''}`
-                  : `${t.add} — ${t.components.toLowerCase()}`
+              icon={
+                editingReadOnly ? (
+                  <IconEye size={18} />
+                ) : editing.id ? (
+                  <IconEdit size={18} />
+                ) : (
+                  <IconPlus size={18} />
+                )
               }
-              onClose={() => setEditing(null)}
+              tone={editingReadOnly ? 'edit' : editing.id ? 'edit' : 'add'}
+              title={
+                editingReadOnly
+                  ? `${t.preview}: ${editing.name ?? ''}`
+                  : editing.id
+                    ? `${t.edit}: ${editing.name ?? ''}`
+                    : `${t.add} — ${heading.toLowerCase()}`
+              }
+              onClose={closeEditor}
             />
             <div className="modal-body">
+            {kind === 'secondary' && (
+              <div className="modal-tabs">
+                <button
+                  type="button"
+                  className={`modal-tab ${modalTab === 'basics' ? 'active' : ''}`}
+                  onClick={() => setModalTab('basics')}
+                >
+                  <span>{t.productTabBasics}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`modal-tab ${modalTab === 'dependencies' ? 'active' : ''}`}
+                  onClick={() => setModalTab('dependencies')}
+                >
+                  <span>{t.componentDependencies}</span>
+                  <span className="modal-tab-count">{editing.dependencies?.length ?? 0}</span>
+                </button>
+                <div className="modal-tabs-spacer" />
+              </div>
+            )}
+            {(kind !== 'secondary' || modalTab === 'basics') && (<>
             <div className="form-row">
               <label>{t.name}</label>
               <input
                 className="input"
                 value={editing.name ?? ''}
                 onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                disabled={editingReadOnly}
               />
             </div>
-            <div className="form-row">
-              <label>Typ</label>
-              <SearchableSelect
-                options={TYPES.map((tt) => ({ value: tt, label: tt }))}
-                value={editing.type ?? 'other'}
-                onChange={(val) => setEditing({ ...editing, type: val as ComponentType })}
-              />
-            </div>
+            {kind === 'secondary' && (
+              <>
+                <div className="form-row">
+                  <label>{t.packingCapacity}</label>
+                  <NumberInput
+                    className="input"
+                    value={editing.capacity}
+                    onChange={(v) => setEditing({ ...editing, capacity: v })}
+                    disabled={editingReadOnly}
+                  />
+                </div>
+                <div className="form-row">
+                  <label>{t.packingCapacityUnit}</label>
+                  <select
+                    className="input"
+                    value={editing.capacityUnit ?? 'units'}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        capacityUnit: e.target.value as PackingCapacityUnit,
+                      })
+                    }
+                    disabled={editingReadOnly}
+                  >
+                    <option value="units">{t.unitUnits}</option>
+                    <option value="m">m</option>
+                    <option value="kg">kg</option>
+                    <option value="l">l</option>
+                  </select>
+                </div>
+              </>
+            )}
+            {kind === 'primary' && (
+              <div className="form-row">
+                <label>Typ</label>
+                <SearchableSelect
+                  options={TYPES.map((tt) => ({ value: tt, label: tt }))}
+                  value={editing.type ?? 'other'}
+                  onChange={(val) => setEditing({ ...editing, type: val as ComponentType })}
+                  disabled={editingReadOnly}
+                />
+              </div>
+            )}
             <div className="form-row">
               <label>{t.symbol}</label>
               <input
                 className="input"
                 value={editing.mpFirmaSymbol ?? ''}
                 onChange={(e) => setEditing({ ...editing, mpFirmaSymbol: e.target.value })}
+                disabled={editingReadOnly}
               />
             </div>
             <div className="form-row">
@@ -451,6 +656,7 @@ const Components: React.FC = () => {
                 className="input"
                 value={editing.moq}
                 onChange={(v) => setEditing({ ...editing, moq: v })}
+                disabled={editingReadOnly}
               />
             </div>
             <div className="form-row">
@@ -459,6 +665,7 @@ const Components: React.FC = () => {
                 className="input"
                 value={editing.leadTimeDays}
                 onChange={(v) => setEditing({ ...editing, leadTimeDays: v })}
+                disabled={editingReadOnly}
               />
             </div>
             <div className="form-row">
@@ -468,6 +675,7 @@ const Components: React.FC = () => {
                 step="0.01"
                 value={editing.lastPurchasePriceNet}
                 onChange={(v) => setEditing({ ...editing, lastPurchasePriceNet: v })}
+                disabled={editingReadOnly}
               />
             </div>
             <div className="form-row">
@@ -477,6 +685,7 @@ const Components: React.FC = () => {
                 placeholder="PLN"
                 value={editing.currency ?? ''}
                 onChange={(e) => setEditing({ ...editing, currency: e.target.value })}
+                disabled={editingReadOnly}
               />
             </div>
             <div className="form-row">
@@ -484,16 +693,41 @@ const Components: React.FC = () => {
               <textarea
                 value={editing.notes ?? ''}
                 onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
+                disabled={editingReadOnly}
               />
             </div>
+            </>)}
+            {kind === 'secondary' && modalTab === 'dependencies' && (
+              <DependenciesEditor
+                editing={editing}
+                allComponents={items}
+                onChange={(deps) => setEditing({ ...editing, dependencies: deps })}
+                onOpenComponent={(c) => {
+                  // Stay in modal, just swap the entity being edited.
+                  setEditingReadOnly(true);
+                  setModalTab('basics');
+                  setEditing(c);
+                }}
+                readOnly={editingReadOnly}
+                t={t}
+              />
+            )}
             </div>
             <div className="modal-footer">
-              <button className="btn" onClick={() => setEditing(null)}>
-                {t.cancel}
-              </button>
-              <button className="btn primary-filled" onClick={onSave}>
-                {t.save}
-              </button>
+              {editingReadOnly ? (
+                <button className="btn primary-filled" onClick={closeEditor}>
+                  {t.close}
+                </button>
+              ) : (
+                <>
+                  <button className="btn" onClick={closeEditor}>
+                    {t.cancel}
+                  </button>
+                  <button className="btn primary-filled" onClick={onSave}>
+                    {t.save}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -522,6 +756,182 @@ const Components: React.FC = () => {
       )}
 
       {loaderMessage && <LoadingOverlay message={loaderMessage} />}
+    </div>
+  );
+};
+
+// ---------- Cross-component dependencies editor ----------
+//
+// Rendered inside the secondary-component modal. Lets the user say "1 of
+// THIS component consumes N of <other secondary>". Cascading consumption
+// is computed by the back-end calculators on every cost/shortage/maxProducible
+// pass. The form does:
+//   - prevents self-reference (a carton can't depend on itself)
+//   - filters the picker to other secondary components only
+//   - shows "1 [this] → N [unit-of-dep]" hint per row
+//
+// Cycle detection at scheme-walk time (in packingConsumption.ts) is a safety
+// net; we should also reject cycles on save, but for now a single-step user
+// can already form one A→B→A pair — flagged here only via a faint warning
+// when we notice an existing back-edge. Forbidden cycle save can be added
+// later if it becomes a real issue.
+interface DependenciesEditorProps {
+  editing: Partial<PackagingComponent>;
+  allComponents: PackagingComponent[];
+  onChange: (next: ComponentDependency[]) => void;
+  onOpenComponent?: (c: PackagingComponent) => void;
+  readOnly?: boolean;
+  t: ReturnType<typeof useT>;
+}
+
+const DependenciesEditor: React.FC<DependenciesEditorProps> = ({
+  editing,
+  allComponents,
+  onChange,
+  onOpenComponent,
+  readOnly = false,
+  t,
+}) => {
+  const deps = editing.dependencies ?? [];
+
+  const availableOptions = useMemo(() => {
+    return allComponents
+      .filter(
+        (c) =>
+          isSecondaryComponent(c.type) &&
+          c.id !== editing.id &&
+          !deps.some((d) => d.componentId === c.id),
+      )
+      .map((c) => ({
+        value: c.id,
+        label: c.name,
+        hint: c.capacityUnit ?? 'units',
+      }));
+  }, [allComponents, editing.id, deps]);
+
+  const componentById = useMemo(
+    () => new Map(allComponents.map((c) => [c.id, c])),
+    [allComponents],
+  );
+
+  const update = (idx: number, patch: Partial<ComponentDependency>) => {
+    const next = deps.slice();
+    next[idx] = { ...next[idx], ...patch };
+    onChange(next);
+  };
+
+  const remove = (idx: number) => onChange(deps.filter((_, i) => i !== idx));
+
+  const add = () => {
+    if (availableOptions.length === 0) return;
+    onChange([
+      ...deps,
+      { componentId: availableOptions[0].value, consumption: 1 },
+    ]);
+  };
+
+  return (
+    <div>
+      <div className="hint" style={{ fontSize: 12, marginBottom: 10 }}>
+        {t.componentDependenciesHint}
+      </div>
+      {!readOnly && (
+        <div className="row" style={{ marginBottom: 12 }}>
+          <div className="spacer" />
+          <button
+            className="btn btn-sm soft-edit"
+            onClick={add}
+            disabled={availableOptions.length === 0}
+          >
+            <IconPlus size={13} /> {t.add}
+          </button>
+        </div>
+      )}
+      <table className="table">
+        <thead>
+          <tr>
+            <th>{t.componentDependenciesConsumed}</th>
+            <th className="num">{t.componentDependenciesAmount}</th>
+            <th>{t.unit}</th>
+            {!readOnly && <th className="actions">{t.actionsHeader}</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {deps.length === 0 && (
+            <tr>
+              <td colSpan={readOnly ? 3 : 4} className="hint">
+                {t.noData}
+              </td>
+            </tr>
+          )}
+          {deps.map((dep, idx) => {
+            const depComp = componentById.get(dep.componentId);
+            const depUnit = depComp?.capacityUnit ?? 'units';
+            const unitLabel = depUnit === 'units' ? t.unitUnits : depUnit;
+            return (
+              <tr key={idx}>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <SearchableSelect
+                        options={[
+                          ...(depComp
+                            ? [
+                                {
+                                  value: depComp.id,
+                                  label: depComp.name,
+                                  hint: depComp.capacityUnit ?? 'units',
+                                },
+                              ]
+                            : []),
+                          ...availableOptions,
+                        ]}
+                        value={dep.componentId}
+                        onChange={(val) => update(idx, { componentId: val })}
+                        disabled={readOnly}
+                      />
+                    </div>
+                    {depComp && onOpenComponent && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-icon-only"
+                        onClick={() => onOpenComponent(depComp)}
+                        title={t.preview}
+                      >
+                        <IconEye size={13} />
+                      </button>
+                    )}
+                  </div>
+                </td>
+                <td className="num">
+                  <NumberInput
+                    className="input"
+                    style={{ width: 110 }}
+                    value={dep.consumption}
+                    emptyValue={0}
+                    onChange={(v) => update(idx, { consumption: v ?? 0 })}
+                    disabled={readOnly}
+                  />
+                </td>
+                <td>
+                  <span className="hint">{unitLabel}</span>
+                </td>
+                {!readOnly && (
+                  <td className="actions">
+                    <button
+                      className="btn btn-sm soft-danger btn-icon-only"
+                      onClick={() => remove(idx)}
+                      title={t.delete}
+                    >
+                      <IconClose size={12} />
+                    </button>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 };

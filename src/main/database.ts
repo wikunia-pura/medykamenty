@@ -15,8 +15,16 @@ import type {
   RFQEmailRecord,
   StoreSchema,
   CatalogAlias,
+  ComponentType,
+  UUID,
+} from '../shared/types';
+import {
+  migrateLegacySecondaryPackaging,
+  normalizeComponentSchema,
+  normalizeProductSchema,
 } from '../shared/types';
 import { normalize as normalizeAlias } from './services/smartMatcher';
+import log from './utils/logger';
 import {
   DEFAULT_WASTE_FACTOR,
   DEFAULT_CURRENCY,
@@ -226,7 +234,7 @@ export default class Database {
     const { data, error } = await getSupabase().from('components').select('id, data');
     const rows = unwrap(data, error, 'listComponents');
     return rows
-      .map(r => rebuild<PackagingComponent>(r))
+      .map(r => normalizeComponentSchema(rebuild<PackagingComponent>(r)))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -237,7 +245,7 @@ export default class Database {
       .eq('id', id)
       .maybeSingle();
     if (error) throw new Error(`getComponent: ${error.message}`);
-    return data ? rebuild<PackagingComponent>(data) : undefined;
+    return data ? normalizeComponentSchema(rebuild<PackagingComponent>(data)) : undefined;
   }
 
   async createComponent(
@@ -273,7 +281,22 @@ export default class Database {
     const blockedBy: string[] = [];
     const products = await this.listProducts();
     for (const p of products) {
-      if (p.packaging.some(pkg => pkg.componentId === id)) blockedBy.push(`product:${p.name}`);
+      if (p.packaging.some(pkg => pkg.componentId === id)) {
+        blockedBy.push(`product:${p.name}`);
+        continue;
+      }
+      if (p.packingScheme?.tiers.some(t => t.componentId === id)) {
+        blockedBy.push(`product:${p.name}`);
+      }
+    }
+    // Also block if another component depends on this one (e.g. a carton
+    // consumes this tape) — otherwise the cascade would dangle.
+    const components = await this.listComponents();
+    for (const c of components) {
+      if (c.id === id) continue;
+      if (c.dependencies?.some(d => d.componentId === id)) {
+        blockedBy.push(`component:${c.name}`);
+      }
     }
     if (blockedBy.length > 0) return { ok: false, blockedBy };
     const { error } = await getSupabase().from('components').delete().eq('id', id);
@@ -367,7 +390,37 @@ export default class Database {
   async listProducts(): Promise<Product[]> {
     const { data, error } = await getSupabase().from('products').select('id, data');
     const rows = unwrap(data, error, 'listProducts');
-    return rows.map(r => rebuild<Product>(r)).sort((a, b) => a.name.localeCompare(b.name));
+    const products = rows.map(r => normalizeProductSchema(rebuild<Product>(r)));
+    // Lazy migration: move legacy secondary packaging entries (cartons, tape,
+    // barrels) from `packaging[]` into `packingScheme.tiers[]`. Runs once
+    // per product that still has the legacy shape; persists best-effort so
+    // we don't repeat the work on every read.
+    let typeMap: Map<UUID, ComponentType> | null = null;
+    const migrated: Product[] = [];
+    for (const p of products) {
+      if (!p.packaging || p.packaging.length === 0) {
+        migrated.push(p);
+        continue;
+      }
+      if (!typeMap) {
+        const comps = await this.listComponents();
+        typeMap = new Map(comps.map(c => [c.id, c.type]));
+      }
+      const after = migrateLegacySecondaryPackaging(p, typeMap);
+      if (after !== p) {
+        try {
+          const { rest } = splitId(after);
+          await getSupabase()
+            .from('products')
+            .update({ data: rest, updated_at: after.updatedAt })
+            .eq('id', after.id);
+        } catch (err) {
+          log.warn(`Lazy migration of product ${after.id} failed:`, err);
+        }
+      }
+      migrated.push(after);
+    }
+    return migrated.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async getProduct(id: string): Promise<Product | undefined> {
@@ -377,7 +430,26 @@ export default class Database {
       .eq('id', id)
       .maybeSingle();
     if (error) throw new Error(`getProduct: ${error.message}`);
-    return data ? rebuild<Product>(data) : undefined;
+    if (!data) return undefined;
+    const product = normalizeProductSchema(rebuild<Product>(data));
+    // Same lazy migration as listProducts() — apply on the rare path where
+    // a product is fetched by id without going through the list first.
+    if (!product.packaging || product.packaging.length === 0) return product;
+    const comps = await this.listComponents();
+    const typeMap = new Map(comps.map(c => [c.id, c.type]));
+    const after = migrateLegacySecondaryPackaging(product, typeMap);
+    if (after !== product) {
+      try {
+        const { rest } = splitId(after);
+        await getSupabase()
+          .from('products')
+          .update({ data: rest, updated_at: after.updatedAt })
+          .eq('id', after.id);
+      } catch (err) {
+        log.warn(`Lazy migration of product ${after.id} failed:`, err);
+      }
+    }
+    return after;
   }
 
   async createProduct(input: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>): Promise<Product> {

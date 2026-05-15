@@ -2,6 +2,7 @@ import type {
   Supplier,
   RawMaterial,
   PackagingComponent,
+  PackingScheme,
   Product,
   ProductionPlan,
   Lang,
@@ -331,6 +332,14 @@ interface ProductExportRow {
   conversionLaborCost?: number;
   ingredients: { rawMaterialName: string; percentage: number }[];
   packaging: { componentName: string; qtyPerUnit: number }[];
+  packingScheme?: {
+    tiers: {
+      componentName: string;
+      consumption: number;
+      consumptionOverride?: boolean;
+      note?: string;
+    }[];
+  };
   notes?: string;
   archived: boolean;
 }
@@ -360,6 +369,18 @@ export function exportProductsJson(
         qtyPerUnit: pk.qtyPerUnit,
       }))
       .filter((pk) => pk.componentName),
+    packingScheme: p.packingScheme
+      ? {
+          tiers: p.packingScheme.tiers
+            .map((t) => ({
+              componentName: compName(t.componentId),
+              consumption: t.consumption,
+              consumptionOverride: t.consumptionOverride,
+              note: t.note,
+            }))
+            .filter((t) => t.componentName),
+        }
+      : undefined,
     notes: p.notes,
     archived: p.archived,
   }));
@@ -396,6 +417,24 @@ export async function importProductsJson(
       if (c) packaging.push({ componentId: c.id, qtyPerUnit: Number(pk.qtyPerUnit) || 0 });
       else stats.unresolved++;
     }
+    let packingScheme: PackingScheme | undefined;
+    if (r.packingScheme?.tiers && r.packingScheme.tiers.length > 0) {
+      const tiers = [];
+      for (const t of r.packingScheme.tiers) {
+        const c = findByName(components, t.componentName ?? '');
+        if (!c) {
+          stats.unresolved++;
+          continue;
+        }
+        tiers.push({
+          componentId: c.id,
+          consumption: Number(t.consumption) || 1,
+          consumptionOverride: t.consumptionOverride,
+          note: t.note,
+        });
+      }
+      if (tiers.length > 0) packingScheme = { tiers };
+    }
     const payload = {
       name,
       sku: r.sku?.trim() || undefined,
@@ -405,6 +444,7 @@ export async function importProductsJson(
         typeof r.conversionLaborCost === 'number' ? r.conversionLaborCost : undefined,
       ingredients,
       packaging,
+      packingScheme,
       notes: r.notes?.trim() || undefined,
       archived: !!r.archived,
     };

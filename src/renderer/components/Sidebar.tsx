@@ -64,6 +64,7 @@ const Sidebar: React.FC<Props> = ({ current, onSelect, userEmail, onSignOut }) =
     { key: 'products', label: t.products, icon: '◐', group: 'catalog' },
     { key: 'rawMaterials', label: t.rawMaterials, icon: '⬡', group: 'catalog' },
     { key: 'components', label: t.components, icon: '▦', group: 'catalog' },
+    { key: 'outerPackaging', label: t.outerPackaging, icon: '▣', group: 'catalog' },
     { key: 'suppliers', label: t.suppliers, icon: '◉', group: 'catalog' },
     { key: 'settings', label: t.settings, icon: '⚙', group: 'system' },
   ];

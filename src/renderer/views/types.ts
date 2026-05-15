@@ -3,6 +3,7 @@ export type ViewKey =
   | 'products'
   | 'rawMaterials'
   | 'components'
+  | 'outerPackaging'
   | 'suppliers'
   | 'stockImport'
   | 'productionPlan'

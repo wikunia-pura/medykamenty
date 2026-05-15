@@ -24,6 +24,8 @@ import Database from '../database';
 import type {
   ComponentType,
   PackagingComponent,
+  PackingCapacityUnit,
+  PackingTier,
   Product,
   RawMaterial,
   RecipeImportAnalysis,
@@ -196,7 +198,7 @@ type RowClass =
       pricePerKg?: number;
       channel?: 'MY' | 'RETTER';
     }
-  | { kind: 'packaging'; name: string }
+  | { kind: 'packaging'; name: string; capacityHint?: number; capacityUnitHint?: PackingCapacityUnit }
   // "Konfekcja" — assembly/labour cost line. NOT a raw material and NOT a
   // packaging component. The numeric value lands on `Product.conversionLaborCost`.
   | { kind: 'konfekcja'; cost?: number }
@@ -280,9 +282,25 @@ function classifyRow(cells: unknown[]): RowClass {
     };
   }
 
-  // Packaging row: name in A, nothing in B…J.
-  if (c0 && cells.slice(1).every((v) => asString(v) === undefined && asNumber(v) === undefined)) {
-    return { kind: 'packaging', name: c0 };
+  // Packaging row: name in A. Column B may optionally carry a capacity hint
+  // (e.g. "50" for "50 products per carton") and column C an optional unit
+  // override ("kg" or "l" — for barrels of bulk); columns D…J should be empty.
+  if (c0 && cells.slice(3).every((v) => asString(v) === undefined && asNumber(v) === undefined)) {
+    const capHint = asNumber(cells[1]);
+    const b = asString(cells[1]);
+    // Don't accept B as a capacity if it's clearly a header word like
+    // "Zawartość %" — only pure numbers count.
+    if (b && capHint === undefined) return { kind: 'unknown' };
+    const unitRaw = asString(cells[2]);
+    let unitHint: PackingCapacityUnit | undefined;
+    if (unitRaw) {
+      const n = normalize(unitRaw);
+      if (n === 'units' || n === 'szt' || n === 'szt.' || n === 'pcs') unitHint = 'units';
+      else if (n === 'kg') unitHint = 'kg';
+      else if (n === 'l' || n === 'l.') unitHint = 'l';
+      else return { kind: 'unknown' };
+    }
+    return { kind: 'packaging', name: c0, capacityHint: capHint, capacityUnitHint: unitHint };
   }
 
   return { kind: 'unknown' };
@@ -328,6 +346,11 @@ export interface RawIngredient {
 export interface RawPackaging {
   name: string;
   section: 'primary' | 'secondary';
+  // For secondary section only: optional "this container holds N <unit>"
+  // capacity hint from column B. Without a hint, commit() defaults to
+  // capacity=1 and flags the tier for review.
+  capacityHint?: number;
+  capacityUnitHint?: PackingCapacityUnit;
 }
 
 export interface RecipeBlock {
@@ -477,7 +500,12 @@ function extractBlocks(ws: ExcelJS.Worksheet): RecipeBlock[] {
       if (state === 'reading_primary_components') {
         current.packaging.push({ name: cls.name, section: 'primary' });
       } else if (state === 'reading_secondary_components') {
-        current.packaging.push({ name: cls.name, section: 'secondary' });
+        current.packaging.push({
+          name: cls.name,
+          section: 'secondary',
+          capacityHint: cls.capacityHint,
+          capacityUnitHint: cls.capacityUnitHint,
+        });
       } else {
         // Stray name-only row outside any section. Skip and warn.
         current.warnings.push(`Pominięto wiersz „${cls.name}" — nie należy do żadnej sekcji.`);
@@ -745,7 +773,14 @@ export async function commitRecipesXlsx(
   // "add-new" on need section/channel info from the file to set fields like
   // factorySupplied or component type; we look those up by re-walking blocks.
   const rawHints = new Map<string, { channel?: 'MY' | 'RETTER' }>();
-  const compHints = new Map<string, { section: 'primary' | 'secondary' }>();
+  const compHints = new Map<
+    string,
+    {
+      section: 'primary' | 'secondary';
+      capacityHint?: number;
+      capacityUnitHint?: PackingCapacityUnit;
+    }
+  >();
   for (const b of blocks) {
     for (const ing of b.ingredients) {
       const k = smartNormalize(ing.name);
@@ -753,7 +788,13 @@ export async function commitRecipesXlsx(
     }
     for (const pkg of b.packaging) {
       const k = smartNormalize(pkg.name);
-      if (!compHints.has(k)) compHints.set(k, { section: pkg.section });
+      if (!compHints.has(k)) {
+        compHints.set(k, {
+          section: pkg.section,
+          capacityHint: pkg.capacityHint,
+          capacityUnitHint: pkg.capacityUnitHint,
+        });
+      }
     }
   }
 
@@ -780,10 +821,25 @@ export async function commitRecipesXlsx(
     compIdx,
     async (cleanName, sourceName) => {
       const hint = compHints.get(smartNormalize(sourceName));
+      const type = inferComponentType(cleanName, hint?.section ?? 'primary');
+      // Seed total capacity on the component from the file (column B in the
+      // "Pozostałe komponenty" section) — e.g. "Karton zbiorczy | 50" means
+      // 50 slots per carton. Without a hint, leave undefined and flag the
+      // tier for review.
+      const isSecondary = (hint?.section ?? 'primary') === 'secondary';
+      const capacity =
+        isSecondary && hint?.capacityHint && hint.capacityHint > 0
+          ? hint.capacityHint
+          : undefined;
+      const capacityUnit: PackingCapacityUnit | undefined = isSecondary
+        ? hint?.capacityUnitHint ?? (type === 'barrel' ? 'l' : 'units')
+        : undefined;
       return db.createComponent({
         name: cleanName,
-        type: inferComponentType(cleanName, hint?.section ?? 'primary'),
+        type,
         supplierIds: [],
+        capacity,
+        capacityUnit,
       });
     },
     (id, newName) => db.updateComponent(id, { name: newName }),
@@ -816,7 +872,8 @@ export async function commitRecipesXlsx(
       capacityMl: block.capacityMl,
       ingredientCount: 0,
       packagingCount: 0,
-      qtyReviewNeeded: [],
+      schemeTierCount: 0,
+      schemeCapacityReviewNeeded: [],
       warnings: [...block.warnings],
     };
 
@@ -876,8 +933,12 @@ export async function commitRecipesXlsx(
       );
     }
 
-    // Resolve packaging.
+    // Resolve packaging. Primary components keep their 1:1 entry in
+    // `packaging[]` (one per product unit). Secondary components — outer
+    // cartons, tape, barrels, bags — go into `packingScheme.tiers[]` because
+    // they cover many units per piece, with a per-tier capacity.
     const packaging: Product['packaging'] = [];
+    const schemeTiers: PackingTier[] = [];
     for (const pkg of block.packaging) {
       const comp = lookupWithResolutions(
         compIdx,
@@ -892,9 +953,21 @@ export async function commitRecipesXlsx(
         missing = true;
         break;
       }
-      packaging.push({ componentId: comp.id, qtyPerUnit: 1 });
       if (isSecondaryComponent(comp.type)) {
-        result.qtyReviewNeeded.push(comp.name);
+        // Capacity lives on the component; tier stores per-product consumption.
+        // Default consumption: 1 (one slot / one piece per product). For
+        // kg/l, walkSchemeConsumption auto-derives from product mass/volume
+        // unless the user later sets `consumptionOverride: true`.
+        const needsReview =
+          !comp.capacity || comp.capacity <= 0;
+        schemeTiers.push({
+          componentId: comp.id,
+          consumption: 1,
+          note: needsReview ? 'IMPORT — uzupełnij pojemność komponentu' : undefined,
+        });
+        if (needsReview) result.schemeCapacityReviewNeeded.push(comp.name);
+      } else {
+        packaging.push({ componentId: comp.id, qtyPerUnit: 1 });
       }
     }
     if (missing) {
@@ -905,6 +978,7 @@ export async function commitRecipesXlsx(
 
     result.ingredientCount = ingredients.length;
     result.packagingCount = packaging.length;
+    result.schemeTierCount = schemeTiers.length;
 
     const existing = lookupExisting(productIdx, block.name, summary.globalWarnings);
     const payload = {
@@ -920,6 +994,7 @@ export async function commitRecipesXlsx(
       conversionLaborCost: block.conversionLaborCost,
       ingredients,
       packaging,
+      packingScheme: schemeTiers.length > 0 ? { tiers: schemeTiers } : undefined,
       archived: false,
     };
 
@@ -931,11 +1006,14 @@ export async function commitRecipesXlsx(
               // may have filled in (sku, notes, sachetsCount). Konfekcja
               // value from the file wins when present — that's the whole
               // point — but a missing line keeps whatever the user already
-              // had.
+              // had. Same rule for `packingScheme`: file overrides only when
+              // it provides tiers; absent → keep user's edits.
               ...payload,
               sku: existing.sku,
               conversionLaborCost:
                 block.conversionLaborCost ?? existing.conversionLaborCost,
+              packingScheme:
+                schemeTiers.length > 0 ? { tiers: schemeTiers } : existing.packingScheme,
               notes: existing.notes,
               sachetsCount: existing.sachetsCount,
               archived: existing.archived,
@@ -1090,14 +1168,24 @@ export async function exportRecipesXlsx(filePath: string, db: Database): Promise
       ]);
     }
 
-    // Split packaging into primary vs secondary by component type.
+    // Primary packaging: 1:1 entries from `packaging[]`. Secondary packaging
+    // comes from `packingScheme.tiers[]`. Total capacity now lives on the
+    // component, so the exported row shows `componentName | capacity | unit`.
     const primary: { name: string }[] = [];
-    const secondary: { name: string }[] = [];
+    const secondary: { name: string; capacity?: number; unit?: 'units' | 'kg' | 'l' | 'm' }[] = [];
     for (const pk of p.packaging) {
       const c = compById.get(pk.componentId);
       if (!c) continue;
-      if (isSecondaryComponent(c.type)) secondary.push({ name: c.name });
-      else primary.push({ name: c.name });
+      if (isSecondaryComponent(c.type)) {
+        secondary.push({ name: c.name });
+      } else {
+        primary.push({ name: c.name });
+      }
+    }
+    for (const tier of p.packingScheme?.tiers ?? []) {
+      const c = compById.get(tier.componentId);
+      if (!c) continue;
+      secondary.push({ name: c.name, capacity: c.capacity, unit: c.capacityUnit });
     }
 
     ws.addRow(['Komponenty', null, null, null, null, null, null, null, null, null]);
@@ -1108,7 +1196,21 @@ export async function exportRecipesXlsx(filePath: string, db: Database): Promise
     if (secondary.length > 0) {
       ws.addRow(['Pozostałe komponenty', null, null, null, null, null, null, null, null, null]);
       for (const pk of secondary) {
-        ws.addRow([pk.name, null, null, null, null, null, null, null, null, null]);
+        // Column B: capacity (e.g. 50 = "50 produktów / 1 karton"). Column C:
+        // capacity unit hint when not the default 'units'. The importer
+        // already accepts an optional numeric capacity in column B.
+        ws.addRow([
+          pk.name,
+          pk.capacity ?? null,
+          pk.unit && pk.unit !== 'units' ? pk.unit : null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+        ]);
       }
     }
 

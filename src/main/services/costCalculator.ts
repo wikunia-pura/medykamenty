@@ -2,6 +2,7 @@ import type Database from '../database';
 import type { CostReport, CostBreakdownLine } from '../../shared/types';
 import { pricePerGram } from '../utils/units';
 import { nowIso } from '../utils/id';
+import { walkSchemePerProduct, piecesPerProduct } from './packingConsumption';
 
 export async function computeCost(planId: string, db: Database): Promise<CostReport> {
   const plan = await db.getPlan(planId);
@@ -53,6 +54,22 @@ export async function computeCost(planId: string, db: Database): Promise<CostRep
         continue;
       }
       packagingCost += pkg.qtyPerUnit * comp.lastPurchasePriceNet;
+    }
+
+    // Shared/shipping packaging via the scheme. walkSchemeConsumption returns
+    // every component touched per product unit (direct tiers + cascaded
+    // dependencies). Cost share = price × (pieces consumed per product) =
+    // price × unitsConsumed / capacity.
+    for (const entry of walkSchemePerProduct(product, components)) {
+      const comp = components.get(entry.componentId);
+      if (!comp) continue;
+      if (comp.lastPurchasePriceNet === undefined) {
+        missing.push({ itemId: comp.id, itemName: comp.name, kind: 'component' });
+        continue;
+      }
+      const pieces = piecesPerProduct(comp, entry.unitsConsumedPerProduct);
+      if (!Number.isFinite(pieces) || pieces <= 0) continue;
+      packagingCost += comp.lastPurchasePriceNet * pieces;
     }
 
     const laborCost = product.conversionLaborCost ?? 0;

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
 import type {
+  AppSettings,
   RawMaterial,
   RawMaterialsImportMode,
   RawMaterialsImportSummary,
@@ -24,6 +25,7 @@ import {
   IconStar,
   IconImport,
   IconClose,
+  IconSettings,
 } from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
@@ -42,6 +44,8 @@ const RawMaterials: React.FC = () => {
   const t = useT();
   const [items, setItems] = useState<RawMaterial[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [wasteFactor, setWasteFactor] = useState<number>(1);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<RawMaterial> | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<RawMaterial | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
@@ -59,6 +63,7 @@ const RawMaterials: React.FC = () => {
 
   useEscapeKey(() => setEditing(null), !!editing);
   useEscapeKey(() => setXlsxSummary(null), !!xlsxSummary);
+  useEscapeKey(() => setSettingsOpen(false), settingsOpen);
 
   const COLUMNS: ColumnDef[] = useMemo(
     () => [
@@ -150,12 +155,21 @@ const RawMaterials: React.FC = () => {
   };
 
   const reload = async () => {
-    const [rms, ss] = await Promise.all([
+    const [rms, ss, s] = await Promise.all([
       window.electronAPI.listRawMaterials(),
       window.electronAPI.listSuppliers(),
+      window.electronAPI.getSettings(),
     ]);
     setItems(rms);
     setSuppliers(ss);
+    setWasteFactor(s.wasteFactor);
+  };
+
+  const onChangeWasteFactor = async (v: number | undefined) => {
+    const next = v ?? 1;
+    setWasteFactor(next);
+    const updated: AppSettings = await window.electronAPI.updateSettings({ wasteFactor: next });
+    setWasteFactor(updated.wasteFactor);
   };
 
   useEffect(() => {
@@ -385,6 +399,16 @@ const RawMaterials: React.FC = () => {
         <HeaderNav />
         <h1>{t.rawMaterials}</h1>
         <span className="page-header-count">{items.length}</span>
+        <button
+          type="button"
+          className="btn btn-sm"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => setSettingsOpen(true)}
+          title={t.settings}
+          aria-label={t.settings}
+        >
+          <IconSettings size={14} />
+        </button>
       </div>
 
       <div className="card">
@@ -629,6 +653,36 @@ const RawMaterials: React.FC = () => {
 
       {blockedBy && (
         <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />
+      )}
+
+      {settingsOpen && (
+        <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <ModalHeader
+              icon={<IconSettings size={18} />}
+              tone="edit"
+              title={t.settings}
+              onClose={() => setSettingsOpen(false)}
+            />
+            <div className="modal-body">
+              <div className="form-row">
+                <label>{t.settingsWasteFactor}</label>
+                <NumberInput
+                  className="input"
+                  step="0.01"
+                  value={wasteFactor}
+                  emptyValue={1}
+                  onChange={onChangeWasteFactor}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn primary-filled" onClick={() => setSettingsOpen(false)}>
+                {t.close}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {loaderMessage && <LoadingOverlay message={loaderMessage} />}

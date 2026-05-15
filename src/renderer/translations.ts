@@ -9,6 +9,14 @@ export interface T {
   products: string;
   rawMaterials: string;
   components: string;
+  outerPackaging: string;
+  outerPackagingPropagate: string;
+  outerPackagingPropagateTitle: string;
+  outerPackagingPropagateHint: string;
+  outerPackagingPropagateConfirm: string;
+  outerPackagingPropagateSuccess: string;
+  outerPackagingPropagateNeedCapacity: string;
+  outerPackagingPropagateInProgress: string;
   suppliers: string;
   stockImport: string;
   productionPlan: string;
@@ -108,7 +116,26 @@ export interface T {
   packaging: string;
   percentage: string;
   qtyPerUnit: string;
+  packingScheme: string;
+  packingSchemeHint: string;
+  packingCapacity: string;
+  packingCapacityUnit: string;
+  packingCapacityMissing: string;
+  packingConsumption: string;
+  packingConsumptionOverride: string;
+  packingPerProduct: string;
+  packingScope: string;
+  packingScopePerUnit: string;
+  packingScopePerBulk: string;
+  packingBulkUnitInvalid: string;
+  productTabBasics: string;
+  componentDependencies: string;
+  componentDependenciesHint: string;
+  componentDependenciesConsumed: string;
+  componentDependenciesAmount: string;
+  unitUnits: string;
   moqUnits: string;
+  planItemBelowMoqWarning: string;
   sachetMassKg: string;
   sachetsCount: string;
   recipeSumWarning: string;
@@ -411,6 +438,18 @@ const pl: T = {
   products: 'Produkty',
   rawMaterials: 'Surowce',
   components: 'Komponenty',
+  outerPackaging: 'Opakowania zbiorcze',
+  outerPackagingPropagate: 'Propaguj do {products} produktów ({tiers} tier.)',
+  outerPackagingPropagateTitle:
+    'Zapisuje komponent i nadpisuje pojemność na wszystkich tier\'ach produktów używających tego komponentu.',
+  outerPackagingPropagateHint:
+    'Nadpisuje obecne pojemności na produktach. Edycje per produkt zostaną zastąpione.',
+  outerPackagingPropagateConfirm:
+    'Zastąpić pojemność na {tiers} tier(ach) w {products} produktach wartością {capacity} {unit} (komponent „{name}")? Indywidualne edycje na produktach zostaną nadpisane.',
+  outerPackagingPropagateSuccess:
+    'Zaktualizowano {tiers} tier(ów) w {products} produktach.',
+  outerPackagingPropagateNeedCapacity: 'Ustaw pojemność > 0 zanim propagujesz.',
+  outerPackagingPropagateInProgress: 'Propagowanie do produktów…',
   suppliers: 'Dostawcy',
   stockImport: 'Import stanów',
   productionPlan: 'Plan produkcji',
@@ -512,7 +551,27 @@ const pl: T = {
   packaging: 'Komponenty',
   percentage: 'Udział (%)',
   qtyPerUnit: 'Ilość / opakowanie',
+  packingScheme: 'Opakowanie zbiorcze',
+  packingSchemeHint: 'Pojemność na komponencie, zużycie per produkt na tier.',
+  packingCapacity: 'Pojemność',
+  packingCapacityUnit: 'Jednostka',
+  packingCapacityMissing: 'Komponent „{name}" nie ma ustawionej pojemności — kalkulacje będą puste.',
+  packingConsumption: 'Zużycie',
+  packingConsumptionOverride: 'Nadpisz ręcznie',
+  packingPerProduct: 'Per produkt',
+  packingScope: 'Powiązanie',
+  packingScopePerUnit: 'Do produktu',
+  packingScopePerBulk: 'Do masy własnej',
+  packingBulkUnitInvalid: 'Powiązanie z masą wymaga jednostki kg lub l.',
+  productTabBasics: 'Podstawowe dane',
+  componentDependencies: 'Zużywa',
+  componentDependenciesHint:
+    '1 sztuka tego komponentu pociąga za sobą zużycie poniższych komponentów. Wartości w jednostkach pojemności komponentu zużywanego.',
+  componentDependenciesConsumed: 'Komponent',
+  componentDependenciesAmount: 'Ilość',
+  unitUnits: 'szt.',
   moqUnits: 'MOQ produktu (szt.)',
+  planItemBelowMoqWarning: 'Ilość poniżej MOQ produktu ({moq} szt.) — fabryka może nie przyjąć zamówienia.',
   sachetMassKg: 'Masa na saszetki (kg)',
   sachetsCount: 'Liczba saszetek (z masy)',
   recipeSumWarning: 'Suma % poniżej 100 — woda dolewana do 100% jest pomijana w kalkulacji.',
@@ -534,7 +593,7 @@ const pl: T = {
   recipesImportRawCreated: 'Nowe surowce w katalogu',
   recipesImportComponentsCreated: 'Nowe komponenty w katalogu',
   recipesImportQtyReviewNote:
-    'Kartony zbiorcze, taśmy, beczki i worki dostały ilość 1/szt. — uzupełnij faktyczne ilości w edytorze produktu.',
+    'Kartony zbiorcze, taśmy, beczki i worki trafiły do "Opakowania zbiorczego" z pojemnością 1 — uzupełnij faktyczne pojemności (np. 50 produktów / karton) w edytorze produktu.',
   recipesImportWarnings: 'Ostrzeżenia',
   recipesImportPerProductTitle: 'Szczegóły per produkt',
   recipesImportActionCreated: 'utworzony',
@@ -806,6 +865,18 @@ const en: T = {
   products: 'Products',
   rawMaterials: 'Raw materials',
   components: 'Components',
+  outerPackaging: 'Shipping packaging',
+  outerPackagingPropagate: 'Propagate to {products} products ({tiers} tiers)',
+  outerPackagingPropagateTitle:
+    'Saves the component and overwrites the capacity on every product tier that uses this component.',
+  outerPackagingPropagateHint:
+    'Overwrites current capacity on those products. Per-product overrides will be replaced.',
+  outerPackagingPropagateConfirm:
+    'Replace capacity on {tiers} tier(s) across {products} products with {capacity} {unit} (component "{name}")? Per-product overrides will be lost.',
+  outerPackagingPropagateSuccess:
+    'Updated {tiers} tier(s) in {products} products.',
+  outerPackagingPropagateNeedCapacity: 'Set capacity > 0 before propagating.',
+  outerPackagingPropagateInProgress: 'Propagating to products…',
   suppliers: 'Suppliers',
   stockImport: 'Stock import',
   productionPlan: 'Production plan',
@@ -907,7 +978,27 @@ const en: T = {
   packaging: 'Components',
   percentage: 'Share (%)',
   qtyPerUnit: 'Qty / package',
+  packingScheme: 'Shipping packaging',
+  packingSchemeHint: 'Capacity lives on the component, per-product consumption on the tier.',
+  packingCapacity: 'Capacity',
+  packingCapacityUnit: 'Unit',
+  packingCapacityMissing: 'Component "{name}" has no capacity set — calculations will be blank.',
+  packingConsumption: 'Consumption',
+  packingConsumptionOverride: 'Manual override',
+  packingPerProduct: 'Per product',
+  packingScope: 'Scope',
+  packingScopePerUnit: 'Per product',
+  packingScopePerBulk: 'Per bulk mass',
+  packingBulkUnitInvalid: 'Bulk-mass scope requires kg or l capacity unit.',
+  productTabBasics: 'Basics',
+  componentDependencies: 'Consumes',
+  componentDependenciesHint:
+    'One unit of this component pulls the components below. Values are in the consumed component\'s capacity-unit.',
+  componentDependenciesConsumed: 'Component',
+  componentDependenciesAmount: 'Amount',
+  unitUnits: 'units',
   moqUnits: 'Product MOQ (units)',
+  planItemBelowMoqWarning: 'Quantity below product MOQ ({moq} units) — the factory may reject the order.',
   sachetMassKg: 'Sachet mass (kg)',
   sachetsCount: 'Sachets count (from mass)',
   recipeSumWarning: 'Sum below 100% — water filling to 100% is ignored in cost calculation.',
@@ -929,7 +1020,7 @@ const en: T = {
   recipesImportRawCreated: 'New raw materials in catalog',
   recipesImportComponentsCreated: 'New components in catalog',
   recipesImportQtyReviewNote:
-    'Outer cartons, tape, barrels and bags were assigned qty = 1/unit — please correct actual quantities in the product editor.',
+    'Outer cartons, tape, barrels and bags landed in "Shipping packaging" with capacity = 1 — please set the real capacity (e.g. 50 products / carton) in the product editor.',
   recipesImportWarnings: 'Warnings',
   recipesImportPerProductTitle: 'Per-product details',
   recipesImportActionCreated: 'created',

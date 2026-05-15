@@ -1,6 +1,7 @@
 import type Database from '../database';
-import type { MaxProducibleResult, StockRow } from '../../shared/types';
+import type { MaxProducibleResult, PackagingComponent, StockRow } from '../../shared/types';
 import { toGrams } from '../utils/units';
+import { walkSchemePerProduct, piecesPerProduct } from './packingConsumption';
 
 function buildIndex(rows: StockRow[] | undefined, by: 'raw' | 'component'): Map<string, number> {
   const map = new Map<string, number>();
@@ -61,6 +62,27 @@ export async function maxProducible(productId: string, db: Database): Promise<Ma
       available,
       needPerUnit: pkg.qtyPerUnit,
       maxUnits: Math.floor(available / pkg.qtyPerUnit),
+    });
+  }
+
+  // Scheme tiers + cascaded dependencies. Each entry: how many of this
+  // component's capacity-units are consumed per finished product. Pieces per
+  // product = unitsConsumed / capacity. Max units = floor(available / pieces).
+  const allComponents = await db.listComponents();
+  const compById = new Map<string, PackagingComponent>(allComponents.map((c) => [c.id, c]));
+  for (const entry of walkSchemePerProduct(product, compById)) {
+    const comp = compById.get(entry.componentId);
+    if (!comp) continue;
+    const pieces = piecesPerProduct(comp, entry.unitsConsumedPerProduct);
+    if (!Number.isFinite(pieces) || pieces <= 0) continue;
+    const available = compIndex.get(comp.id) ?? 0;
+    bottlenecks.push({
+      itemId: comp.id,
+      itemName: comp.name,
+      kind: 'component',
+      available,
+      needPerUnit: pieces,
+      maxUnits: Math.floor(available / pieces),
     });
   }
 

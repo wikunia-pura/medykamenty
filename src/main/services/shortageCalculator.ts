@@ -11,6 +11,11 @@ import type {
 } from '../../shared/types';
 import { ceilToMoq, toGrams } from '../utils/units';
 import { nowIso } from '../utils/id';
+import {
+  walkSchemePerProduct,
+  walkSchemePerBulkKg,
+  piecesPerProduct,
+} from './packingConsumption';
 
 function buildStockIndex(
   snapshot: { rows: StockRow[] } | undefined,
@@ -67,6 +72,21 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
           (compNeedUnits.get(pkg.componentId) ?? 0) + pkg.qtyPerUnit * item.qtyUnits,
         );
       }
+      // Scheme tiers + cascaded dependencies (carton → tape, barrel → bag).
+      // walkSchemePerProduct gives per-finished-unit consumption in the
+      // dependent component's capacity-unit. Includes per_bulk_mass tiers
+      // scaled by per-product mass/volume — so finished-product runs still
+      // account for shared bulk packaging (barrels, bags).
+      for (const entry of walkSchemePerProduct(product, components)) {
+        const comp = components.get(entry.componentId);
+        if (!comp || !comp.capacity || comp.capacity <= 0) continue;
+        const piecesPerUnit = piecesPerProduct(comp, entry.unitsConsumedPerProduct);
+        if (!Number.isFinite(piecesPerUnit) || piecesPerUnit <= 0) continue;
+        compNeedUnits.set(
+          entry.componentId,
+          (compNeedUnits.get(entry.componentId) ?? 0) + Math.ceil(piecesPerUnit * item.qtyUnits),
+        );
+      }
     }
     for (const bm of plan.bulkMass) {
       const product = products.get(bm.productId);
@@ -79,6 +99,19 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
         rawNeedG.set(
           ing.rawMaterialId,
           (rawNeedG.get(ing.rawMaterialId) ?? 0) + totalMassG * (ing.percentage / 100),
+        );
+      }
+      // Bulk-only production also consumes per_bulk_mass scheme tiers — a
+      // barrel still has to hold the bulk even if it never becomes finished
+      // units. Per_unit tiers (cartons etc.) contribute 0 here.
+      for (const entry of walkSchemePerBulkKg(product, components)) {
+        const comp = components.get(entry.componentId);
+        if (!comp || !comp.capacity || comp.capacity <= 0) continue;
+        const piecesPerKg = piecesPerProduct(comp, entry.unitsConsumedPerProduct);
+        if (!Number.isFinite(piecesPerKg) || piecesPerKg <= 0) continue;
+        compNeedUnits.set(
+          entry.componentId,
+          (compNeedUnits.get(entry.componentId) ?? 0) + Math.ceil(piecesPerKg * bm.massKg * W),
         );
       }
     }

@@ -151,6 +151,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
       conversionLaborCost: editingProduct.conversionLaborCost,
       ingredients: editingProduct.ingredients ?? [],
       packaging: editingProduct.packaging ?? [],
+      packingScheme: editingProduct.packingScheme,
       notes: editingProduct.notes?.trim() || undefined,
       archived: !!editingProduct.archived,
     });

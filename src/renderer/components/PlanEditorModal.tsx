@@ -52,11 +52,17 @@ const PlanEditorModal: React.FC<Props> = ({
   const removeItem = (idx: number) => {
     setEditing({ ...editing, items: items.filter((_, i) => i !== idx) });
   };
+  const defaultQtyFor = (product: Product | undefined): number => {
+    const moq = product?.moqUnits;
+    if (moq && moq > 0) return moq;
+    return 1000;
+  };
   const addItem = () => {
     if (products.length === 0) return;
+    const first = products[0];
     setEditing({
       ...editing,
-      items: [...items, { productId: products[0].id, qtyUnits: 1000 }],
+      items: [...items, { productId: first.id, qtyUnits: defaultQtyFor(first) }],
     });
   };
 
@@ -81,6 +87,7 @@ const PlanEditorModal: React.FC<Props> = ({
     label: p.name,
     hint: `${p.capacityMl} ml`,
   }));
+  const productById = new Map(products.map((p) => [p.id, p]));
 
   const totalUnits = items.reduce((acc, it) => acc + (it.qtyUnits || 0), 0);
   const totalKg = bulkMass.reduce((acc, b) => acc + (b.massKg || 0), 0);
@@ -224,39 +231,61 @@ const PlanEditorModal: React.FC<Props> = ({
                     {!readOnly && <span aria-hidden />}
                   </div>
                   <div className="plan-rows">
-                    {items.map((item, idx) => (
-                      <div className="plan-row" key={idx}>
-                        <div className="plan-row-product">
-                          <SearchableSelect
-                            options={productOptions}
-                            value={item.productId}
-                            onChange={(val) => updateItem(idx, { productId: val })}
-                            placeholder={t.search}
-                            disabled={readOnly}
-                          />
+                    {items.map((item, idx) => {
+                      const product = productById.get(item.productId);
+                      const moq = product?.moqUnits;
+                      const belowMoq =
+                        !!moq && moq > 0 && (item.qtyUnits ?? 0) < moq;
+                      return (
+                        <div
+                          key={idx}
+                          style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+                        >
+                          <div className="plan-row">
+                            <div className="plan-row-product">
+                              <SearchableSelect
+                                options={productOptions}
+                                value={item.productId}
+                                onChange={(val) => updateItem(idx, { productId: val })}
+                                placeholder={t.search}
+                                disabled={readOnly}
+                              />
+                            </div>
+                            <div className="plan-row-qty">
+                              <NumberInput
+                                className="input"
+                                style={{ width: 120 }}
+                                value={item.qtyUnits}
+                                emptyValue={0}
+                                onChange={(v) => updateItem(idx, { qtyUnits: v ?? 0 })}
+                                disabled={readOnly}
+                              />
+                              <span className="plan-row-unit">szt.</span>
+                            </div>
+                            {!readOnly && (
+                              <button
+                                className="btn btn-sm soft-danger btn-icon-only"
+                                onClick={() => removeItem(idx)}
+                                title={t.delete}
+                              >
+                                <IconClose size={12} />
+                              </button>
+                            )}
+                          </div>
+                          {belowMoq && (
+                            <div
+                              className="warn-text"
+                              style={{ fontSize: 12, paddingLeft: 10 }}
+                            >
+                              {t.planItemBelowMoqWarning.replace(
+                                '{moq}',
+                                moq!.toLocaleString(),
+                              )}
+                            </div>
+                          )}
                         </div>
-                        <div className="plan-row-qty">
-                          <NumberInput
-                            className="input"
-                            style={{ width: 120 }}
-                            value={item.qtyUnits}
-                            emptyValue={0}
-                            onChange={(v) => updateItem(idx, { qtyUnits: v ?? 0 })}
-                            disabled={readOnly}
-                          />
-                          <span className="plan-row-unit">szt.</span>
-                        </div>
-                        {!readOnly && (
-                          <button
-                            className="btn btn-sm soft-danger btn-icon-only"
-                            onClick={() => removeItem(idx)}
-                            title={t.delete}
-                          >
-                            <IconClose size={12} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               )

@@ -208,7 +208,7 @@ export interface ElectronAPI {
   getAppVersion(): Promise<string>;
   openExternal(url: string): Promise<void>;
   checkForUpdates(): Promise<{ available: boolean; info?: any; message?: string; error?: string }>;
-  downloadUpdate(): Promise<{ ok: boolean; openedRelease?: boolean; error?: string }>;
+  downloadUpdate(): Promise<{ ok: boolean; inApp?: boolean; openedRelease?: boolean; error?: string }>;
 
   onUpdateAvailable(cb: (info: any) => void): void;
   onUpdateDownloaded(cb: (info: any) => void): void;

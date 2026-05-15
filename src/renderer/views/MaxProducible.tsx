@@ -140,6 +140,7 @@ const MaxProducibleView: React.FC = () => {
       conversionLaborCost: editingProduct.conversionLaborCost,
       ingredients: editingProduct.ingredients ?? [],
       packaging: editingProduct.packaging ?? [],
+      packingScheme: editingProduct.packingScheme,
       notes: editingProduct.notes?.trim() || undefined,
       archived: !!editingProduct.archived,
     });
