@@ -131,13 +131,13 @@ const OrderEditorModal: React.FC<Props> = ({ editing, setEditing, onCancel, onSa
             />
           </div>
         </div>
-        <div className="modal-actions">
+        <div className="modal-footer">
           <button type="button" className="btn" onClick={onCancel}>
-            <IconClose size={12} /> {t.cancel}
+            {t.cancel}
           </button>
           <button
             type="button"
-            className="btn primary"
+            className="btn primary-filled"
             disabled={!canSave}
             onClick={() => onSave(isNew ? selectedTemplateId || null : null)}
           >

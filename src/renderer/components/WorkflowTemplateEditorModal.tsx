@@ -123,7 +123,7 @@ const WorkflowTemplateEditorModal: React.FC<Props> = ({
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div
-        className={`modal modal-lg${readOnly ? ' modal-readonly' : ''}`}
+        className={`modal modal-md${readOnly ? ' modal-readonly' : ''}`}
         onClick={(e) => e.stopPropagation()}
       >
         <ModalHeader
@@ -237,19 +237,19 @@ const WorkflowTemplateEditorModal: React.FC<Props> = ({
             </div>
           </div>
         </div>
-        <div className="modal-actions">
+        <div className="modal-footer">
           {readOnly ? (
-            <button type="button" className="btn" onClick={onCancel}>
-              <IconClose size={12} /> {t.close}
+            <button type="button" className="btn primary-filled" onClick={onCancel}>
+              {t.close}
             </button>
           ) : (
             <>
               <button type="button" className="btn" onClick={onCancel}>
-                <IconClose size={12} /> {t.cancel}
+                {t.cancel}
               </button>
               <button
                 type="button"
-                className="btn primary"
+                className="btn primary-filled"
                 disabled={!canSave}
                 onClick={onSave}
               >

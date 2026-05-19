@@ -1,14 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
-import type {
-  Order,
-  OrderStatus,
-  TaskInstance,
-  WorkflowTemplate,
-} from '../../shared/types';
+import type { Order, OrderStatus, TaskInstance } from '../../shared/types';
 import OrderEditorModal from '../components/OrderEditorModal';
-import WorkflowTemplateEditorModal from '../components/WorkflowTemplateEditorModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
@@ -35,22 +29,16 @@ const todayIso = (): string => {
 const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
   const t = useT();
   const [items, setItems] = useState<Order[]>([]);
-  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [editing, setEditing] = useState<Partial<Order> | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Order | null>(null);
-  const [previewTemplate, setPreviewTemplate] = useState<WorkflowTemplate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
 
   const reload = async () => {
     try {
-      const [list, tpls] = await Promise.all([
-        window.electronAPI.listOrders(),
-        window.electronAPI.listWorkflowTemplates(),
-      ]);
+      const list = await window.electronAPI.listOrders();
       setItems(list);
-      setTemplates(tpls);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -171,7 +159,6 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
     { value: 'cancelled', label: t.orderStatusCancelled },
   ];
 
-  const templateById = new Map(templates.map((tpl) => [tpl.id, tpl]));
   const filtered = items.filter((o) => matchesQuery(o, query));
 
   return (
@@ -203,18 +190,16 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
             <thead>
               <tr>
                 <th className="col-w-lg">{t.name}</th>
-                <th className="col-w-md">{t.orderTemplate}</th>
                 <th className="col-w-sm">{t.orderStartDate}</th>
                 <th className="col-w-sm">{t.orderEndDate}</th>
-                <th className="col-w-md">{t.orderStatus}</th>
-                <th className="col-w-xl">{t.workflow}</th>
+                <th>{t.workflow}</th>
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="hint">
+                  <td colSpan={5} className="hint">
                     {query ? '—' : t.noData}
                   </td>
                 </tr>
@@ -223,10 +208,6 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
                 const tasks = o.workflow?.tasks ?? [];
                 const endDate =
                   tasks.length > 0 ? tasks[tasks.length - 1].endDate : null;
-                const tpl = o.workflow?.templateId
-                  ? templateById.get(o.workflow.templateId)
-                  : null;
-                const tplName = o.workflow?.templateName ?? tpl?.name ?? null;
                 return (
                   <tr
                     key={o.id}
@@ -234,50 +215,28 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
                     onClick={() => onOpenOrder(o.id)}
                     title={t.orderDetails}
                   >
-                    <td className="col-name col-wrap">{o.name}</td>
-                    <td>
-                      {tplName ? (
-                        tpl ? (
-                          <a
-                            href="#"
-                            className="link"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setPreviewTemplate(tpl);
-                            }}
-                            title={t.workflowTemplatePreview}
-                          >
-                            {tplName}
-                          </a>
-                        ) : (
-                          <span className="hint" title={t.workflowTemplateDeleted}>
-                            {tplName}
-                          </span>
-                        )
-                      ) : (
-                        <span className="hint">—</span>
-                      )}
+                    <td className="col-name col-wrap">
+                      <div className="orders-name-cell">
+                        <span className="orders-name-text">{o.name}</span>
+                        <select
+                          className={`status-inline-select order-status-${o.status}`}
+                          value={o.status}
+                          onClick={(ev) => ev.stopPropagation()}
+                          onChange={(e) =>
+                            void onPickStatus(o, e.target.value as OrderStatus)
+                          }
+                          title={t.changeStatus}
+                        >
+                          {statusOptions.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </td>
                     <td>{o.startDate}</td>
                     <td>{endDate ?? <span className="hint">—</span>}</td>
-                    <td>
-                      <select
-                        className={`status-inline-select order-status-${o.status}`}
-                        value={o.status}
-                        onClick={(ev) => ev.stopPropagation()}
-                        onChange={(e) =>
-                          void onPickStatus(o, e.target.value as OrderStatus)
-                        }
-                        title={t.changeStatus}
-                      >
-                        {statusOptions.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
                     <td>
                       {tasks.length === 0 ? (
                         <span className="hint">—</span>
@@ -329,18 +288,6 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
           setEditing={setEditing}
           onCancel={() => setEditing(null)}
           onSave={onSave}
-        />
-      )}
-
-      {previewTemplate && (
-        <WorkflowTemplateEditorModal
-          editing={previewTemplate}
-          setEditing={() => {
-            /* read-only preview: ignore edits */
-          }}
-          onCancel={() => setPreviewTemplate(null)}
-          onSave={() => setPreviewTemplate(null)}
-          readOnly
         />
       )}
 

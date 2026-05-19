@@ -15,7 +15,6 @@ interface NavItem {
     | 'tools'
     | 'catalog'
     | 'system';
-  step?: number;
 }
 
 interface Props {
@@ -59,9 +58,9 @@ const Sidebar: React.FC<Props> = ({ current, onSelect, userEmail, onSignOut }) =
     { key: 'dashboard', label: t.dashboard, icon: '◇', group: 'dashboard' },
     { key: 'orders', label: t.orders, icon: '▤', group: 'orders' },
     { key: 'workflowTemplates', label: t.workflowTemplates, icon: '☷', group: 'orders' },
-    { key: 'stockImport', label: t.stockImport, icon: '⇪', group: 'workflow', step: 1 },
-    { key: 'shortageReport', label: t.shortageReport, icon: '⚠', group: 'workflow', step: 2 },
-    { key: 'emailGenerator', label: t.emailGenerator, icon: '✉', group: 'workflow', step: 3 },
+    { key: 'stockImport', label: t.stockImport, icon: '⇪', group: 'workflow' },
+    { key: 'shortageReport', label: t.shortageReport, icon: '⚠', group: 'workflow' },
+    { key: 'emailGenerator', label: t.emailGenerator, icon: '✉', group: 'workflow' },
     { key: 'costCalculator', label: t.costCalculator, icon: '$', group: 'tools' },
     { key: 'maxProducible', label: t.maxProducible, icon: '∞', group: 'tools' },
     { key: 'productionPlan', label: t.productionPlan, icon: '▤', group: 'plan' },
@@ -103,7 +102,6 @@ const Sidebar: React.FC<Props> = ({ current, onSelect, userEmail, onSignOut }) =
         <div className="sidebar-nav">
           {groups.map((g, gi) => {
             const label = groupLabels[g.key];
-            const isWorkflow = g.key === 'workflow';
             const isDashboard = g.key === 'dashboard';
             return (
               <div
@@ -118,17 +116,11 @@ const Sidebar: React.FC<Props> = ({ current, onSelect, userEmail, onSignOut }) =
                       key={item.key}
                       className={`nav-item ${active ? 'active' : ''} ${
                         isDashboard ? 'nav-item-dashboard' : ''
-                      } ${isWorkflow ? 'nav-item-step' : ''}`}
+                      }`}
                       onClick={() => onSelect(item.key)}
                       title={item.label}
                     >
-                      {isWorkflow ? (
-                        <span className={`nav-step-badge ${active ? 'active' : ''}`}>
-                          {item.step}
-                        </span>
-                      ) : (
-                        <span className="nav-icon">{item.icon}</span>
-                      )}
+                      <span className="nav-icon">{item.icon}</span>
                       <span className="nav-label">{item.label}</span>
                     </div>
                   );

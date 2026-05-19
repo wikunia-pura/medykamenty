@@ -188,10 +188,6 @@ a:hover {
 .sidebar-slot.sidebar-collapsed:not(:hover) .nav-group-dashboard .nav-item-dashboard {
   padding: 10px 0;
 }
-.sidebar-slot.sidebar-collapsed:not(:hover) .nav-group-workflow::before {
-  opacity: 0;
-}
-
 .sidebar-nav {
   flex: 1;
   display: flex;
@@ -268,45 +264,6 @@ a:hover {
 }
 .nav-group-dashboard .nav-item-dashboard:not(.active):hover {
   background: rgba(255, 255, 255, 0.06);
-}
-
-/* Workflow stepper */
-.nav-item-step {
-  position: relative;
-}
-.nav-step-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(243, 244, 246, 0.7);
-  font-size: 11px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-.nav-step-badge.active {
-  background: var(--primary);
-  color: #fff;
-}
-.nav-group-workflow .nav-item {
-  padding-left: 14px;
-}
-/* Connector line between workflow steps */
-.nav-group-workflow {
-  position: relative;
-}
-.nav-group-workflow::before {
-  content: '';
-  position: absolute;
-  left: 25px;
-  top: 36px;
-  bottom: 18px;
-  width: 2px;
-  background: rgba(255, 255, 255, 0.07);
-  pointer-events: none;
 }
 
 .nav-icon {
@@ -865,6 +822,16 @@ body.dark-mode .table tr:hover td {
 }
 .col-name-wide {
   min-width: 360px;
+}
+.orders-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.orders-name-cell .orders-name-text {
+  min-width: 0;
+  word-break: break-word;
 }
 .col-w-match,
 .col-match {
@@ -2939,6 +2906,8 @@ body.dark-mode .dashboard-tile-cyan {
   box-shadow: var(--shadow-1);
   transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
   color: var(--text);
+  min-width: 0;
+  overflow: hidden;
 }
 .dashboard-shortage-tile:hover {
   transform: translateY(-2px);
@@ -2950,16 +2919,21 @@ body.dark-mode .dashboard-tile-cyan {
 .dashboard-shortage-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+  min-width: 0;
+}
+.dashboard-shortage-head .tag {
+  flex: 0 0 auto;
 }
 .dashboard-shortage-supplier {
+  flex: 1 1 0;
+  min-width: 0;
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 60%;
+  text-align: right;
 }
 .dashboard-shortage-name {
   font-weight: 600;
@@ -3028,7 +3002,7 @@ body.dark-mode .dashboard-tile-cyan {
    the header (name + dates + status) is a slim band above it. */
 .dashboard-orders-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 .dashboard-order-tile {
@@ -3378,6 +3352,7 @@ body.dark-mode .dashboard-welcome-image {
   justify-content: flex-end;
   gap: 12px;
   margin-top: 12px;
+  margin-bottom: 28px;
 }
 .dashboard-main .dashboard-hero {
   margin-top: auto;
@@ -4821,8 +4796,8 @@ body.dark-mode .workflow-task-row.instance.status-done:hover {
 }
 
 .badge.order-status-in_progress {
-  background: rgba(79, 124, 255, 0.15);
-  color: var(--primary, #4f7cff);
+  background: rgba(192, 138, 22, 0.18);
+  color: var(--warning, #c08a16);
 }
 
 .badge.order-status-completed {
@@ -5316,12 +5291,12 @@ body.dark-mode .task-action-popover-footer {
 }
 
 .status-inline-select.order-status-in_progress {
-  background-color: rgba(100, 126, 245, 0.18);
-  color: var(--primary, #4f7cff);
+  background-color: rgba(192, 138, 22, 0.2);
+  color: var(--warning, #c08a16);
 }
 
 body.dark-mode .status-inline-select.order-status-in_progress {
-  color: #a8b8ff;
+  color: #e6b34a;
 }
 
 .status-inline-select.order-status-completed {
