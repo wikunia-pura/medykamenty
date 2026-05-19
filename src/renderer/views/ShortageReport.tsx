@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav, useNavigation } from '../navigation';
 import type {
+  Order,
   ProductionPlan,
   Product,
   ShortageLine,
@@ -13,10 +14,19 @@ import type { ViewKey } from './types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import NoPlansEmptyState from '../components/NoPlansEmptyState';
-import { IconMail, IconPlus, IconTrash, IconEdit, IconEye, IconArrowLeft } from '../components/Icons';
+import {
+  IconMail,
+  IconPlus,
+  IconTrash,
+  IconEdit,
+  IconArrowLeft,
+  IconClose,
+} from '../components/Icons';
 import SearchableSelect from '../components/SearchableSelect';
 import PlanEditorModal from '../components/PlanEditorModal';
 import HoverTooltip from '../components/HoverTooltip';
+import ModalHeader from '../components/ModalHeader';
+import { useEscapeKey } from '../utils/useEscapeKey';
 
 interface Props {
   selectedPlanId: string;
@@ -25,6 +35,12 @@ interface Props {
   onNavigateToEmails: (reportId: string) => void;
   focusReportId?: string;
   onFocusReportConsumed?: () => void;
+  // When the view was opened from an order's workflow task, generated reports
+  // are linked back to that order so they appear in the order's report list.
+  orderTaskContextOrderId?: string;
+  // Lets the user jump to an order from the "linked order" pill or column.
+  onNavigateToOrder?: (orderId: string) => void;
+  taskBanner?: React.ReactNode;
 }
 
 type ReportMode = 'preview' | 'edit';
@@ -53,11 +69,19 @@ const ShortageReportView: React.FC<Props> = ({
   onNavigateToEmails,
   focusReportId,
   onFocusReportConsumed,
+  orderTaskContextOrderId,
+  onNavigateToOrder,
+  taskBanner,
 }) => {
   const t = useT();
   const navCtx = useNavigation();
+  // True after the initial data fetch (plans, suppliers, products, orders,
+  // history). Used to gate the "linked plan / order deleted" warnings so they
+  // don't flash during initial render while the lists are still empty.
+  const [dataLoaded, setDataLoaded] = useState(false);
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [focus, setFocus] = useState<FocusState | null>(cache.focus);
   const [history, setHistory] = useState<ShortageReportEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -100,16 +124,19 @@ const ShortageReportView: React.FC<Props> = ({
     void (async () => {
       setLoaderMessage(t.loading);
       try {
-        const [ps, ss, pr] = await Promise.all([
+        const [ps, ss, pr, os] = await Promise.all([
           window.electronAPI.listPlans(),
           window.electronAPI.listSuppliers(),
           window.electronAPI.listProducts(),
+          window.electronAPI.listOrders().catch(() => [] as Order[]),
         ]);
         setPlans(ps);
         setSuppliers(ss);
         setProducts(pr);
+        setOrders(os);
         if (!selectedPlanId && ps[0]) onSelectPlan(ps[0].id);
         await loadHistory();
+        setDataLoaded(true);
       } finally {
         setLoaderMessage(null);
       }
@@ -168,7 +195,10 @@ const ShortageReportView: React.FC<Props> = ({
     setLoaderMessage(t.loaderComputing);
     setError(null);
     try {
-      const r = await window.electronAPI.computeShortages(selectedPlanId);
+      const r = await window.electronAPI.computeShortages(
+        selectedPlanId,
+        orderTaskContextOrderId,
+      );
       const list = await loadHistory();
       const newest = list.find((e) => e.planId === selectedPlanId);
       setFocusAndCache({
@@ -215,7 +245,10 @@ const ShortageReportView: React.FC<Props> = ({
           preferredSupplierId: next,
         });
       }
-      const r = await window.electronAPI.computeShortages(focus.planId);
+      const r = await window.electronAPI.computeShortages(
+        focus.planId,
+        orderTaskContextOrderId,
+      );
       const list = await loadHistory();
       const newest = list.find((e) => e.planId === focus.planId);
       setFocusAndCache({ ...focus, report: r, entryId: newest?.id ?? null });
@@ -321,14 +354,46 @@ const ShortageReportView: React.FC<Props> = ({
 
   const hasPlans = plans.length > 0;
 
+  // ID of the report whose order link is being changed. Drives the
+  // ReportOrderPicker overlay (rendered in both list and focus return paths
+  // below). null = picker closed.
+  const [pickerEntryId, setPickerEntryId] = useState<string | null>(null);
+
+  const setReportOrder = async (entryId: string, orderId: string | null) => {
+    setBusy(true);
+    try {
+      await window.electronAPI.updateShortageReport(entryId, { orderId });
+      const list = await loadHistory();
+      if (focus?.entryId === entryId) {
+        const updated = list.find((e) => e.id === entryId);
+        if (updated) {
+          // Keep the focused state aligned with the new orderId so the meta
+          // line refreshes immediately.
+          setFocusAndCache({ ...focus, entryId: updated.id });
+        }
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      setPickerEntryId(null);
+    }
+  };
+
   // ----- Focused view (compute / edit / preview a single report) -----
   if (focus) {
     const { report, mode, reportName } = focus;
     const linkedPlan = focus.planId
       ? plans.find((p) => p.id === focus.planId)
       : undefined;
-    const planMissing = !!focus.planId && !linkedPlan;
+    const planMissing = dataLoaded && !!focus.planId && !linkedPlan;
     const livePlanName = linkedPlan?.name ?? focus.planName;
+    const focusedEntry = focus.entryId
+      ? history.find((e) => e.id === focus.entryId)
+      : null;
+    const focusOrderId = focusedEntry?.orderId;
+    const linkedOrder = focusOrderId ? orders.find((o) => o.id === focusOrderId) : null;
+    const orderMissing = dataLoaded && !!focusOrderId && !linkedOrder;
     return (
       <div className="main">
         <div className="focus-bar">
@@ -386,11 +451,54 @@ const ShortageReportView: React.FC<Props> = ({
                 )}
               </span>
             )}
+            {focus.entryId && (
+              <span className="focus-bar-meta">
+                <span className="hint">{t.orders}:</span>{' '}
+                {linkedOrder ? (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => onNavigateToOrder?.(linkedOrder.id)}
+                    title={t.orderDetails}
+                  >
+                    {linkedOrder.name}
+                  </button>
+                ) : orderMissing ? (
+                  <span className="tag danger" title={t.orderDeleted}>
+                    {t.orderDeletedTag}
+                  </span>
+                ) : (
+                  <span className="hint">—</span>
+                )}
+              </span>
+            )}
             <span className={`tag ${mode === 'edit' ? 'warn' : ''}`}>
               {mode === 'edit' ? t.editMode : t.previewMode}
             </span>
           </div>
           <div className="btn-row">
+            {focus.entryId && (
+              <>
+                {focusOrderId ? (
+                  <button
+                    className="btn soft-danger"
+                    onClick={() => void setReportOrder(focus.entryId!, null)}
+                    title={t.unlinkOrder}
+                  >
+                    <IconClose size={13} /> {t.unlinkOrder}
+                  </button>
+                ) : (
+                  <button
+                    className="btn soft-edit"
+                    onClick={() => setPickerEntryId(focus.entryId)}
+                    disabled={orders.length === 0}
+                    title={t.linkOrder}
+                  >
+                    <IconPlus size={13} /> {t.linkOrder}
+                  </button>
+                )}
+              </>
+            )}
             {mode === 'preview' && (
               <button
                 className="btn primary"
@@ -412,6 +520,15 @@ const ShortageReportView: React.FC<Props> = ({
             </button>
           </div>
         </div>
+        {taskBanner}
+
+        {pickerEntryId && (
+          <ReportOrderPicker
+            orders={orders}
+            onCancel={() => setPickerEntryId(null)}
+            onPick={(orderId) => void setReportOrder(pickerEntryId, orderId)}
+          />
+        )}
 
         {error && <div className="card error-text">{error}</div>}
 
@@ -565,6 +682,7 @@ const ShortageReportView: React.FC<Props> = ({
           <span className="page-header-count">{history.length}</span>
         )}
       </div>
+      {taskBanner}
 
       {!hasPlans ? (
         <NoPlansEmptyState onAddPlan={() => onNavigate('productionPlan')} />
@@ -624,6 +742,7 @@ const ShortageReportView: React.FC<Props> = ({
                 <tr>
                   <th>{t.reportName}</th>
                   <th>{t.selectedPlan}</th>
+                  <th>{t.orders}</th>
                   <th>{t.computedAtLabel}</th>
                   <th>{t.shortageReport}</th>
                   <th className="actions actions-sticky">{t.actionsHeader}</th>
@@ -635,7 +754,10 @@ const ShortageReportView: React.FC<Props> = ({
                   const groups = e.report.groups.length;
                   const linkedPlan = plans.find((p) => p.id === e.planId);
                   const livePlanName = linkedPlan?.name ?? e.planName;
-                  const planMissing = !!e.planId && !linkedPlan;
+                  const planMissing = dataLoaded && !!e.planId && !linkedPlan;
+                  const linkedOrder = e.orderId
+                    ? orders.find((o) => o.id === e.orderId)
+                    : null;
                   return (
                   <tr
                     key={e.id}
@@ -667,6 +789,24 @@ const ShortageReportView: React.FC<Props> = ({
                           {livePlanName}
                         </button>
                       </div>
+                    </td>
+                    <td className="col-wrap" onClick={(ev) => ev.stopPropagation()}>
+                      {linkedOrder ? (
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => onNavigateToOrder?.(linkedOrder.id)}
+                          title={t.orderDetails}
+                        >
+                          {linkedOrder.name}
+                        </button>
+                      ) : dataLoaded && e.orderId ? (
+                        <span className="tag danger" title={t.orderDeleted}>
+                          {t.orderDeletedTag}
+                        </span>
+                      ) : (
+                        <span className="hint">—</span>
+                      )}
                     </td>
                     <td className="hint">{new Date(e.computedAt).toLocaleString()}</td>
                     <td>
@@ -711,13 +851,24 @@ const ShortageReportView: React.FC<Props> = ({
                       onClick={(ev) => ev.stopPropagation()}
                     >
                       <div className="btn-row">
-                        <button
-                          className="btn btn-sm"
-                          onClick={() => openEntry(e, 'preview')}
-                          title={t.preview}
-                        >
-                          <IconEye size={13} /> {t.preview}
-                        </button>
+                        {e.orderId ? (
+                          <button
+                            className="btn btn-sm soft-danger"
+                            onClick={() => void setReportOrder(e.id, null)}
+                            title={t.unlinkOrder}
+                          >
+                            <IconClose size={13} /> {t.unlinkOrder}
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-sm soft-success"
+                            onClick={() => setPickerEntryId(e.id)}
+                            disabled={orders.length === 0}
+                            title={t.linkOrder}
+                          >
+                            <IconPlus size={13} /> {t.linkOrder}
+                          </button>
+                        )}
                         <button
                           className="btn btn-sm soft-edit"
                           onClick={() => openEntry(e, 'edit')}
@@ -802,7 +953,59 @@ const ShortageReportView: React.FC<Props> = ({
         );
       })()}
 
+      {pickerEntryId && (
+        <ReportOrderPicker
+          orders={orders}
+          onCancel={() => setPickerEntryId(null)}
+          onPick={(orderId) => void setReportOrder(pickerEntryId, orderId)}
+        />
+      )}
+
       {loaderMessage && <LoadingOverlay message={loaderMessage} />}
+    </div>
+  );
+};
+
+// Small modal for picking which order to link the focused report to.
+const ReportOrderPicker: React.FC<{
+  orders: Order[];
+  onCancel: () => void;
+  onPick: (orderId: string) => void;
+}> = ({ orders, onCancel, onPick }) => {
+  const t = useT();
+  useEscapeKey(onCancel);
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+        <ModalHeader
+          icon={<IconPlus size={18} />}
+          tone="add"
+          title={t.linkOrder}
+          onClose={onCancel}
+        />
+        <div className="modal-body picker-list">
+          {orders.length === 0 ? (
+            <p className="empty-hint">{t.ordersEmpty}</p>
+          ) : (
+            orders.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                className="picker-item"
+                onClick={() => onPick(o.id)}
+              >
+                <span className="picker-item-label">{o.name}</span>
+                <span className="picker-item-sub">{o.startDate}</span>
+              </button>
+            ))
+          )}
+        </div>
+        <div className="picker-footer">
+          <button type="button" className="btn" onClick={onCancel}>
+            <IconClose size={12} /> {t.cancel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

@@ -330,12 +330,15 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.PLAN_UPDATE, (_e, id: string, patch) => db.updatePlan(id, patch));
   ipcMain.handle(IPC.PLAN_DELETE, (_e, id: string) => db.deletePlan(id));
   ipcMain.handle(IPC.PLAN_DUPLICATE, (_e, id: string) => db.duplicatePlan(id));
-  ipcMain.handle(IPC.PLAN_COMPUTE_SHORTAGES, async (_e, planId: string) => {
-    const report = await computeShortages(planId, db);
-    await db.updatePlan(planId, { status: 'computed', computedAt: report.computedAt });
-    await db.addShortageReport(planId, report);
-    return report;
-  });
+  ipcMain.handle(
+    IPC.PLAN_COMPUTE_SHORTAGES,
+    async (_e, planId: string, orderId?: string) => {
+      const report = await computeShortages(planId, db);
+      await db.updatePlan(planId, { status: 'computed', computedAt: report.computedAt });
+      await db.addShortageReport(planId, report, orderId);
+      return report;
+    },
+  );
 
   // ---- Shortage report history ----
   ipcMain.handle(IPC.SHORTAGE_REPORT_LIST, () => db.listShortageReports());
@@ -343,7 +346,8 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.SHORTAGE_REPORT_DELETE, (_e, id: string) => db.deleteShortageReport(id));
   ipcMain.handle(
     IPC.SHORTAGE_REPORT_UPDATE,
-    (_e, id: string, patch: { reportName?: string }) => db.updateShortageReport(id, patch),
+    (_e, id: string, patch: { reportName?: string; orderId?: string | null }) =>
+      db.updateShortageReport(id, patch),
   );
   ipcMain.handle(IPC.PLAN_COMPUTE_COST, (_e, planId: string) => computeCost(planId, db));
 
@@ -377,6 +381,52 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       emailId: string,
       opts: { language: Lang; useAI: boolean },
     ) => regenerateBatchEmail(batchId, emailId, opts, db),
+  );
+
+  // ---- Workflow templates ----
+  ipcMain.handle(IPC.WORKFLOW_TEMPLATE_LIST, () => db.listWorkflowTemplates());
+  ipcMain.handle(IPC.WORKFLOW_TEMPLATE_GET, (_e, id: string) => db.getWorkflowTemplate(id));
+  ipcMain.handle(IPC.WORKFLOW_TEMPLATE_CREATE, (_e, input) =>
+    db.createWorkflowTemplate(input),
+  );
+  ipcMain.handle(IPC.WORKFLOW_TEMPLATE_UPDATE, (_e, id: string, patch) =>
+    db.updateWorkflowTemplate(id, patch),
+  );
+  ipcMain.handle(IPC.WORKFLOW_TEMPLATE_DELETE, (_e, id: string) =>
+    db.deleteWorkflowTemplate(id),
+  );
+
+  // ---- Orders ----
+  ipcMain.handle(IPC.ORDERS_LIST, () => db.listOrders());
+  ipcMain.handle(IPC.ORDERS_GET, (_e, id: string) => db.getOrder(id));
+  ipcMain.handle(IPC.ORDERS_CREATE, (_e, input) => db.createOrder(input));
+  ipcMain.handle(IPC.ORDERS_UPDATE, (_e, id: string, patch) => db.updateOrder(id, patch));
+  ipcMain.handle(IPC.ORDERS_DELETE, (_e, id: string) => db.deleteOrder(id));
+  ipcMain.handle(
+    IPC.ORDERS_ATTACH_WORKFLOW,
+    (_e, orderId: string, templateId: string) =>
+      db.attachWorkflowToOrder(orderId, templateId),
+  );
+  ipcMain.handle(IPC.ORDERS_DETACH_WORKFLOW, (_e, orderId: string) =>
+    db.detachWorkflowFromOrder(orderId),
+  );
+  ipcMain.handle(
+    IPC.ORDERS_UPDATE_TASK,
+    (_e, orderId: string, taskId: string, patch) =>
+      db.updateOrderTask(orderId, taskId, patch),
+  );
+  ipcMain.handle(
+    IPC.ORDERS_ADD_TASK,
+    (_e, orderId: string, input, insertAtIndex?: number) =>
+      db.addOrderTask(orderId, input, insertAtIndex),
+  );
+  ipcMain.handle(IPC.ORDERS_DELETE_TASK, (_e, orderId: string, taskId: string) =>
+    db.deleteOrderTask(orderId, taskId),
+  );
+  ipcMain.handle(
+    IPC.ORDERS_REORDER_TASKS,
+    (_e, orderId: string, fromIndex: number, toIndex: number) =>
+      db.reorderOrderTasks(orderId, fromIndex, toIndex),
   );
 
   // ---- Reverse ----
@@ -490,6 +540,8 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
         productionPlans: [],
         shortageReports: [],
         emailBatches: [],
+        orders: [],
+        workflowTemplates: [],
         settings: db.getSettings(),
       },
       'replace',

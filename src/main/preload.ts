@@ -73,6 +73,24 @@ const CH = {
   EMAIL_BATCH_MARK_SENT: 'emailBatch:mark-sent',
   EMAIL_BATCH_REGENERATE_EMAIL: 'emailBatch:regenerate-email',
 
+  ORDERS_LIST: 'orders:list',
+  ORDERS_GET: 'orders:get',
+  ORDERS_CREATE: 'orders:create',
+  ORDERS_UPDATE: 'orders:update',
+  ORDERS_DELETE: 'orders:delete',
+  ORDERS_ATTACH_WORKFLOW: 'orders:attach-workflow',
+  ORDERS_DETACH_WORKFLOW: 'orders:detach-workflow',
+  ORDERS_UPDATE_TASK: 'orders:update-task',
+  ORDERS_ADD_TASK: 'orders:add-task',
+  ORDERS_DELETE_TASK: 'orders:delete-task',
+  ORDERS_REORDER_TASKS: 'orders:reorder-tasks',
+
+  WORKFLOW_TEMPLATE_LIST: 'workflowTemplate:list',
+  WORKFLOW_TEMPLATE_GET: 'workflowTemplate:get',
+  WORKFLOW_TEMPLATE_CREATE: 'workflowTemplate:create',
+  WORKFLOW_TEMPLATE_UPDATE: 'workflowTemplate:update',
+  WORKFLOW_TEMPLATE_DELETE: 'workflowTemplate:delete',
+
   REVERSE_MAX_PRODUCIBLE: 'reverse:max-producible',
 
   SETTINGS_GET: 'settings:get',
@@ -191,15 +209,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updatePlan: (id: string, patch: any) => ipcRenderer.invoke(CH.PLAN_UPDATE, id, patch),
   deletePlan: (id: string) => ipcRenderer.invoke(CH.PLAN_DELETE, id),
   duplicatePlan: (id: string) => ipcRenderer.invoke(CH.PLAN_DUPLICATE, id),
-  computeShortages: (planId: string) => ipcRenderer.invoke(CH.PLAN_COMPUTE_SHORTAGES, planId),
+  computeShortages: (planId: string, orderId?: string) =>
+    ipcRenderer.invoke(CH.PLAN_COMPUTE_SHORTAGES, planId, orderId),
   computeCost: (planId: string) => ipcRenderer.invoke(CH.PLAN_COMPUTE_COST, planId),
 
   // Shortage report history
   listShortageReports: () => ipcRenderer.invoke(CH.SHORTAGE_REPORT_LIST),
   getShortageReport: (id: string) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_GET, id),
   deleteShortageReport: (id: string) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_DELETE, id),
-  updateShortageReport: (id: string, patch: { reportName?: string }) =>
-    ipcRenderer.invoke(CH.SHORTAGE_REPORT_UPDATE, id, patch),
+  updateShortageReport: (
+    id: string,
+    patch: { reportName?: string; orderId?: string | null },
+  ) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_UPDATE, id, patch),
 
   // Email batches (RFQ history)
   generateEmails: (
@@ -221,6 +242,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
     emailId: string,
     opts: { language: 'pl' | 'en'; useAI: boolean },
   ) => ipcRenderer.invoke(CH.EMAIL_BATCH_REGENERATE_EMAIL, batchId, emailId, opts),
+
+  // Orders
+  listOrders: () => ipcRenderer.invoke(CH.ORDERS_LIST),
+  getOrder: (id: string) => ipcRenderer.invoke(CH.ORDERS_GET, id),
+  createOrder: (input: any) => ipcRenderer.invoke(CH.ORDERS_CREATE, input),
+  updateOrder: (id: string, patch: any) => ipcRenderer.invoke(CH.ORDERS_UPDATE, id, patch),
+  deleteOrder: (id: string) => ipcRenderer.invoke(CH.ORDERS_DELETE, id),
+  attachWorkflowToOrder: (orderId: string, templateId: string) =>
+    ipcRenderer.invoke(CH.ORDERS_ATTACH_WORKFLOW, orderId, templateId),
+  detachWorkflowFromOrder: (orderId: string) =>
+    ipcRenderer.invoke(CH.ORDERS_DETACH_WORKFLOW, orderId),
+  updateOrderTask: (orderId: string, taskId: string, patch: any) =>
+    ipcRenderer.invoke(CH.ORDERS_UPDATE_TASK, orderId, taskId, patch),
+  addOrderTask: (orderId: string, input: any, insertAtIndex?: number) =>
+    ipcRenderer.invoke(CH.ORDERS_ADD_TASK, orderId, input, insertAtIndex),
+  deleteOrderTask: (orderId: string, taskId: string) =>
+    ipcRenderer.invoke(CH.ORDERS_DELETE_TASK, orderId, taskId),
+  reorderOrderTasks: (orderId: string, fromIndex: number, toIndex: number) =>
+    ipcRenderer.invoke(CH.ORDERS_REORDER_TASKS, orderId, fromIndex, toIndex),
+
+  // Workflow templates
+  listWorkflowTemplates: () => ipcRenderer.invoke(CH.WORKFLOW_TEMPLATE_LIST),
+  getWorkflowTemplate: (id: string) => ipcRenderer.invoke(CH.WORKFLOW_TEMPLATE_GET, id),
+  createWorkflowTemplate: (input: any) =>
+    ipcRenderer.invoke(CH.WORKFLOW_TEMPLATE_CREATE, input),
+  updateWorkflowTemplate: (id: string, patch: any) =>
+    ipcRenderer.invoke(CH.WORKFLOW_TEMPLATE_UPDATE, id, patch),
+  deleteWorkflowTemplate: (id: string) =>
+    ipcRenderer.invoke(CH.WORKFLOW_TEMPLATE_DELETE, id),
 
   // Reverse
   maxProducible: (productId: string) => ipcRenderer.invoke(CH.REVERSE_MAX_PRODUCIBLE, productId),

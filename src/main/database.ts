@@ -17,6 +17,13 @@ import type {
   CatalogAlias,
   ComponentType,
   UUID,
+  Order,
+  WorkflowTemplate,
+  TaskTemplate,
+  TaskInstance,
+  TaskType,
+  DateOnly,
+  OrderStatus,
 } from '../shared/types';
 import {
   migrateLegacySecondaryPackaging,
@@ -85,6 +92,118 @@ function splitId<T extends { id: string }>(entity: T): { id: string; rest: Omit<
 // Reconstruct an entity from a Supabase row { id, data }.
 function rebuild<T extends { id: string }>(row: { id: string; data: Record<string, unknown> }): T {
   return { ...row.data, id: row.id } as T;
+}
+
+// ===== Workflow task date math =====
+// Tasks are sequential and dated as half-open day spans: task N starts the day
+// after task N-1 ends, and the very first task starts on the order startDate.
+// `endDate` is inclusive — durationDays=1 means start=end (single-day task).
+
+function parseDate(d: DateOnly): Date {
+  // Local-time midnight; pure date math, no timezone juggling.
+  const [y, m, day] = d.split('-').map(Number);
+  return new Date(y, (m ?? 1) - 1, day ?? 1);
+}
+
+function formatDate(d: Date): DateOnly {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function addDays(d: DateOnly, days: number): DateOnly {
+  const date = parseDate(d);
+  date.setDate(date.getDate() + days);
+  return formatDate(date);
+}
+
+function diffDaysInclusive(start: DateOnly, end: DateOnly): number {
+  const ms = parseDate(end).getTime() - parseDate(start).getTime();
+  return Math.max(1, Math.round(ms / 86400000) + 1);
+}
+
+function instantiateTasks(templateTasks: TaskTemplate[], orderStart: DateOnly): TaskInstance[] {
+  const out: TaskInstance[] = [];
+  let cursor = orderStart;
+  for (const t of templateTasks) {
+    const duration = Math.max(1, t.durationDays);
+    const startDate = cursor;
+    const endDate = addDays(startDate, duration - 1);
+    out.push({
+      id: newId(),
+      name: t.name,
+      type: t.type,
+      status: 'todo',
+      startDate,
+      endDate,
+    });
+    cursor = addDays(endDate, 1);
+  }
+  return out;
+}
+
+// Reuses the existing per-task spans to derive their durations, then re-chains
+// from `orderStart`. Used when the user edits the order's startDate or reorders.
+function recomputeTaskDatesFromExisting<W extends { tasks: TaskInstance[] }>(
+  wf: W,
+  orderStart: DateOnly,
+): W {
+  let cursor = orderStart;
+  const tasks: TaskInstance[] = wf.tasks.map(t => {
+    const duration = diffDaysInclusive(t.startDate, t.endDate);
+    const startDate = cursor;
+    const endDate = addDays(startDate, duration - 1);
+    cursor = addDays(endDate, 1);
+    return { ...t, startDate, endDate };
+  });
+  return { ...wf, tasks };
+}
+
+// Variant that consumes a `_durationDays` hint stashed on a freshly-added task
+// (no existing dates to derive from yet).
+function recomputeTaskDatesFromDurations<W extends { tasks: TaskInstance[] }>(
+  wf: W,
+  orderStart: DateOnly,
+): W {
+  let cursor = orderStart;
+  const tasks: TaskInstance[] = wf.tasks.map(t => {
+    const stash = (t as TaskInstance & { _durationDays?: number })._durationDays;
+    const duration =
+      typeof stash === 'number' && stash > 0
+        ? stash
+        : diffDaysInclusive(t.startDate, t.endDate);
+    const startDate = cursor;
+    const endDate = addDays(startDate, duration - 1);
+    cursor = addDays(endDate, 1);
+    const { _durationDays: _, ...clean } = t as TaskInstance & { _durationDays?: number };
+    return { ...clean, startDate, endDate };
+  });
+  return { ...wf, tasks };
+}
+
+// Public-facing recompute used by updateOrder when startDate changes.
+function recomputeTaskDates<W extends { tasks: TaskInstance[] }>(
+  wf: W,
+  orderStart: DateOnly,
+): W {
+  return recomputeTaskDatesFromExisting(wf, orderStart);
+}
+
+// Derive order status from task statuses. `cancelled` is sticky — only the user
+// can take an order out of it. Otherwise: all done → completed, any progress
+// (in_progress or done) → in_progress, all todo → draft. No tasks → unchanged.
+function deriveOrderStatus(
+  current: OrderStatus,
+  tasks: TaskInstance[],
+): OrderStatus {
+  if (current === 'cancelled') return 'cancelled';
+  if (tasks.length === 0) return current;
+  if (tasks.every(t => t.status === 'done')) return 'completed';
+  if (tasks.some(t => t.status === 'in_progress' || t.status === 'done')) {
+    return 'in_progress';
+  }
+  return 'draft';
 }
 
 export default class Database {
@@ -714,7 +833,11 @@ export default class Database {
     return data ? withReportName(rebuild<ShortageReportEntry>(data)) : undefined;
   }
 
-  async addShortageReport(planId: string, report: ShortageReport): Promise<ShortageReportEntry> {
+  async addShortageReport(
+    planId: string,
+    report: ShortageReport,
+    orderId?: string,
+  ): Promise<ShortageReportEntry> {
     const plan = await this.getPlan(planId);
     const planName = plan?.name ?? '?';
     const entry: ShortageReportEntry = {
@@ -724,6 +847,7 @@ export default class Database {
       reportName: defaultReportName(planName, report.computedAt),
       computedAt: report.computedAt,
       report,
+      ...(orderId ? { orderId } : {}),
     };
     const { rest } = splitId(entry);
     const { error } = await getSupabase().from('shortage_reports').insert({
@@ -731,6 +855,7 @@ export default class Database {
       plan_id: planId,
       computed_at: entry.computedAt,
       data: rest,
+      ...(orderId ? { order_id: orderId } : {}),
     });
     if (error) throw new Error(`addShortageReport: ${error.message}`);
 
@@ -759,16 +884,24 @@ export default class Database {
 
   async updateShortageReport(
     id: string,
-    patch: { reportName?: string },
+    patch: { reportName?: string; orderId?: string | null },
   ): Promise<ShortageReportEntry | undefined> {
     const existing = await this.getShortageReport(id);
     if (!existing) return undefined;
     const next: ShortageReportEntry = withReportName({ ...existing });
     if (patch.reportName !== undefined) next.reportName = patch.reportName;
+    if (patch.orderId !== undefined) {
+      // null clears the link; undefined leaves it alone.
+      if (patch.orderId === null) delete next.orderId;
+      else next.orderId = patch.orderId;
+    }
     const { rest } = splitId(next);
+    // Mirror order_id on the top-level column so list filters keep working.
+    const update: Record<string, unknown> = { data: rest };
+    if (patch.orderId !== undefined) update.order_id = patch.orderId;
     const { error } = await getSupabase()
       .from('shortage_reports')
-      .update({ data: rest })
+      .update(update)
       .eq('id', id);
     if (error) throw new Error(`updateShortageReport: ${error.message}`);
     return next;
@@ -803,6 +936,7 @@ export default class Database {
       plan_id: batch.planId,
       generated_at: batch.generatedAt,
       data: rest,
+      ...(batch.orderId ? { order_id: batch.orderId } : {}),
     });
     if (error) throw new Error(`addEmailBatch: ${error.message}`);
 
@@ -858,6 +992,292 @@ export default class Database {
     });
   }
 
+  // ============================ Workflow templates ============================
+
+  async listWorkflowTemplates(): Promise<WorkflowTemplate[]> {
+    const { data, error } = await getSupabase()
+      .from('workflow_templates')
+      .select('id, data')
+      .order('updated_at', { ascending: false });
+    const rows = unwrap(data, error, 'listWorkflowTemplates');
+    return rows.map(r => rebuild<WorkflowTemplate>(r));
+  }
+
+  async getWorkflowTemplate(id: string): Promise<WorkflowTemplate | undefined> {
+    const { data, error } = await getSupabase()
+      .from('workflow_templates')
+      .select('id, data')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new Error(`getWorkflowTemplate: ${error.message}`);
+    return data ? rebuild<WorkflowTemplate>(data) : undefined;
+  }
+
+  async createWorkflowTemplate(
+    input: Omit<WorkflowTemplate, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<WorkflowTemplate> {
+    const now = nowIso();
+    const wt: WorkflowTemplate = { ...input, id: newId(), createdAt: now, updatedAt: now };
+    const { rest } = splitId(wt);
+    const { error } = await getSupabase()
+      .from('workflow_templates')
+      .insert({ id: wt.id, data: rest, updated_at: now });
+    if (error) throw new Error(`createWorkflowTemplate: ${error.message}`);
+    return wt;
+  }
+
+  async updateWorkflowTemplate(
+    id: string,
+    patch: Partial<Omit<WorkflowTemplate, 'id' | 'createdAt'>>,
+  ): Promise<WorkflowTemplate> {
+    const existing = await this.getWorkflowTemplate(id);
+    if (!existing) throw new Error(`WorkflowTemplate ${id} not found`);
+    const updated: WorkflowTemplate = { ...existing, ...patch, id, updatedAt: nowIso() };
+    const { rest } = splitId(updated);
+    const { error } = await getSupabase()
+      .from('workflow_templates')
+      .update({ data: rest, updated_at: updated.updatedAt })
+      .eq('id', id);
+    if (error) throw new Error(`updateWorkflowTemplate: ${error.message}`);
+    return updated;
+  }
+
+  async deleteWorkflowTemplate(id: string): Promise<{ ok: boolean }> {
+    const { error } = await getSupabase().from('workflow_templates').delete().eq('id', id);
+    if (error) throw new Error(`deleteWorkflowTemplate: ${error.message}`);
+    return { ok: true };
+  }
+
+  // ================================ Orders ================================
+
+  async listOrders(): Promise<Order[]> {
+    const { data, error } = await getSupabase()
+      .from('orders')
+      .select('id, data')
+      .order('updated_at', { ascending: false });
+    const rows = unwrap(data, error, 'listOrders');
+    return rows
+      .map(r => rebuild<Order>(r))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async getOrder(id: string): Promise<Order | undefined> {
+    const { data, error } = await getSupabase()
+      .from('orders')
+      .select('id, data')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new Error(`getOrder: ${error.message}`);
+    return data ? rebuild<Order>(data) : undefined;
+  }
+
+  async createOrder(input: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>): Promise<Order> {
+    const now = nowIso();
+    const order: Order = { ...input, id: newId(), createdAt: now, updatedAt: now };
+    const { rest } = splitId(order);
+    const { error } = await getSupabase()
+      .from('orders')
+      .insert({ id: order.id, data: rest, updated_at: now });
+    if (error) throw new Error(`createOrder: ${error.message}`);
+    return order;
+  }
+
+  async updateOrder(
+    id: string,
+    patch: Partial<Omit<Order, 'id' | 'createdAt'>>,
+  ): Promise<Order> {
+    const existing = await this.getOrder(id);
+    if (!existing) throw new Error(`Order ${id} not found`);
+    const updated: Order = { ...existing, ...patch, id, updatedAt: nowIso() };
+    // Recompute task dates if startDate changed and a workflow is attached —
+    // tasks are sequential and chained off the order startDate.
+    if (
+      patch.startDate !== undefined &&
+      patch.startDate !== existing.startDate &&
+      updated.workflow
+    ) {
+      updated.workflow = recomputeTaskDates(updated.workflow, updated.startDate);
+    }
+    const { rest } = splitId(updated);
+    const { error } = await getSupabase()
+      .from('orders')
+      .update({ data: rest, updated_at: updated.updatedAt })
+      .eq('id', id);
+    if (error) throw new Error(`updateOrder: ${error.message}`);
+    return updated;
+  }
+
+  async deleteOrder(id: string): Promise<{ ok: boolean }> {
+    // Clear order_id on linked reports/batches (don't cascade-delete — user may
+    // want to keep the report history even after deleting the order).
+    await getSupabase().from('shortage_reports').update({ order_id: null }).eq('order_id', id);
+    await getSupabase().from('email_batches').update({ order_id: null }).eq('order_id', id);
+    const { error } = await getSupabase().from('orders').delete().eq('id', id);
+    if (error) throw new Error(`deleteOrder: ${error.message}`);
+    return { ok: true };
+  }
+
+  async attachWorkflowToOrder(orderId: string, templateId: string): Promise<Order> {
+    const order = await this.getOrder(orderId);
+    if (!order) throw new Error(`Order ${orderId} not found`);
+    const template = await this.getWorkflowTemplate(templateId);
+    if (!template) throw new Error(`WorkflowTemplate ${templateId} not found`);
+    const tasks = instantiateTasks(template.tasks, order.startDate);
+    const updated: Order = {
+      ...order,
+      workflow: {
+        templateId: template.id,
+        templateName: template.name,
+        tasks,
+      },
+      updatedAt: nowIso(),
+    };
+    const { rest } = splitId(updated);
+    const { error } = await getSupabase()
+      .from('orders')
+      .update({ data: rest, updated_at: updated.updatedAt })
+      .eq('id', orderId);
+    if (error) throw new Error(`attachWorkflowToOrder: ${error.message}`);
+    return updated;
+  }
+
+  async detachWorkflowFromOrder(orderId: string): Promise<Order> {
+    const order = await this.getOrder(orderId);
+    if (!order) throw new Error(`Order ${orderId} not found`);
+    const { workflow: _workflow, ...withoutWorkflow } = order;
+    const updated: Order = { ...withoutWorkflow, updatedAt: nowIso() };
+    const { rest } = splitId(updated);
+    const { error } = await getSupabase()
+      .from('orders')
+      .update({ data: rest, updated_at: updated.updatedAt })
+      .eq('id', orderId);
+    if (error) throw new Error(`detachWorkflowFromOrder: ${error.message}`);
+    return updated;
+  }
+
+  async updateOrderTask(
+    orderId: string,
+    taskId: string,
+    patch: Partial<TaskInstance>,
+  ): Promise<Order> {
+    const order = await this.getOrder(orderId);
+    if (!order || !order.workflow) throw new Error(`Order ${orderId} has no workflow`);
+    const idx = order.workflow.tasks.findIndex(t => t.id === taskId);
+    if (idx === -1) throw new Error(`Task ${taskId} not found`);
+    const prev = order.workflow.tasks[idx];
+    const next: TaskInstance = { ...prev, ...patch, id: taskId };
+    // Auto-stamp completedAt when transitioning to done; clear it otherwise.
+    if (patch.status !== undefined) {
+      next.completedAt = patch.status === 'done' ? nowIso() : undefined;
+    }
+    const tasks = [...order.workflow.tasks];
+    tasks[idx] = next;
+    const updated: Order = {
+      ...order,
+      status: deriveOrderStatus(order.status, tasks),
+      workflow: { ...order.workflow, tasks },
+      updatedAt: nowIso(),
+    };
+    const { rest } = splitId(updated);
+    const { error } = await getSupabase()
+      .from('orders')
+      .update({ data: rest, updated_at: updated.updatedAt })
+      .eq('id', orderId);
+    if (error) throw new Error(`updateOrderTask: ${error.message}`);
+    return updated;
+  }
+
+  async addOrderTask(
+    orderId: string,
+    input: { name: string; type: TaskType; durationDays: number },
+    insertAtIndex?: number,
+  ): Promise<Order> {
+    const order = await this.getOrder(orderId);
+    if (!order) throw new Error(`Order ${orderId} not found`);
+    const wf = order.workflow ?? { tasks: [] };
+    const tasks = [...wf.tasks];
+    // Provisional dates — recomputeTaskDates() below overwrites with the
+    // proper chain based on durationDays and the order startDate.
+    const newTask: TaskInstance = {
+      id: newId(),
+      name: input.name,
+      type: input.type,
+      status: 'todo',
+      startDate: order.startDate,
+      endDate: order.startDate,
+    };
+    // Stash durationDays on the task so the chain recomputation can read it.
+    (newTask as TaskInstance & { _durationDays?: number })._durationDays = input.durationDays;
+    const at = insertAtIndex ?? tasks.length;
+    tasks.splice(Math.max(0, Math.min(tasks.length, at)), 0, newTask);
+    // Diverged from template now — clear templateId so we don't pretend.
+    const newWf = { ...wf, tasks, templateId: undefined };
+    const recomputed = recomputeTaskDatesFromDurations(newWf, order.startDate);
+    const updated: Order = {
+      ...order,
+      status: deriveOrderStatus(order.status, recomputed.tasks),
+      workflow: recomputed,
+      updatedAt: nowIso(),
+    };
+    const { rest } = splitId(updated);
+    const { error } = await getSupabase()
+      .from('orders')
+      .update({ data: rest, updated_at: updated.updatedAt })
+      .eq('id', orderId);
+    if (error) throw new Error(`addOrderTask: ${error.message}`);
+    return updated;
+  }
+
+  async deleteOrderTask(orderId: string, taskId: string): Promise<Order> {
+    const order = await this.getOrder(orderId);
+    if (!order || !order.workflow) throw new Error(`Order ${orderId} has no workflow`);
+    const tasks = order.workflow.tasks.filter(t => t.id !== taskId);
+    const updated: Order = {
+      ...order,
+      status: deriveOrderStatus(order.status, tasks),
+      workflow: { ...order.workflow, tasks, templateId: undefined },
+      updatedAt: nowIso(),
+    };
+    const { rest } = splitId(updated);
+    const { error } = await getSupabase()
+      .from('orders')
+      .update({ data: rest, updated_at: updated.updatedAt })
+      .eq('id', orderId);
+    if (error) throw new Error(`deleteOrderTask: ${error.message}`);
+    return updated;
+  }
+
+  async reorderOrderTasks(
+    orderId: string,
+    fromIndex: number,
+    toIndex: number,
+  ): Promise<Order> {
+    const order = await this.getOrder(orderId);
+    if (!order || !order.workflow) throw new Error(`Order ${orderId} has no workflow`);
+    const tasks = [...order.workflow.tasks];
+    if (fromIndex < 0 || fromIndex >= tasks.length || toIndex < 0 || toIndex >= tasks.length) {
+      return order;
+    }
+    const [moved] = tasks.splice(fromIndex, 1);
+    tasks.splice(toIndex, 0, moved);
+    // Reorder shifts each task's place in the chain — recompute dates so the
+    // sequence still starts at the order startDate.
+    const newWf = { ...order.workflow, tasks, templateId: undefined };
+    const recomputed = recomputeTaskDatesFromExisting(newWf, order.startDate);
+    const updated: Order = {
+      ...order,
+      workflow: recomputed,
+      updatedAt: nowIso(),
+    };
+    const { rest } = splitId(updated);
+    const { error } = await getSupabase()
+      .from('orders')
+      .update({ data: rest, updated_at: updated.updatedAt })
+      .eq('id', orderId);
+    if (error) throw new Error(`reorderOrderTasks: ${error.message}`);
+    return updated;
+  }
+
   // =============================== Settings ===============================
   // Stay local to the machine — UI prefs, not shared data.
 
@@ -888,6 +1308,8 @@ export default class Database {
       productionPlans,
       shortageReports,
       emailBatches,
+      orders,
+      workflowTemplates,
     ] = await Promise.all([
       this.listSuppliers(),
       this.listRawMaterials(),
@@ -897,6 +1319,8 @@ export default class Database {
       this.listPlans(),
       this.listShortageReports(),
       this.listEmailBatches(),
+      this.listOrders().catch(() => [] as Order[]),
+      this.listWorkflowTemplates().catch(() => [] as WorkflowTemplate[]),
     ]);
     return {
       schemaVersion: 1,
@@ -908,6 +1332,8 @@ export default class Database {
       productionPlans,
       shortageReports,
       emailBatches,
+      orders,
+      workflowTemplates,
       settings: this.getSettings(),
     };
   }
@@ -925,6 +1351,8 @@ export default class Database {
         supa.from('production_plans').delete().not('id', 'is', null),
         supa.from('shortage_reports').delete().not('id', 'is', null),
         supa.from('email_batches').delete().not('id', 'is', null),
+        supa.from('orders').delete().not('id', 'is', null),
+        supa.from('workflow_templates').delete().not('id', 'is', null),
       ]);
     }
 
@@ -977,7 +1405,22 @@ export default class Database {
     applied += await bulkUpsert(
       'email_batches',
       data.emailBatches ?? [],
-      b => ({ report_id: b.reportId, plan_id: b.planId, generated_at: b.generatedAt }),
+      b => ({
+        report_id: b.reportId,
+        plan_id: b.planId,
+        generated_at: b.generatedAt,
+        ...(b.orderId ? { order_id: b.orderId } : {}),
+      }),
+    );
+    applied += await bulkUpsert(
+      'orders',
+      data.orders ?? [],
+      () => ({ updated_at: nowIso() }),
+    );
+    applied += await bulkUpsert(
+      'workflow_templates',
+      data.workflowTemplates ?? [],
+      () => ({ updated_at: nowIso() }),
     );
 
     if (data.settings) {

@@ -11,4 +11,7 @@ export type ViewKey =
   | 'emailGenerator'
   | 'costCalculator'
   | 'maxProducible'
+  | 'orders'
+  | 'orderDetails'
+  | 'workflowTemplates'
   | 'settings';

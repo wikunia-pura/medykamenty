@@ -23,6 +23,10 @@ import type {
   StoreSchema,
   CatalogAlias,
   MatchSuggestion,
+  Order,
+  WorkflowTemplate,
+  TaskInstance,
+  TaskTemplate,
 } from '../shared/types';
 
 export interface ElectronAPI {
@@ -122,7 +126,7 @@ export interface ElectronAPI {
   updatePlan(id: string, patch: Partial<ProductionPlan>): Promise<ProductionPlan>;
   deletePlan(id: string): Promise<{ ok: boolean }>;
   duplicatePlan(id: string): Promise<ProductionPlan>;
-  computeShortages(planId: string): Promise<ShortageReport>;
+  computeShortages(planId: string, orderId?: string): Promise<ShortageReport>;
   computeCost(planId: string): Promise<CostReport>;
 
   // Shortage report history
@@ -131,7 +135,7 @@ export interface ElectronAPI {
   deleteShortageReport(id: string): Promise<{ ok: boolean }>;
   updateShortageReport(
     id: string,
-    patch: { reportName?: string },
+    patch: { reportName?: string; orderId?: string | null },
   ): Promise<ShortageReportEntry | undefined>;
 
   // Email batches (RFQ history)
@@ -157,6 +161,41 @@ export interface ElectronAPI {
     emailId: string,
     opts: { language: Lang; useAI: boolean },
   ): Promise<EmailBatch>;
+
+  // Orders
+  listOrders(): Promise<Order[]>;
+  getOrder(id: string): Promise<Order | undefined>;
+  createOrder(input: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>): Promise<Order>;
+  updateOrder(id: string, patch: Partial<Order>): Promise<Order>;
+  deleteOrder(id: string): Promise<{ ok: boolean }>;
+  attachWorkflowToOrder(orderId: string, templateId: string): Promise<Order>;
+  detachWorkflowFromOrder(orderId: string): Promise<Order>;
+  updateOrderTask(
+    orderId: string,
+    taskId: string,
+    patch: Partial<TaskInstance>,
+  ): Promise<Order>;
+  addOrderTask(
+    orderId: string,
+    input: Omit<TaskInstance, 'id' | 'startDate' | 'endDate' | 'status'> & {
+      durationDays: number;
+    },
+    insertAtIndex?: number,
+  ): Promise<Order>;
+  deleteOrderTask(orderId: string, taskId: string): Promise<Order>;
+  reorderOrderTasks(orderId: string, fromIndex: number, toIndex: number): Promise<Order>;
+
+  // Workflow templates
+  listWorkflowTemplates(): Promise<WorkflowTemplate[]>;
+  getWorkflowTemplate(id: string): Promise<WorkflowTemplate | undefined>;
+  createWorkflowTemplate(
+    input: Omit<WorkflowTemplate, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<WorkflowTemplate>;
+  updateWorkflowTemplate(
+    id: string,
+    patch: Partial<WorkflowTemplate>,
+  ): Promise<WorkflowTemplate>;
+  deleteWorkflowTemplate(id: string): Promise<{ ok: boolean }>;
 
   // Reverse
   maxProducible(productId: string): Promise<MaxProducibleResult>;

@@ -19,6 +19,7 @@ import BulkUnmatchedModal from '../components/BulkUnmatchedModal';
 
 interface Props {
   onNavigate?: (key: ViewKey) => void;
+  taskBanner?: React.ReactNode;
 }
 
 type StagedFile = { name: string; path: string; kind: 'raw' | 'component' };
@@ -41,7 +42,7 @@ function readExpanded(key: string): boolean {
   }
 }
 
-const StockImport: React.FC<Props> = ({ onNavigate }) => {
+const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
@@ -693,6 +694,7 @@ const StockImport: React.FC<Props> = ({ onNavigate }) => {
           </span>
         )}
       </div>
+      {taskBanner}
       <p className="subtitle">
         Import xlsx z MP Firma. Aplikacja dopasuje pozycje do istniejących surowców i komponentów po
         symbolu lub nazwie. Pozycje wieloznaczne lub nierozpoznane można rozstrzygnąć ręcznie.

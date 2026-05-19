@@ -4,7 +4,7 @@ import Footer from './components/Footer';
 import UpdateNotification from './components/UpdateNotification';
 import { I18nProvider } from './i18n';
 import { NavigationProvider } from './navigation';
-import type { Lang, AppSettings } from '../shared/types';
+import type { Lang, AppSettings, TaskStatus } from '../shared/types';
 import type { ViewKey } from './views/types';
 import Dashboard from './views/Dashboard';
 import Products from './views/Products';
@@ -19,6 +19,10 @@ import CostCalculatorView from './views/CostCalculator';
 import MaxProducibleView from './views/MaxProducible';
 import Settings from './views/Settings';
 import Login from './views/Login';
+import Orders from './views/Orders';
+import OrderDetails from './views/OrderDetails';
+import WorkflowTemplates from './views/WorkflowTemplates';
+import OrderTaskBanner from './components/OrderTaskBanner';
 
 const NAV_STACK_LIMIT = 50;
 
@@ -50,6 +54,7 @@ const App: React.FC = () => {
   const handleSidebarSelect = (next: ViewKey) => {
     resetShortageReportFocus();
     resetEmailGeneratorFocus();
+    setOrderTaskCtx(null);
     setSidebarTick((n) => n + 1);
     setView(next);
   };
@@ -72,6 +77,16 @@ const App: React.FC = () => {
   const [planSearchQuery, setPlanSearchQuery] = useState<string>('');
   const [focusReportId, setFocusReportId] = useState<string>('');
   const [focusBatchId, setFocusBatchId] = useState<string>('');
+  const [selectedOrderId, setSelectedOrderId] = useState<string>('');
+  // Active workflow-task context. When set, the user navigated to a screen
+  // (stockImport/shortageReport/emailGenerator) from a workflow task and the
+  // top banner offers a way back to the order + a one-click "mark done".
+  const [orderTaskCtx, setOrderTaskCtx] = useState<{
+    orderId: string;
+    taskId: string;
+    orderName: string;
+    taskStatus: TaskStatus;
+  } | null>(null);
   const [session, setSession] = useState<{ email: string; userId: string } | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [migrationInfo, setMigrationInfo] = useState<{
@@ -127,6 +142,77 @@ const App: React.FC = () => {
     setFocusBatchId(batchId);
     setView('emailGenerator');
   };
+
+  const openOrder = (id: string) => {
+    setSelectedOrderId(id);
+    setOrderTaskCtx(null);
+    setView('orderDetails');
+  };
+
+  const navigateForTask = async (
+    target: 'stockImport' | 'shortageReport' | 'emailGenerator',
+    orderId: string,
+    taskId: string,
+  ) => {
+    let orderName = '';
+    let taskStatus: TaskStatus = 'in_progress';
+    try {
+      const o = await window.electronAPI.getOrder(orderId);
+      orderName = o?.name ?? '';
+      const tk = o?.workflow?.tasks.find((task) => task.id === taskId);
+      if (tk) taskStatus = tk.status;
+    } catch {
+      /* ignore — banner still renders, just without the name */
+    }
+    setSelectedOrderId(orderId);
+    setOrderTaskCtx({ orderId, taskId, orderName, taskStatus });
+    setView(target);
+  };
+
+  const markTaskDoneAndReturn = async () => {
+    if (!orderTaskCtx) return;
+    try {
+      await window.electronAPI.updateOrderTask(orderTaskCtx.orderId, orderTaskCtx.taskId, {
+        status: 'done',
+      });
+    } catch (err) {
+      console.error('Failed to mark task done', err);
+    }
+    setOrderTaskCtx(null);
+    setView('orderDetails');
+  };
+
+  const reopenTaskAndStay = async () => {
+    if (!orderTaskCtx) return;
+    try {
+      await window.electronAPI.updateOrderTask(orderTaskCtx.orderId, orderTaskCtx.taskId, {
+        status: 'in_progress',
+      });
+      setOrderTaskCtx({ ...orderTaskCtx, taskStatus: 'in_progress' });
+    } catch (err) {
+      console.error('Failed to reopen task', err);
+    }
+  };
+
+  const backToOrderFromTask = () => {
+    setOrderTaskCtx(null);
+    setView('orderDetails');
+  };
+
+  // Clear the workflow-task banner whenever the user navigates away from the
+  // three special-task screens. Without this, history nav (Alt+←/→), row
+  // clicks, or any path that bypasses the banner's "back" button would leave
+  // orderTaskCtx stuck, and the banner would re-appear on the next visit to
+  // a task screen even though the user didn't actually click a task.
+  useEffect(() => {
+    if (
+      view !== 'stockImport' &&
+      view !== 'shortageReport' &&
+      view !== 'emailGenerator'
+    ) {
+      setOrderTaskCtx(null);
+    }
+  }, [view]);
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
@@ -222,6 +308,19 @@ const App: React.FC = () => {
 
   const renderView = () => {
     if (!settings) return <div className="main">Loading…</div>;
+    const taskBanner =
+      orderTaskCtx &&
+      (view === 'stockImport' ||
+        view === 'shortageReport' ||
+        view === 'emailGenerator') ? (
+        <OrderTaskBanner
+          orderName={orderTaskCtx.orderName}
+          taskStatus={orderTaskCtx.taskStatus}
+          onBackToOrder={backToOrderFromTask}
+          onMarkDone={markTaskDoneAndReturn}
+          onReopen={reopenTaskAndStay}
+        />
+      ) : null;
     switch (view) {
       case 'dashboard':
         return (
@@ -229,6 +328,8 @@ const App: React.FC = () => {
             key={`dashboard-${sidebarTick}`}
             onNavigate={setView}
             onNavigateToReport={navigateToReport}
+            onOpenOrder={openOrder}
+            onNavigateForTask={navigateForTask}
           />
         );
       case 'products':
@@ -242,7 +343,27 @@ const App: React.FC = () => {
       case 'suppliers':
         return <Suppliers />;
       case 'stockImport':
-        return <StockImport onNavigate={setView} />;
+        return <StockImport onNavigate={setView} taskBanner={taskBanner} />;
+      case 'orders':
+        return (
+          <Orders onOpenOrder={openOrder} onNavigateForTask={navigateForTask} />
+        );
+      case 'orderDetails':
+        return selectedOrderId ? (
+          <OrderDetails
+            key={`order-${selectedOrderId}`}
+            orderId={selectedOrderId}
+            onBack={() => setView('orders')}
+            onNavigateToReport={navigateToReport}
+            onNavigateToEmails={navigateToEmails}
+            onNavigateToBatch={navigateToBatch}
+            onNavigateForTask={navigateForTask}
+          />
+        ) : (
+          <Orders onOpenOrder={openOrder} onNavigateForTask={navigateForTask} />
+        );
+      case 'workflowTemplates':
+        return <WorkflowTemplates />;
       case 'productionPlan':
         return (
           <ProductionPlanView
@@ -265,6 +386,9 @@ const App: React.FC = () => {
             onNavigateToEmails={navigateToEmails}
             focusReportId={focusReportId}
             onFocusReportConsumed={() => setFocusReportId('')}
+            orderTaskContextOrderId={orderTaskCtx?.orderId}
+            onNavigateToOrder={openOrder}
+            taskBanner={taskBanner}
           />
         );
       case 'emailGenerator':
@@ -282,6 +406,7 @@ const App: React.FC = () => {
             onNavigateToReport={navigateToReport}
             focusBatchId={focusBatchId}
             onFocusBatchConsumed={() => setFocusBatchId('')}
+            taskBanner={taskBanner}
           />
         );
       case 'costCalculator':

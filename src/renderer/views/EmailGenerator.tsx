@@ -38,6 +38,7 @@ interface Props {
   onNavigateToReport?: (planId: string, reportId: string) => void;
   focusBatchId?: string;
   onFocusBatchConsumed?: () => void;
+  taskBanner?: React.ReactNode;
 }
 
 interface FocusState {
@@ -69,12 +70,17 @@ const EmailGenerator: React.FC<Props> = ({
   onNavigateToReport,
   focusBatchId,
   onFocusBatchConsumed,
+  taskBanner,
 }) => {
   const t = useT();
   const navCtx = useNavigation();
   const [reports, setReports] = useState<ShortageReportEntry[]>([]);
   const [batches, setBatches] = useState<EmailBatch[]>([]);
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
+  // Becomes true after the first loadAll resolves. Used to suppress the
+  // "linked plan / report deleted" warning during the initial render, when
+  // those lists are still empty and every linked id falsely looks missing.
+  const [dataLoaded, setDataLoaded] = useState(false);
   const [focus, setFocus] = useState<FocusState | null>(cache.focus);
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
@@ -144,6 +150,7 @@ const EmailGenerator: React.FC<Props> = ({
     setBatches(b);
     setPlans(p);
     setProducts(pr);
+    setDataLoaded(true);
     return { reports: r, batches: b };
   };
 
@@ -323,12 +330,12 @@ const EmailGenerator: React.FC<Props> = ({
       ? batch.emails
       : batch.emails.filter((e) => matchesQuery(e, focusQuery));
     const linkedPlan = batch.planId ? plans.find((p) => p.id === batch.planId) : undefined;
-    const planMissing = !!batch.planId && !linkedPlan;
+    const planMissing = dataLoaded && !!batch.planId && !linkedPlan;
     const livePlanName = linkedPlan?.name ?? batch.planName;
     const linkedReport = batch.reportId
       ? reports.find((r) => r.id === batch.reportId)
       : undefined;
-    const reportMissing = !!batch.reportId && !linkedReport;
+    const reportMissing = dataLoaded && !!batch.reportId && !linkedReport;
     return (
       <div className="main">
         <div className="focus-bar">
@@ -390,6 +397,7 @@ const EmailGenerator: React.FC<Props> = ({
             </span>
           </div>
         </div>
+        {taskBanner}
 
         {error && <div className="card error-text">{error}</div>}
 
@@ -544,6 +552,7 @@ const EmailGenerator: React.FC<Props> = ({
           <span className="page-header-count">{batches.length}</span>
         )}
       </div>
+      {taskBanner}
 
       {reports.length === 0 ? (
         <div
@@ -633,9 +642,11 @@ const EmailGenerator: React.FC<Props> = ({
                     const allSent = total > 0 && sent === total;
                     const rowLinkedPlan = plans.find((p) => p.id === b.planId);
                     const livePlanName = rowLinkedPlan?.name ?? b.planName;
-                    const rowPlanMissing = !!b.planId && !rowLinkedPlan;
+                    const rowPlanMissing = dataLoaded && !!b.planId && !rowLinkedPlan;
                     const rowReportMissing =
-                      !!b.reportId && !reports.some((r) => r.id === b.reportId);
+                      dataLoaded &&
+                      !!b.reportId &&
+                      !reports.some((r) => r.id === b.reportId);
                     return (
                       <tr
                         key={b.id}

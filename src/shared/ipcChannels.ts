@@ -77,6 +77,26 @@ export const IPC = {
   EMAIL_BATCH_MARK_SENT: 'emailBatch:mark-sent',
   EMAIL_BATCH_REGENERATE_EMAIL: 'emailBatch:regenerate-email',
 
+  // Orders
+  ORDERS_LIST: 'orders:list',
+  ORDERS_GET: 'orders:get',
+  ORDERS_CREATE: 'orders:create',
+  ORDERS_UPDATE: 'orders:update',
+  ORDERS_DELETE: 'orders:delete',
+  ORDERS_ATTACH_WORKFLOW: 'orders:attach-workflow',
+  ORDERS_DETACH_WORKFLOW: 'orders:detach-workflow',
+  ORDERS_UPDATE_TASK: 'orders:update-task',
+  ORDERS_ADD_TASK: 'orders:add-task',
+  ORDERS_DELETE_TASK: 'orders:delete-task',
+  ORDERS_REORDER_TASKS: 'orders:reorder-tasks',
+
+  // Workflow templates
+  WORKFLOW_TEMPLATE_LIST: 'workflowTemplate:list',
+  WORKFLOW_TEMPLATE_GET: 'workflowTemplate:get',
+  WORKFLOW_TEMPLATE_CREATE: 'workflowTemplate:create',
+  WORKFLOW_TEMPLATE_UPDATE: 'workflowTemplate:update',
+  WORKFLOW_TEMPLATE_DELETE: 'workflowTemplate:delete',
+
   // Reverse
   REVERSE_MAX_PRODUCIBLE: 'reverse:max-producible',
 

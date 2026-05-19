@@ -1,13 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import type { ViewKey } from './types';
-import type { ShortageLine, ShortageReportEntry } from '../../shared/types';
+import type {
+  Order,
+  OrderStatus,
+  ShortageLine,
+  ShortageReportEntry,
+  TaskInstance,
+} from '../../shared/types';
 import { IconImport } from '../components/Icons';
+import TaskProgressBar, { type TaskAction } from '../components/TaskProgressBar';
 import drugsUrl from '../assets/drugs2.webp';
 
 interface Props {
   onNavigate: (key: ViewKey) => void;
   onNavigateToReport: (planId: string, reportId: string) => void;
+  onOpenOrder: (id: string) => void;
+  onNavigateForTask: (
+    target: 'stockImport' | 'shortageReport' | 'emailGenerator',
+    orderId: string,
+    taskId: string,
+  ) => void;
 }
 
 interface Counts {
@@ -26,20 +39,28 @@ interface DataTile {
   accent: 'blue' | 'green' | 'purple' | 'amber' | 'cyan';
 }
 
-const Dashboard: React.FC<Props> = ({ onNavigate, onNavigateToReport }) => {
+const Dashboard: React.FC<Props> = ({
+  onNavigate,
+  onNavigateToReport,
+  onOpenOrder,
+  onNavigateForTask,
+}) => {
   const t = useT();
   const [counts, setCounts] = useState<Counts | null>(null);
   const [latestReport, setLatestReport] = useState<ShortageReportEntry | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
 
   const reload = async () => {
-    const [products, rawMaterials, components, suppliers, plans, reports] = await Promise.all([
-      window.electronAPI.listProducts(),
-      window.electronAPI.listRawMaterials(),
-      window.electronAPI.listComponents(),
-      window.electronAPI.listSuppliers(),
-      window.electronAPI.listPlans(),
-      window.electronAPI.listShortageReports(),
-    ]);
+    const [products, rawMaterials, components, suppliers, plans, reports, orderList] =
+      await Promise.all([
+        window.electronAPI.listProducts(),
+        window.electronAPI.listRawMaterials(),
+        window.electronAPI.listComponents(),
+        window.electronAPI.listSuppliers(),
+        window.electronAPI.listPlans(),
+        window.electronAPI.listShortageReports(),
+        window.electronAPI.listOrders(),
+      ]);
     setCounts({
       products: products.length,
       rawMaterials: rawMaterials.length,
@@ -48,6 +69,53 @@ const Dashboard: React.FC<Props> = ({ onNavigate, onNavigateToReport }) => {
       plans: plans.length,
     });
     setLatestReport(reports[0] ?? null);
+    setOrders(orderList);
+  };
+
+  const onTaskAction = async (order: Order, task: TaskInstance, action: TaskAction) => {
+    if (action.kind === 'setStatus') {
+      try {
+        await window.electronAPI.updateOrderTask(order.id, task.id, {
+          status: action.status,
+        });
+        await reload();
+      } catch (err) {
+        console.error('Failed to update task', err);
+      }
+    } else if (action.kind === 'open') {
+      const target =
+        task.type === 'import_stock'
+          ? 'stockImport'
+          : task.type === 'generate_shortage'
+            ? 'shortageReport'
+            : task.type === 'generate_emails'
+              ? 'emailGenerator'
+              : null;
+      if (!target) return;
+      if (task.status === 'todo') {
+        try {
+          await window.electronAPI.updateOrderTask(order.id, task.id, {
+            status: 'in_progress',
+          });
+        } catch {
+          /* non-fatal */
+        }
+      }
+      onNavigateForTask(target, order.id, task.id);
+    }
+  };
+
+  const orderStatusLabel = (s: OrderStatus): string => {
+    switch (s) {
+      case 'draft':
+        return t.orderStatusDraft;
+      case 'in_progress':
+        return t.orderStatusInProgress;
+      case 'completed':
+        return t.orderStatusCompleted;
+      case 'cancelled':
+        return t.orderStatusCancelled;
+    }
   };
 
   useEffect(() => {
@@ -80,6 +148,10 @@ const Dashboard: React.FC<Props> = ({ onNavigate, onNavigateToReport }) => {
     : '';
 
   const fmt = (n: number, unit: ShortageLine['unit']) => n.toFixed(unit === 'pcs' ? 0 : 2);
+
+  const activeOrders = orders
+    .filter((o) => o.status !== 'completed' && o.status !== 'cancelled')
+    .sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
 
   const hour = new Date().getHours();
   const greeting =
@@ -133,6 +205,74 @@ const Dashboard: React.FC<Props> = ({ onNavigate, onNavigateToReport }) => {
           </button>
         ))}
       </div>
+
+      <h2 className="dashboard-section-head">
+        {t.dashboardActiveOrders}
+        <span className="dashboard-section-hint">{t.dashboardActiveOrdersHint}</span>
+      </h2>
+
+      {activeOrders.length === 0 ? (
+        <div className="dashboard-empty">
+          <span className="dashboard-empty-icon">▤</span>
+          <div>
+            <div className="dashboard-empty-title">{t.dashboardNoActiveOrders}</div>
+            <button className="btn primary" onClick={() => onNavigate('orders')}>
+              {t.orderNew} →
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="dashboard-orders-grid">
+            {activeOrders.map((o) => {
+              const tasks = o.workflow?.tasks ?? [];
+              const endDate =
+                tasks.length > 0 ? tasks[tasks.length - 1].endDate : null;
+              return (
+                <div
+                  key={o.id}
+                  className={`dashboard-order-tile order-status-accent-${o.status}`}
+                >
+                  <button
+                    type="button"
+                    className="dashboard-order-head"
+                    onClick={() => onOpenOrder(o.id)}
+                    title={t.orderDetails}
+                  >
+                    <div className="dashboard-order-head-text">
+                      <div className="dashboard-order-name">{o.name}</div>
+                      <div className="dashboard-order-dates">
+                        {o.startDate}
+                        {endDate ? ` → ${endDate}` : ''}
+                      </div>
+                    </div>
+                    <span className={`badge order-status-${o.status}`}>
+                      {orderStatusLabel(o.status)}
+                    </span>
+                  </button>
+                  <div className="dashboard-order-progress">
+                    {tasks.length === 0 ? (
+                      <span className="hint">{t.dashboardOrderNoTasks}</span>
+                    ) : (
+                      <TaskProgressBar
+                        tasks={tasks}
+                        size="md"
+                        interactive
+                        onTaskAction={(task, action) => onTaskAction(o, task, action)}
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="dashboard-shortage-more">
+            <button className="btn" onClick={() => onNavigate('orders')}>
+              {t.dashboardOrdersSeeAll} →
+            </button>
+          </div>
+        </>
+      )}
 
       <h2 className="dashboard-section-head">
         {t.dashboardMissingItems}

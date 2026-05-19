@@ -105,6 +105,7 @@ export async function generateEmailsForReport(
     generatedAt: nowIso(),
     language: opts.language,
     emails: records,
+    ...(entry.orderId ? { orderId: entry.orderId } : {}),
   };
 
   await db.addEmailBatch(batch);

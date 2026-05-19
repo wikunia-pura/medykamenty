@@ -372,6 +372,8 @@ export interface StoreSchema {
   productionPlans: ProductionPlan[];
   shortageReports?: ShortageReportEntry[];
   emailBatches?: EmailBatch[];
+  orders?: Order[];
+  workflowTemplates?: WorkflowTemplate[];
   settings: AppSettings;
 }
 
@@ -510,6 +512,7 @@ export interface ShortageReportEntry {
   reportName: string;
   computedAt: ISODate;
   report: ShortageReport;
+  orderId?: UUID;
 }
 
 export interface CostBreakdownLine {
@@ -555,6 +558,7 @@ export interface EmailBatch {
   generatedAt: ISODate;
   language: Lang;
   emails: RFQEmailRecord[];
+  orderId?: UUID;
 }
 
 export interface MaxProducibleResult {
@@ -569,4 +573,66 @@ export interface MaxProducibleResult {
     needPerUnit: number;
     maxUnits: number;
   }[];
+}
+
+// ============================ Orders / Workflows ============================
+
+// YYYY-MM-DD; tasks are scheduled by calendar day, not by exact timestamp.
+export type DateOnly = string;
+
+// 'custom' = user-defined task with arbitrary semantics.
+// The other three are wired to existing screens — clicking them navigates and
+// auto-sets in_progress; the user marks done themselves.
+export type TaskType = 'custom' | 'import_stock' | 'generate_shortage' | 'generate_emails';
+
+export type TaskStatus = 'todo' | 'in_progress' | 'done';
+
+export type OrderStatus = 'draft' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface TaskTemplate {
+  id: UUID;
+  name: string;
+  type: TaskType;
+  // Duration in days from the previous task's end (or order startDate for the
+  // first task). Used when instantiating a template against an order to
+  // compute concrete startDate / endDate.
+  durationDays: number;
+}
+
+export interface WorkflowTemplate {
+  id: UUID;
+  name: string;
+  tasks: TaskTemplate[];
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+export interface TaskInstance {
+  id: UUID;
+  name: string;
+  type: TaskType;
+  status: TaskStatus;
+  startDate: DateOnly;
+  endDate: DateOnly;
+  completedAt?: ISODate;
+}
+
+export interface OrderWorkflow {
+  // The template this workflow was instantiated from; cleared if user edits the
+  // tasks (instance diverges from template).
+  templateId?: UUID;
+  // Echoed for display when the template is later renamed/deleted.
+  templateName?: string;
+  tasks: TaskInstance[];
+}
+
+export interface Order {
+  id: UUID;
+  name: string;
+  startDate: DateOnly;
+  status: OrderStatus;
+  notes?: string;
+  workflow?: OrderWorkflow;
+  createdAt: ISODate;
+  updatedAt: ISODate;
 }

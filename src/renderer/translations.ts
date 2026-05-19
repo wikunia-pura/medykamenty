@@ -314,6 +314,11 @@ export interface T {
   dashboardWelcomeTagline: string;
   dashboardWelcomeMottoIntro: string;
   dashboardWelcomeMotto: string;
+  dashboardActiveOrders: string;
+  dashboardActiveOrdersHint: string;
+  dashboardNoActiveOrders: string;
+  dashboardOrdersSeeAll: string;
+  dashboardOrderNoTasks: string;
   // Demo
   loadDemoTitle: string;
   loadDemoBody: string;
@@ -428,6 +433,75 @@ export interface T {
   linkedReportDeleted: string;
   linkedPlanDeletedTag: string;
   linkedReportDeletedTag: string;
+  // Orders + workflows
+  orders: string;
+  ordersEmpty: string;
+  orderNew: string;
+  orderName: string;
+  orderStartDate: string;
+  orderStatus: string;
+  orderStatusDraft: string;
+  orderStatusInProgress: string;
+  orderStatusCompleted: string;
+  orderStatusCancelled: string;
+  orderNotes: string;
+  orderDetails: string;
+  confirmDeleteOrder: string;
+  workflowTemplates: string;
+  workflowTemplatesEmpty: string;
+  workflowTemplateNew: string;
+  workflowTemplateNamePlaceholder: string;
+  workflowTemplateNoTasks: string;
+  workflowTemplateNameRequired: string;
+  confirmDeleteWorkflowTemplate: string;
+  attachWorkflow: string;
+  detachWorkflow: string;
+  confirmDetachWorkflow: string;
+  selectWorkflowTemplate: string;
+  noWorkflowAttached: string;
+  workflow: string;
+  workflowTasks: string;
+  tasks: string;
+  addTask: string;
+  taskNamePlaceholder: string;
+  taskType: string;
+  taskTypeCustom: string;
+  taskTypeImportStock: string;
+  taskTypeGenerateShortage: string;
+  taskTypeGenerateEmails: string;
+  taskStatusTodo: string;
+  taskStatusInProgress: string;
+  taskStatusDone: string;
+  tasksDoneOf: string;
+  taskStartDate: string;
+  taskEndDate: string;
+  taskDuration: string;
+  totalDuration: string;
+  days: string;
+  markInProgress: string;
+  markDone: string;
+  markTodo: string;
+  taskSkipWarning: string;
+  ordersReports: string;
+  ordersReportsEmpty: string;
+  newReport: string;
+  selectPlan: string;
+  backToOrder: string;
+  taskInProgressNote: string;
+  taskAlreadyDoneNote: string;
+  markTaskDone: string;
+  reopenTask: string;
+  openScreen: string;
+  orderTemplate: string;
+  orderEndDate: string;
+  changeStatus: string;
+  workflowTemplatePreview: string;
+  workflowTemplateDeleted: string;
+  orderDeleted: string;
+  orderDeletedTag: string;
+  goToReportsView: string;
+  linkOrder: string;
+  unlinkOrder: string;
 }
 
 const pl: T = {
@@ -746,6 +820,11 @@ const pl: T = {
   dashboardWelcomeTagline: 'Zaplanuj produkcję, sprawdź braki, wyślij maile RFQ — wszystko w jednym miejscu.',
   dashboardWelcomeMottoIntro: 'Pracuj z uśmiechem i powtarzaj nasze motto:',
   dashboardWelcomeMotto: 'Od jednego strzała jeszcze nikt się nie uzależnił',
+  dashboardActiveOrders: 'Aktywne zamówienia',
+  dashboardActiveOrdersHint: 'Postęp prac dla każdego zamówienia w toku',
+  dashboardNoActiveOrders: 'Brak aktywnych zamówień.',
+  dashboardOrdersSeeAll: 'Wszystkie zamówienia',
+  dashboardOrderNoTasks: 'Brak zadań w workflow',
   loadDemoTitle: 'Dane demo',
   loadDemoBody:
     'Wczytuje fikcyjną firmę: 4 dostawców, 7 surowców (z jednym fabrycznym i jednym pustym), 3 komponenty, jeden produkt z recepturą, gotowy plan na 1000 sztuk i stany magazynowe. Po wczytaniu od razu można obliczyć zapotrzebowanie i wygenerować maile.',
@@ -855,6 +934,74 @@ const pl: T = {
   linkedReportDeleted: 'Powiązany raport zapotrzebowania został usunięty i nie jest już dostępny.',
   linkedPlanDeletedTag: 'plan usunięty',
   linkedReportDeletedTag: 'raport usunięty',
+  orders: 'Zamówienia',
+  ordersEmpty: 'Brak zamówień. Utwórz pierwsze zamówienie, aby rozpocząć.',
+  orderNew: 'Nowe zamówienie',
+  orderName: 'Nazwa zamówienia',
+  orderStartDate: 'Data startu',
+  orderStatus: 'Status',
+  orderStatusDraft: 'Szkic',
+  orderStatusInProgress: 'W realizacji',
+  orderStatusCompleted: 'Zakończone',
+  orderStatusCancelled: 'Anulowane',
+  orderNotes: 'Notatki',
+  orderDetails: 'Szczegóły zamówienia',
+  confirmDeleteOrder: 'Usunąć zamówienie?',
+  workflowTemplates: 'Szablony workflow',
+  workflowTemplatesEmpty: 'Brak szablonów. Utwórz pierwszy, aby przyspieszyć obsługę zamówień.',
+  workflowTemplateNew: 'Nowy szablon',
+  workflowTemplateNamePlaceholder: 'np. Standardowy proces zamówienia',
+  workflowTemplateNoTasks: 'Dodaj zadania do szablonu.',
+  workflowTemplateNameRequired: 'Podaj nazwę szablonu.',
+  confirmDeleteWorkflowTemplate: 'Usunąć szablon workflow?',
+  attachWorkflow: 'Podepnij workflow',
+  detachWorkflow: 'Odepnij workflow',
+  confirmDetachWorkflow: 'Odpiąć workflow od zamówienia? Postęp zadań zostanie usunięty.',
+  selectWorkflowTemplate: 'Wybierz szablon workflow',
+  noWorkflowAttached: 'Brak podpiętego workflow. Wybierz szablon, aby rozpocząć.',
+  workflow: 'Workflow',
+  workflowTasks: 'Zadania workflow',
+  tasks: 'Zadania',
+  addTask: 'Dodaj zadanie',
+  taskNamePlaceholder: 'Nazwa zadania',
+  taskType: 'Typ',
+  taskTypeCustom: 'Własne',
+  taskTypeImportStock: 'Import stanów magazynowych',
+  taskTypeGenerateShortage: 'Generowanie raportu zapotrzebowania',
+  taskTypeGenerateEmails: 'Generowanie maili do dostawców',
+  taskStatusTodo: 'Do zrobienia',
+  taskStatusInProgress: 'W trakcie',
+  taskStatusDone: 'Zrobione',
+  tasksDoneOf: 'Ukończono {done} z {total}',
+  taskStartDate: 'Start',
+  taskEndDate: 'Koniec',
+  taskDuration: 'Czas trwania',
+  totalDuration: 'Łącznie',
+  days: 'dni',
+  markInProgress: 'Rozpocznij',
+  markDone: 'Zakończ',
+  markTodo: 'Cofnij',
+  taskSkipWarning: 'Poprzednie zadania nie zostały ukończone. Kontynuować?',
+  ordersReports: 'Raporty zapotrzebowania',
+  ordersReportsEmpty: 'Brak raportów dla tego zamówienia.',
+  newReport: 'Powiąż raport',
+  selectPlan: 'Wybierz plan produkcyjny',
+  backToOrder: 'Wróć do zamówienia',
+  taskInProgressNote: 'Zadanie z workflow zamówienia jest w trakcie realizacji.',
+  taskAlreadyDoneNote: 'To zadanie z workflow zamówienia jest już oznaczone jako zrobione.',
+  markTaskDone: 'Oznacz zadanie jako zrobione',
+  reopenTask: 'Przywróć do realizacji',
+  openScreen: 'Wykonaj',
+  orderTemplate: 'Szablon',
+  orderEndDate: 'Data zakończenia',
+  changeStatus: 'Zmień status',
+  workflowTemplatePreview: 'Podgląd szablonu',
+  workflowTemplateDeleted: 'Szablon został usunięty',
+  orderDeleted: 'Powiązane zamówienie zostało usunięte',
+  orderDeletedTag: 'zamówienie usunięte',
+  goToReportsView: 'Otwórz widok raportów',
+  linkOrder: 'Powiąż z zamówieniem',
+  unlinkOrder: 'Odepnij zamówienie',
 };
 
 const en: T = {
@@ -1173,6 +1320,11 @@ const en: T = {
   dashboardWelcomeTagline: 'Plan production, spot shortages, send RFQ emails — all in one place.',
   dashboardWelcomeMottoIntro: 'Pracuj z uśmiechem i powtarzaj nasze motto:',
   dashboardWelcomeMotto: 'Od jednego strzała jeszcze nikt się nie uzależnił',
+  dashboardActiveOrders: 'Active orders',
+  dashboardActiveOrdersHint: 'Progress for each in-flight order',
+  dashboardNoActiveOrders: 'No active orders.',
+  dashboardOrdersSeeAll: 'All orders',
+  dashboardOrderNoTasks: 'No tasks in workflow',
   loadDemoTitle: 'Demo data',
   loadDemoBody:
     'Loads a fictional company: 4 suppliers, 7 raw materials (one factory-supplied and one out of stock), 3 components, one product with a recipe, a ready plan for 1000 units, and stock snapshots. After loading you can compute shortages and generate emails right away.',
@@ -1282,6 +1434,74 @@ const en: T = {
   linkedReportDeleted: 'The linked shortage report has been deleted and is no longer available.',
   linkedPlanDeletedTag: 'plan deleted',
   linkedReportDeletedTag: 'report deleted',
+  orders: 'Orders',
+  ordersEmpty: 'No orders yet. Create the first order to get started.',
+  orderNew: 'New order',
+  orderName: 'Order name',
+  orderStartDate: 'Start date',
+  orderStatus: 'Status',
+  orderStatusDraft: 'Draft',
+  orderStatusInProgress: 'In progress',
+  orderStatusCompleted: 'Completed',
+  orderStatusCancelled: 'Cancelled',
+  orderNotes: 'Notes',
+  orderDetails: 'Order details',
+  confirmDeleteOrder: 'Delete order?',
+  workflowTemplates: 'Workflow templates',
+  workflowTemplatesEmpty: 'No templates yet. Create one to speed up order processing.',
+  workflowTemplateNew: 'New template',
+  workflowTemplateNamePlaceholder: 'e.g. Standard order workflow',
+  workflowTemplateNoTasks: 'Add tasks to the template.',
+  workflowTemplateNameRequired: 'Template name is required.',
+  confirmDeleteWorkflowTemplate: 'Delete workflow template?',
+  attachWorkflow: 'Attach workflow',
+  detachWorkflow: 'Detach workflow',
+  confirmDetachWorkflow: 'Detach workflow from this order? Task progress will be lost.',
+  selectWorkflowTemplate: 'Select a workflow template',
+  noWorkflowAttached: 'No workflow attached. Select a template to start.',
+  workflow: 'Workflow',
+  workflowTasks: 'Workflow tasks',
+  tasks: 'Tasks',
+  addTask: 'Add task',
+  taskNamePlaceholder: 'Task name',
+  taskType: 'Type',
+  taskTypeCustom: 'Custom',
+  taskTypeImportStock: 'Import stock',
+  taskTypeGenerateShortage: 'Generate shortage report',
+  taskTypeGenerateEmails: 'Generate supplier emails',
+  taskStatusTodo: 'To do',
+  taskStatusInProgress: 'In progress',
+  taskStatusDone: 'Done',
+  tasksDoneOf: '{done} of {total} completed',
+  taskStartDate: 'Start',
+  taskEndDate: 'End',
+  taskDuration: 'Duration',
+  totalDuration: 'Total',
+  days: 'days',
+  markInProgress: 'Start',
+  markDone: 'Complete',
+  markTodo: 'Reset',
+  taskSkipWarning: 'Previous tasks are not yet done. Continue anyway?',
+  ordersReports: 'Shortage reports',
+  ordersReportsEmpty: 'No shortage reports for this order yet.',
+  newReport: 'Link report',
+  selectPlan: 'Select a production plan',
+  backToOrder: 'Back to order',
+  taskInProgressNote: 'A workflow task from an order is currently in progress.',
+  taskAlreadyDoneNote: 'This workflow task is already marked as done.',
+  markTaskDone: 'Mark task as done',
+  reopenTask: 'Reopen task',
+  openScreen: 'Run',
+  orderTemplate: 'Template',
+  orderEndDate: 'End date',
+  changeStatus: 'Change status',
+  workflowTemplatePreview: 'Template preview',
+  workflowTemplateDeleted: 'Template deleted',
+  orderDeleted: 'Linked order has been deleted',
+  orderDeletedTag: 'order deleted',
+  goToReportsView: 'Open reports view',
+  linkOrder: 'Link to order',
+  unlinkOrder: 'Unlink order',
 };
 
 export const translations: Record<Lang, T> = { pl, en };

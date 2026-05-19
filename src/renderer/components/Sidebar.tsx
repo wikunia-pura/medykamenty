@@ -9,6 +9,7 @@ interface NavItem {
   icon: string;
   group:
     | 'dashboard'
+    | 'orders'
     | 'workflow'
     | 'plan'
     | 'tools'
@@ -26,6 +27,7 @@ interface Props {
 
 const groupLabels: Record<NonNullable<NavItem['group']>, string | null> = {
   dashboard: null,
+  orders: 'Zamówienia',
   workflow: 'Zapotrzebowanie',
   plan: 'Plan',
   tools: 'Narzędzia',
@@ -55,6 +57,8 @@ const Sidebar: React.FC<Props> = ({ current, onSelect, userEmail, onSignOut }) =
 
   const items: NavItem[] = [
     { key: 'dashboard', label: t.dashboard, icon: '◇', group: 'dashboard' },
+    { key: 'orders', label: t.orders, icon: '▤', group: 'orders' },
+    { key: 'workflowTemplates', label: t.workflowTemplates, icon: '☷', group: 'orders' },
     { key: 'stockImport', label: t.stockImport, icon: '⇪', group: 'workflow', step: 1 },
     { key: 'shortageReport', label: t.shortageReport, icon: '⚠', group: 'workflow', step: 2 },
     { key: 'emailGenerator', label: t.emailGenerator, icon: '✉', group: 'workflow', step: 3 },

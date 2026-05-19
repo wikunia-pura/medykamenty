@@ -67,6 +67,27 @@ create table if not exists public.email_batches (
   data          jsonb       not null
 );
 
+create table if not exists public.orders (
+  id          uuid        primary key,
+  data        jsonb       not null,
+  updated_at  timestamptz not null default now()
+);
+
+create table if not exists public.workflow_templates (
+  id          uuid        primary key,
+  data        jsonb       not null,
+  updated_at  timestamptz not null default now()
+);
+
+-- Link reports / email batches to an order. Nullable: legacy rows + reports
+-- generated outside an order context have no order. Set null on order delete
+-- so history survives the order's removal.
+alter table public.shortage_reports
+  add column if not exists order_id uuid references public.orders(id) on delete set null;
+
+alter table public.email_batches
+  add column if not exists order_id uuid references public.orders(id) on delete set null;
+
 -- Aliases learned from stock import: future occurrences of `alias` will auto-match
 -- to `target_id`. Stored normalized (lowercase, diacritics stripped, spaces collapsed)
 -- so lookup is a plain `=` on `alias_normalized`.
@@ -99,6 +120,18 @@ create index if not exists idx_shortage_reports_computed
 create index if not exists idx_email_batches_generated
   on public.email_batches (generated_at desc);
 
+create index if not exists idx_orders_updated
+  on public.orders (updated_at desc);
+
+create index if not exists idx_workflow_templates_updated
+  on public.workflow_templates (updated_at desc);
+
+create index if not exists idx_shortage_reports_order
+  on public.shortage_reports (order_id);
+
+create index if not exists idx_email_batches_order
+  on public.email_batches (order_id);
+
 create index if not exists idx_production_plans_updated
   on public.production_plans (updated_at desc);
 
@@ -130,6 +163,8 @@ alter table public.shortage_reports      enable row level security;
 alter table public.email_batches         enable row level security;
 alter table public.raw_material_aliases  enable row level security;
 alter table public.component_aliases     enable row level security;
+alter table public.orders                enable row level security;
+alter table public.workflow_templates    enable row level security;
 
 drop policy if exists "authenticated_all" on public.suppliers;
 drop policy if exists "authenticated_all" on public.raw_materials;
@@ -141,6 +176,8 @@ drop policy if exists "authenticated_all" on public.shortage_reports;
 drop policy if exists "authenticated_all" on public.email_batches;
 drop policy if exists "authenticated_all" on public.raw_material_aliases;
 drop policy if exists "authenticated_all" on public.component_aliases;
+drop policy if exists "authenticated_all" on public.orders;
+drop policy if exists "authenticated_all" on public.workflow_templates;
 
 create policy "authenticated_all" on public.suppliers
   for all to authenticated using (true) with check (true);
@@ -170,4 +207,10 @@ create policy "authenticated_all" on public.raw_material_aliases
   for all to authenticated using (true) with check (true);
 
 create policy "authenticated_all" on public.component_aliases
+  for all to authenticated using (true) with check (true);
+
+create policy "authenticated_all" on public.orders
+  for all to authenticated using (true) with check (true);
+
+create policy "authenticated_all" on public.workflow_templates
   for all to authenticated using (true) with check (true);
