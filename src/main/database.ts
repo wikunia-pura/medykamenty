@@ -65,8 +65,16 @@ function withReportName(e: ShortageReportEntry): ShortageReportEntry {
 }
 
 function withBatchReportName(b: EmailBatch): EmailBatch {
-  if (b.reportName) return b;
-  return { ...b, reportName: defaultReportName(b.planName, b.reportComputedAt) };
+  let next = b;
+  if (!next.reportName) {
+    next = { ...next, reportName: defaultReportName(next.planName, next.reportComputedAt) };
+  }
+  // batchName is a separate user-facing label that defaults to the report name
+  // for existing batches that predate the field.
+  if (!next.batchName) {
+    next = { ...next, batchName: next.reportName };
+  }
+  return next;
 }
 
 // Settings remain machine-local: language, dark mode, last import dir, llm prefs
@@ -263,6 +271,13 @@ export default class Database {
     return updated;
   }
 
+  async duplicateSupplier(id: string): Promise<Supplier> {
+    const original = await this.getSupplier(id);
+    if (!original) throw new Error(`Supplier ${id} not found`);
+    const { id: _id, createdAt: _ca, updatedAt: _ua, ...rest } = original;
+    return this.createSupplier({ ...rest, name: `${original.name} (kopia)` });
+  }
+
   async deleteSupplier(id: string): Promise<{ ok: boolean; blockedBy?: string[] }> {
     const blockedBy: string[] = [];
     const rawMaterials = await this.listRawMaterials();
@@ -324,6 +339,13 @@ export default class Database {
       .eq('id', id);
     if (error) throw new Error(`updateRawMaterial: ${error.message}`);
     return updated;
+  }
+
+  async duplicateRawMaterial(id: string): Promise<RawMaterial> {
+    const original = await this.getRawMaterial(id);
+    if (!original) throw new Error(`RawMaterial ${id} not found`);
+    const { id: _id, createdAt: _ca, updatedAt: _ua, ...rest } = original;
+    return this.createRawMaterial({ ...rest, name: `${original.name} (kopia)` });
   }
 
   async deleteRawMaterial(id: string): Promise<{ ok: boolean; blockedBy?: string[] }> {
@@ -394,6 +416,13 @@ export default class Database {
       .eq('id', id);
     if (error) throw new Error(`updateComponent: ${error.message}`);
     return updated;
+  }
+
+  async duplicateComponent(id: string): Promise<PackagingComponent> {
+    const original = await this.getComponent(id);
+    if (!original) throw new Error(`Component ${id} not found`);
+    const { id: _id, createdAt: _ca, updatedAt: _ua, ...rest } = original;
+    return this.createComponent({ ...rest, name: `${original.name} (kopia)` });
   }
 
   async deleteComponent(id: string): Promise<{ ok: boolean; blockedBy?: string[] }> {
@@ -884,7 +913,7 @@ export default class Database {
 
   async updateShortageReport(
     id: string,
-    patch: { reportName?: string; orderId?: string | null },
+    patch: { reportName?: string; orderId?: string | null; archived?: boolean },
   ): Promise<ShortageReportEntry | undefined> {
     const existing = await this.getShortageReport(id);
     if (!existing) return undefined;
@@ -895,6 +924,10 @@ export default class Database {
       if (patch.orderId === null) delete next.orderId;
       else next.orderId = patch.orderId;
     }
+    if (patch.archived !== undefined) {
+      if (patch.archived) next.archived = true;
+      else delete next.archived;
+    }
     const { rest } = splitId(next);
     // Mirror order_id on the top-level column so list filters keep working.
     const update: Record<string, unknown> = { data: rest };
@@ -904,6 +937,61 @@ export default class Database {
       .update(update)
       .eq('id', id);
     if (error) throw new Error(`updateShortageReport: ${error.message}`);
+
+    // Cascade order link and archived flag to any email batches generated
+    // from this report — OrderDetails filters batches by orderId, and the
+    // email batch list hides archived entries.
+    if (patch.orderId !== undefined || patch.archived !== undefined) {
+      const { data: batchRows, error: batchListErr } = await getSupabase()
+        .from('email_batches')
+        .select('id, data')
+        .eq('report_id', id);
+      if (batchListErr) {
+        throw new Error(`updateShortageReport: ${batchListErr.message}`);
+      }
+      for (const row of batchRows ?? []) {
+        const batch = rebuild<EmailBatch>(row);
+        if (patch.orderId !== undefined) {
+          if (patch.orderId === null) delete batch.orderId;
+          else batch.orderId = patch.orderId;
+        }
+        if (patch.archived !== undefined) {
+          if (patch.archived) batch.archived = true;
+          else delete batch.archived;
+        }
+        const { rest } = splitId(batch);
+        const batchUpdate: Record<string, unknown> = { data: rest };
+        if (patch.orderId !== undefined) batchUpdate.order_id = patch.orderId;
+        const { error: upErr } = await getSupabase()
+          .from('email_batches')
+          .update(batchUpdate)
+          .eq('id', row.id);
+        if (upErr) throw new Error(`updateShortageReport: ${upErr.message}`);
+      }
+    }
+
+    return next;
+  }
+
+  async setReportSupplierReceived(
+    reportId: string,
+    supplierId: string,
+    receivedAt: string | null,
+  ): Promise<ShortageReportEntry | undefined> {
+    const existing = await this.getShortageReport(reportId);
+    if (!existing) return undefined;
+    const next: ShortageReportEntry = withReportName({ ...existing });
+    const receipts = (next.supplierReceipts ?? []).filter(
+      (r) => r.supplierId !== supplierId,
+    );
+    if (receivedAt) receipts.push({ supplierId, receivedAt });
+    next.supplierReceipts = receipts;
+    const { rest } = splitId(next);
+    const { error } = await getSupabase()
+      .from('shortage_reports')
+      .update({ data: rest })
+      .eq('id', reportId);
+    if (error) throw new Error(`setReportSupplierReceived: ${error.message}`);
     return next;
   }
 
@@ -961,6 +1049,29 @@ export default class Database {
     const { error } = await getSupabase().from('email_batches').delete().eq('id', id);
     if (error) throw new Error(`deleteEmailBatch: ${error.message}`);
     return { ok: true };
+  }
+
+  async updateEmailBatch(
+    id: string,
+    patch: { batchName?: string; orderId?: string | null },
+  ): Promise<EmailBatch | undefined> {
+    const existing = await this.getEmailBatch(id);
+    if (!existing) return undefined;
+    const next: EmailBatch = withBatchReportName({ ...existing });
+    if (patch.batchName !== undefined) next.batchName = patch.batchName;
+    if (patch.orderId !== undefined) {
+      if (patch.orderId === null) delete next.orderId;
+      else next.orderId = patch.orderId;
+    }
+    const { rest } = splitId(next);
+    const update: Record<string, unknown> = { data: rest };
+    if (patch.orderId !== undefined) update.order_id = patch.orderId;
+    const { error } = await getSupabase()
+      .from('email_batches')
+      .update(update)
+      .eq('id', id);
+    if (error) throw new Error(`updateEmailBatch: ${error.message}`);
+    return next;
   }
 
   async updateBatchEmail(
@@ -1042,6 +1153,17 @@ export default class Database {
     return updated;
   }
 
+  async duplicateWorkflowTemplate(id: string): Promise<WorkflowTemplate> {
+    const original = await this.getWorkflowTemplate(id);
+    if (!original) throw new Error(`WorkflowTemplate ${id} not found`);
+    const { id: _id, createdAt: _ca, updatedAt: _ua, tasks, ...rest } = original;
+    return this.createWorkflowTemplate({
+      ...rest,
+      name: `${original.name} (kopia)`,
+      tasks: tasks.map(t => ({ ...t, id: newId() })),
+    });
+  }
+
   async deleteWorkflowTemplate(id: string): Promise<{ ok: boolean }> {
     const { error } = await getSupabase().from('workflow_templates').delete().eq('id', id);
     if (error) throw new Error(`deleteWorkflowTemplate: ${error.message}`);
@@ -1107,6 +1229,29 @@ export default class Database {
     return updated;
   }
 
+  async duplicateOrder(id: string): Promise<Order> {
+    const original = await this.getOrder(id);
+    if (!original) throw new Error(`Order ${id} not found`);
+    const { id: _id, createdAt: _ca, updatedAt: _ua, workflow, ...rest } = original;
+    const duplicatedWorkflow = workflow
+      ? {
+          ...workflow,
+          tasks: workflow.tasks.map(t => ({
+            ...t,
+            id: newId(),
+            status: 'todo' as const,
+            completedAt: undefined,
+          })),
+        }
+      : undefined;
+    return this.createOrder({
+      ...rest,
+      name: `${original.name} (kopia)`,
+      status: 'draft',
+      ...(duplicatedWorkflow ? { workflow: duplicatedWorkflow } : {}),
+    });
+  }
+
   async deleteOrder(id: string): Promise<{ ok: boolean }> {
     // Clear order_id on linked reports/batches (don't cascade-delete — user may
     // want to keep the report history even after deleting the order).
@@ -1170,6 +1315,12 @@ export default class Database {
     if (patch.status !== undefined) {
       next.completedAt = patch.status === 'done' ? nowIso() : undefined;
     }
+    // Normalize note: trim, and drop the field entirely when blank.
+    if (patch.note !== undefined) {
+      const trimmed = patch.note?.trim();
+      if (trimmed) next.note = trimmed;
+      else delete next.note;
+    }
     const tasks = [...order.workflow.tasks];
     tasks[idx] = next;
     const updated: Order = {
@@ -1189,7 +1340,7 @@ export default class Database {
 
   async addOrderTask(
     orderId: string,
-    input: { name: string; type: TaskType; durationDays: number },
+    input: { name: string; type: TaskType; durationDays: number; note?: string },
     insertAtIndex?: number,
   ): Promise<Order> {
     const order = await this.getOrder(orderId);
@@ -1205,6 +1356,7 @@ export default class Database {
       status: 'todo',
       startDate: order.startDate,
       endDate: order.startDate,
+      ...(input.note?.trim() ? { note: input.note.trim() } : {}),
     };
     // Stash durationDays on the task so the chain recomputation can read it.
     (newTask as TaskInstance & { _durationDays?: number })._durationDays = input.durationDays;

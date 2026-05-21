@@ -33,6 +33,7 @@ const findByName = <T extends { name: string }>(
 
 const SUPPLIER_COLUMNS = [
   'name',
+  'type',
   'email',
   'phone',
   'contactPerson',
@@ -47,6 +48,7 @@ export function exportSuppliersCsv(items: Supplier[]): {
 } {
   const rows = items.map((s) => ({
     name: s.name,
+    type: s.type ?? '',
     email: s.email,
     phone: s.phone ?? '',
     contactPerson: s.contactPerson ?? '',
@@ -73,9 +75,14 @@ export async function importSuppliersCsv(
       continue;
     }
     const lang = (r.preferredEmailLanguage ?? '').trim().toLowerCase();
+    const rawType = (r.type ?? '').trim().toLowerCase();
     const payload = {
       name,
       email: (r.email ?? '').trim(),
+      type:
+        rawType === 'raw' || rawType === 'component'
+          ? (rawType as 'raw' | 'component')
+          : undefined,
       phone: r.phone?.trim() || undefined,
       contactPerson: r.contactPerson?.trim() || undefined,
       paymentTerms: r.paymentTerms?.trim() || undefined,

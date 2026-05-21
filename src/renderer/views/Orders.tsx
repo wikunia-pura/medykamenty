@@ -6,8 +6,17 @@ import OrderEditorModal from '../components/OrderEditorModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
+import TaskNoteDialog from '../components/TaskNoteDialog';
 import TaskProgressBar, { type TaskAction } from '../components/TaskProgressBar';
-import { IconEdit, IconTrash, IconPlus } from '../components/Icons';
+import {
+  IconDuplicate,
+  IconEdit,
+  IconPlus,
+  IconSettings,
+  IconTrash,
+} from '../components/Icons';
+import ModalHeader from '../components/ModalHeader';
+import { useEscapeKey } from '../utils/useEscapeKey';
 
 interface Props {
   onOpenOrder: (id: string) => void;
@@ -34,6 +43,11 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editingNote, setEditingNote] =
+    useState<{ orderId: string; task: TaskInstance } | null>(null);
+  useEscapeKey(() => setSettingsOpen(false), settingsOpen);
 
   const reload = async () => {
     try {
@@ -69,6 +83,7 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
           startDate,
           status: editing.status ?? 'draft',
           notes: editing.notes,
+          archived: editing.archived ?? false,
         });
       } else {
         const created = await window.electronAPI.createOrder({
@@ -137,6 +152,8 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
         }
       }
       onNavigateForTask(target, order.id, task.id);
+    } else if (action.kind === 'editNote') {
+      setEditingNote({ orderId: order.id, task });
     }
   };
 
@@ -159,7 +176,9 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
     { value: 'cancelled', label: t.orderStatusCancelled },
   ];
 
-  const filtered = items.filter((o) => matchesQuery(o, query));
+  const visible = showArchived ? items : items.filter((o) => !o.archived);
+  const archivedCount = items.filter((o) => o.archived).length;
+  const filtered = visible.filter((o) => matchesQuery(o, query));
 
   return (
     <div className="main">
@@ -167,6 +186,16 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
         <HeaderNav />
         <h1>{t.orders}</h1>
         <span className="page-header-count">{items.length}</span>
+        <button
+          type="button"
+          className="btn btn-sm"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => setSettingsOpen(true)}
+          title={t.settings}
+          aria-label={t.settings}
+        >
+          <IconSettings size={14} />
+        </button>
       </div>
 
       <div className="card">
@@ -186,7 +215,7 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
           </div>
         )}
         <div className="table-wrap">
-          <table className="table">
+          <table className="table orders-list-table">
             <thead>
               <tr>
                 <th className="col-w-lg">{t.name}</th>
@@ -211,13 +240,18 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
                 return (
                   <tr
                     key={o.id}
-                    className="row-clickable"
+                    className={`row-clickable${o.archived ? ' row-archived' : ''}`}
                     onClick={() => onOpenOrder(o.id)}
                     title={t.orderDetails}
                   >
-                    <td className="col-name col-wrap">
+                    <td className="col-name">
                       <div className="orders-name-cell">
                         <span className="orders-name-text">{o.name}</span>
+                        {o.archived && (
+                          <span className="tag" title={t.archivedTag}>
+                            {t.archivedTag}
+                          </span>
+                        )}
                         <select
                           className={`status-inline-select order-status-${o.status}`}
                           value={o.status}
@@ -266,6 +300,16 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
                           <IconEdit size={13} /> {t.edit}
                         </button>
                         <button
+                          className="btn btn-sm soft-success"
+                          onClick={async () => {
+                            await window.electronAPI.duplicateOrder(o.id);
+                            await reload();
+                          }}
+                          title={t.duplicate}
+                        >
+                          <IconDuplicate size={13} /> {t.duplicate}
+                        </button>
+                        <button
                           className="btn btn-sm soft-danger"
                           onClick={() => setConfirmDelete(o)}
                           title={t.delete}
@@ -298,6 +342,64 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
           onConfirm={() => onDelete(confirmDelete)}
           onCancel={() => setConfirmDelete(null)}
         />
+      )}
+
+      {editingNote && (
+        <TaskNoteDialog
+          task={editingNote.task}
+          onCancel={() => setEditingNote(null)}
+          onSave={async (note) => {
+            const { orderId, task } = editingNote;
+            setBusy(true);
+            try {
+              await window.electronAPI.updateOrderTask(orderId, task.id, { note });
+              await reload();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setBusy(false);
+              setEditingNote(null);
+            }
+          }}
+        />
+      )}
+
+      {settingsOpen && (
+        <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <ModalHeader
+              icon={<IconSettings size={18} />}
+              tone="edit"
+              title={t.settings}
+              onClose={() => setSettingsOpen(false)}
+            />
+            <div className="modal-body">
+              <label className="settings-toggle-row">
+                <span>
+                  {t.showArchived}
+                  {archivedCount > 0 && (
+                    <span className="hint" style={{ marginLeft: 6 }}>
+                      ({archivedCount})
+                    </span>
+                  )}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(ev) => setShowArchived(ev.target.checked)}
+                />
+              </label>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn primary-filled"
+                onClick={() => setSettingsOpen(false)}
+              >
+                {t.close}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {busy && <LoadingOverlay message={t.loaderProcessing} />}

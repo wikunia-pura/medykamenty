@@ -20,33 +20,45 @@ interface GenerateOptions {
 function formatLine(line: ShortageLine, lang: Lang): string {
   const qty = line.suggestedOrder.toFixed(line.unit === 'pcs' ? 0 : 2);
   const unit = line.unit === 'pcs' ? (lang === 'pl' ? 'szt.' : 'pcs') : line.unit;
-  const moqInfo = line.moq ? ` (MOQ: ${line.moq} ${unit})` : '';
-  return `- ${line.itemName} — ${qty} ${unit}${moqInfo}`;
+  return `- ${line.itemName} — ${qty} ${unit}`;
+}
+
+// Components-only groups use the order template; raw-material groups (and the
+// rare mixed group, which shouldn't happen once suppliers have a `type`) use
+// the inquiry template that also asks for expiry date.
+function isComponentGroup(group: ShortageGroup): boolean {
+  const hasRaw = group.rawLines.some((l) => l.shortage > 0);
+  const hasComponent = group.componentLines.some((l) => l.shortage > 0);
+  return hasComponent && !hasRaw;
 }
 
 function buildBody(group: ShortageGroup, lang: Lang): string {
-  const allLines = [...group.rawLines, ...group.componentLines].filter((l) => l.shortage > 0);
-  const today = new Date().toISOString().slice(0, 10);
+  const lines = [...group.rawLines, ...group.componentLines].filter((l) => l.shortage > 0);
+  const items = lines.map((l) => formatLine(l, lang)).join('\n');
+  const componentOnly = isComponentGroup(group);
 
   if (lang === 'pl') {
-    const intro = `Dzień dobry,\n\nZwracam się z prośbą o wycenę następujących pozycji:\n`;
-    const items = allLines.map((l) => formatLine(l, 'pl')).join('\n');
-    const outro =
-      '\n\nProszę o potwierdzenie ceny netto, dostępności, czasu realizacji oraz terminu ważności.\n' +
-      `Data zapytania: ${today}.\n\nPozdrawiam,\nCutis`;
-    return `${intro}${items}${outro}`;
+    if (componentOnly) {
+      return `Dzień dobry, uprzejmie proszę o informację o cenie oraz czasie realizacji zamówienia na poniższe produkty:\n\n${items}`;
+    }
+    return `Dzień dobry,\n\nUprzejmie proszę o informację o cenie, czasie realizacji zamówienia oraz terminie ważności dla:\n${items}`;
   }
-  const intro = `Hello,\n\nI would like to request a quote for the following items:\n`;
-  const items = allLines.map((l) => formatLine(l, 'en')).join('\n');
-  const outro =
-    '\n\nPlease confirm net price, availability, lead time, and expiry date.\n' +
-    `Request date: ${today}.\n\nBest regards,\nCutis`;
-  return `${intro}${items}${outro}`;
+  if (componentOnly) {
+    return `Hello, I would like to request a quote and lead time for the following products:\n\n${items}`;
+  }
+  return `Hello,\n\nI would like to request a quote, lead time, and expiry date for:\n${items}`;
 }
 
-function buildSubject(lang: Lang): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return lang === 'pl' ? `Zapytanie ofertowe — ${today}` : `Quote request — ${today}`;
+function buildSubject(group: ShortageGroup, lang: Lang): string {
+  if (isComponentGroup(group)) {
+    return lang === 'pl' ? 'Zamówienie myLab' : 'myLab order';
+  }
+  const rawNames = group.rawLines.filter((l) => l.shortage > 0).map((l) => l.itemName);
+  const componentNames = group.componentLines.filter((l) => l.shortage > 0).map((l) => l.itemName);
+  const names = (rawNames.length > 0 ? rawNames : componentNames).join(', ');
+  return lang === 'pl'
+    ? `Pytanie o dostępność surowca ${names}`
+    : `Raw material availability inquiry: ${names}`;
 }
 
 export async function generateEmailsForReport(
@@ -68,13 +80,14 @@ export async function generateEmailsForReport(
     const lang: Lang = supplier?.preferredEmailLanguage ?? opts.language;
 
     let body = buildBody(group, lang);
+    const subject = buildSubject(group, lang);
     let refinedByAI = false;
 
     if (opts.useAI && isAiAvailable()) {
       try {
         body = await rewriteEmail(body, lang, {
           supplierName: group.supplierName,
-          subject: buildSubject(lang),
+          subject,
         });
         refinedByAI = true;
       } catch (err) {
@@ -88,7 +101,7 @@ export async function generateEmailsForReport(
       supplierName: group.supplierName,
       to: group.supplierEmail ?? '',
       language: lang,
-      subject: buildSubject(lang),
+      subject,
       body,
       lines,
       refinedByAI,
@@ -101,6 +114,7 @@ export async function generateEmailsForReport(
     planId: entry.planId,
     planName: entry.planName,
     reportName: entry.reportName,
+    batchName: entry.reportName,
     reportComputedAt: entry.computedAt,
     generatedAt: nowIso(),
     language: opts.language,
@@ -132,7 +146,7 @@ export async function regenerateBatchEmail(
   };
 
   let body = buildBody(group, opts.language);
-  const subject = buildSubject(opts.language);
+  const subject = buildSubject(group, opts.language);
   let refinedByAI = false;
 
   if (opts.useAI && isAiAvailable()) {

@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Footer from './components/Footer';
 import UpdateNotification from './components/UpdateNotification';
+import ExistingBatchChooser from './components/ExistingBatchChooser';
 import { I18nProvider } from './i18n';
 import { NavigationProvider } from './navigation';
-import type { Lang, AppSettings, TaskStatus } from '../shared/types';
+import type { EmailBatch, Lang, AppSettings, TaskStatus } from '../shared/types';
 import type { ViewKey } from './views/types';
 import Dashboard from './views/Dashboard';
 import Products from './views/Products';
@@ -38,9 +39,30 @@ const App: React.FC = () => {
   const canGoForward = nav.index < nav.stack.length - 1;
   const [sidebarTick, setSidebarTick] = useState(0);
 
+  const pushView = (next: ViewKey) => {
+    setNav((prev) => {
+      if (prev.stack[prev.index] === next) return prev;
+      const truncated = prev.stack.slice(0, prev.index + 1);
+      const stack = [...truncated, next];
+      if (stack.length > NAV_STACK_LIMIT) {
+        const trimmed = stack.slice(stack.length - NAV_STACK_LIMIT);
+        return { stack: trimmed, index: trimmed.length - 1 };
+      }
+      return { stack, index: stack.length - 1 };
+    });
+  };
+
   const setView = (next: ViewKey) => {
     setNav((prev) => {
       if (prev.stack[prev.index] === next) return prev;
+      // If the caller is navigating to the entry directly before the current
+      // one, treat it as Back: decrement the index instead of pushing a
+      // duplicate. This makes hardcoded "back to parent" buttons (e.g.
+      // OrderDetails → Orders, task screen → OrderDetails) preserve forward
+      // history and avoid stacking duplicates.
+      if (prev.index > 0 && prev.stack[prev.index - 1] === next) {
+        return { ...prev, index: prev.index - 1 };
+      }
       const truncated = prev.stack.slice(0, prev.index + 1);
       const stack = [...truncated, next];
       if (stack.length > NAV_STACK_LIMIT) {
@@ -55,8 +77,10 @@ const App: React.FC = () => {
     resetShortageReportFocus();
     resetEmailGeneratorFocus();
     setOrderTaskCtx(null);
+    setFocusReportId('');
+    setFocusBatchId('');
     setSidebarTick((n) => n + 1);
-    setView(next);
+    pushView(next);
   };
 
   const goBack = () =>
@@ -93,6 +117,13 @@ const App: React.FC = () => {
     hasLocalData: boolean;
     migrated: boolean;
   } | null>(null);
+  // Pre-navigation chooser: when the user requests email generation for a
+  // report that already has 1+ batches, we hold the matches here and let the
+  // user decide before moving them off the current view.
+  const [pendingEmailChooser, setPendingEmailChooser] = useState<{
+    reportId: string;
+    batches: EmailBatch[];
+  } | null>(null);
 
   const handleSignedIn = async () => {
     const s = await window.electronAPI.authGetSession();
@@ -126,10 +157,38 @@ const App: React.FC = () => {
     }
   };
 
-  const navigateToEmails = (reportId: string) => {
+  // Actually leave the current view and (re)generate fresh emails for the
+  // given report. Used both for the no-existing-batches path and for the
+  // "Generate new" action inside the chooser.
+  const proceedToGenerateEmails = (reportId: string) => {
     if (reportId) setSelectedReportId(reportId);
     setAutoGenerateEmails(true);
     setView('emailGenerator');
+  };
+
+  const navigateToEmails = async (reportId: string) => {
+    if (!reportId) {
+      proceedToGenerateEmails(reportId);
+      return;
+    }
+    try {
+      const all = await window.electronAPI.listEmailBatches();
+      const existing = all
+        .filter((b) => b.reportId === reportId)
+        .sort(
+          (a, b) =>
+            new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime(),
+        );
+      if (existing.length > 0) {
+        // Don't navigate — wait for the user to pick an option in the modal.
+        setPendingEmailChooser({ reportId, batches: existing });
+        return;
+      }
+    } catch (err) {
+      console.error('Failed to check existing email batches', err);
+      // Fall through to the default generate flow on error.
+    }
+    proceedToGenerateEmails(reportId);
   };
 
   const navigateToReport = (planId: string, reportId: string) => {
@@ -153,6 +212,7 @@ const App: React.FC = () => {
     target: 'stockImport' | 'shortageReport' | 'emailGenerator',
     orderId: string,
     taskId: string,
+    extras?: { focusReportId?: string; focusBatchId?: string; planId?: string },
   ) => {
     let orderName = '';
     let taskStatus: TaskStatus = 'in_progress';
@@ -166,6 +226,9 @@ const App: React.FC = () => {
     }
     setSelectedOrderId(orderId);
     setOrderTaskCtx({ orderId, taskId, orderName, taskStatus });
+    if (extras?.planId) setSelectedPlanId(extras.planId);
+    if (extras?.focusReportId) setFocusReportId(extras.focusReportId);
+    if (extras?.focusBatchId) setFocusBatchId(extras.focusBatchId);
     setView(target);
   };
 
@@ -353,7 +416,7 @@ const App: React.FC = () => {
           <OrderDetails
             key={`order-${selectedOrderId}`}
             orderId={selectedOrderId}
-            onBack={() => setView('orders')}
+            onBack={() => (canGoBack ? goBack() : setView('orders'))}
             onNavigateToReport={navigateToReport}
             onNavigateToEmails={navigateToEmails}
             onNavigateToBatch={navigateToBatch}
@@ -471,6 +534,21 @@ const App: React.FC = () => {
             {renderView()}
           </div>
         </NavigationProvider>
+        {pendingEmailChooser && (
+          <ExistingBatchChooser
+            batches={pendingEmailChooser.batches}
+            onOpen={(b) => {
+              setPendingEmailChooser(null);
+              navigateToBatch(b.id);
+            }}
+            onCreateNew={() => {
+              const reportId = pendingEmailChooser.reportId;
+              setPendingEmailChooser(null);
+              proceedToGenerateEmails(reportId);
+            }}
+            onCancel={() => setPendingEmailChooser(null)}
+          />
+        )}
         <Footer appVersion={appVersion} />
       </div>
     </I18nProvider>

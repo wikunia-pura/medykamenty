@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav, useNavigation } from '../navigation';
 import type {
@@ -8,6 +8,7 @@ import type {
   ProductionPlan,
   RFQEmailRecord,
   ShortageReportEntry,
+  Supplier,
 } from '../../shared/types';
 import type { ViewKey } from './types';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
@@ -16,15 +17,20 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import HoverTooltip from '../components/HoverTooltip';
 import PlanEditorModal from '../components/PlanEditorModal';
+import SupplierPickerModal from '../components/SupplierPickerModal';
+import ExistingBatchChooser from '../components/ExistingBatchChooser';
 import {
   IconArrowLeft,
   IconCheck,
   IconCopy,
+  IconEdit,
   IconEye,
   IconMail,
   IconPlus,
+  IconSettings,
   IconTrash,
 } from '../components/Icons';
+import ModalHeader from '../components/ModalHeader';
 
 interface Props {
   defaultLanguage: Lang;
@@ -90,11 +96,25 @@ const EmailGenerator: React.FC<Props> = ({
   const [focusQuery, setFocusQuery] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<EmailBatch | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [regenKey, setRegenKey] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  // Email whose supplier the user is changing via the modal. null = closed.
+  const [supplierPickerTarget, setSupplierPickerTarget] = useState<RFQEmailRecord | null>(
+    null,
+  );
   const [editingPlan, setEditingPlan] = useState<Partial<ProductionPlan> | null>(null);
   const [planModalReadOnly, setPlanModalReadOnly] = useState(false);
+  const [batchNameDraft, setBatchNameDraft] = useState<string | null>(null);
+  // When the user asks to generate emails for a report that already has one or
+  // more batches, this holds the matches so we can show the chooser modal.
+  const [existingChooser, setExistingChooser] = useState<{
+    reportId: string;
+    batches: EmailBatch[];
+  } | null>(null);
 
   const openPlanModal = (planId: string) => {
     const plan = plans.find((p) => p.id === planId);
@@ -129,16 +149,19 @@ const EmailGenerator: React.FC<Props> = ({
     reports: ShortageReportEntry[];
     batches: EmailBatch[];
   }> => {
-    const [reportsRes, batchesRes, plansRes, productsRes] = await Promise.allSettled([
-      window.electronAPI.listShortageReports(),
-      window.electronAPI.listEmailBatches(),
-      window.electronAPI.listPlans(),
-      window.electronAPI.listProducts(),
-    ]);
+    const [reportsRes, batchesRes, plansRes, productsRes, suppliersRes] =
+      await Promise.allSettled([
+        window.electronAPI.listShortageReports(),
+        window.electronAPI.listEmailBatches(),
+        window.electronAPI.listPlans(),
+        window.electronAPI.listProducts(),
+        window.electronAPI.listSuppliers(),
+      ]);
     const r = reportsRes.status === 'fulfilled' ? reportsRes.value : [];
     const b = batchesRes.status === 'fulfilled' ? batchesRes.value : [];
     const p = plansRes.status === 'fulfilled' ? plansRes.value : [];
     const pr = productsRes.status === 'fulfilled' ? productsRes.value : [];
+    const su = suppliersRes.status === 'fulfilled' ? suppliersRes.value : [];
     if (reportsRes.status === 'rejected') {
       console.error('listShortageReports failed', reportsRes.reason);
       setError((reportsRes.reason as Error)?.message ?? 'Failed to load reports');
@@ -150,6 +173,7 @@ const EmailGenerator: React.FC<Props> = ({
     setBatches(b);
     setPlans(p);
     setProducts(pr);
+    setSuppliers(su);
     setDataLoaded(true);
     return { reports: r, batches: b };
   };
@@ -172,7 +196,7 @@ const EmailGenerator: React.FC<Props> = ({
     [reports, selectedReportId],
   );
 
-  const generate = async (reportId: string) => {
+  const generate = async (reportId: string, originFromNav = false) => {
     if (!reportId) return;
     setBusy(true);
     setLoaderMessage(t.loaderGenerating);
@@ -183,7 +207,7 @@ const EmailGenerator: React.FC<Props> = ({
         useAI: useAiByDefault && aiAvailable,
       });
       await loadAll();
-      setFocusAndCache({ batch });
+      setFocusAndCache({ batch, originFromNav });
       if (typeof window !== 'undefined') {
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
@@ -195,11 +219,41 @@ const EmailGenerator: React.FC<Props> = ({
     }
   };
 
-  // Auto-generate when navigated here from a shortage report.
+  // Entry point for "generate" actions: if the report already has email
+  // batches, open the chooser so the user can either jump to an existing
+  // batch or explicitly opt into creating a new one. Otherwise generate
+  // straight away (current behavior).
+  const requestGenerate = (reportId: string) => {
+    if (!reportId) return;
+    const existing = batches
+      .filter((b) => b.reportId === reportId)
+      .sort(
+        (a, b) =>
+          new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime(),
+      );
+    if (existing.length > 0) {
+      setExistingChooser({ reportId, batches: existing });
+      return;
+    }
+    void generate(reportId);
+  };
+
+  // Auto-generate when navigated here from a shortage report. The caller
+  // (App.tsx) has already checked for existing batches and shown the chooser
+  // upstream, so here we just generate. The ref guard is required because
+  // React 18 StrictMode double-invokes effects in dev; without it the second
+  // pass would call generate again before the parent's autoGenerate flag
+  // flips, producing a duplicate batch.
+  const autoGenFiredRef = useRef<string | null>(null);
   useEffect(() => {
     if (!autoGenerate || !selectedReportId) return;
+    if (autoGenFiredRef.current === selectedReportId) return;
+    autoGenFiredRef.current = selectedReportId;
     onAutoGenerateConsumed?.();
-    void generate(selectedReportId);
+    // autoGenerate is only set by external callers (App helpers), so the
+    // resulting focus view's Back button should pop the nav stack, not just
+    // unfocus into the local batch list.
+    void generate(selectedReportId, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoGenerate, selectedReportId]);
 
@@ -222,6 +276,61 @@ const EmailGenerator: React.FC<Props> = ({
     } else {
       setFocusAndCache(null);
     }
+  };
+
+  const commitBatchNameRename = async () => {
+    if (!focus || batchNameDraft === null) return;
+    const next = batchNameDraft.trim();
+    setBatchNameDraft(null);
+    if (!next || next === focus.batch.batchName) return;
+    try {
+      const updated = await window.electronAPI.updateEmailBatch(focus.batch.id, {
+        batchName: next,
+      });
+      if (updated) {
+        setFocusAndCache({ batch: updated, originFromNav: focus.originFromNav });
+      }
+      await loadAll();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  // Reassign the email to a different supplier — updates the recipient on the
+  // email record only. The underlying raw materials / components keep their
+  // existing supplier links; if the report is recomputed later, the email will
+  // be regenerated against the current data.
+  const changeEmailSupplier = async (
+    batchId: string,
+    email: RFQEmailRecord,
+    newSupplierId: string,
+  ) => {
+    if (!newSupplierId) return;
+    const next = suppliers.find((s) => s.id === newSupplierId);
+    if (!next) return;
+    const updated = await window.electronAPI.updateBatchEmail(batchId, email.id, {
+      supplierId: next.id,
+      supplierName: next.name,
+      to: next.email ?? '',
+    });
+    if (updated) {
+      setFocusAndCache({ batch: updated, originFromNav: focus?.originFromNav });
+    }
+    await loadAll();
+    setSupplierPickerTarget(null);
+  };
+
+  // Pick the picker's type filter from the email's line mix — pure-raw emails
+  // get the 'raw' filter, pure-component emails get 'component', mixed (rare)
+  // gets no filter.
+  const emailSupplierTypeFilter = (
+    email: RFQEmailRecord,
+  ): 'raw' | 'component' | undefined => {
+    const hasRaw = email.lines.some((l) => l.itemKind === 'raw');
+    const hasComp = email.lines.some((l) => l.itemKind === 'component');
+    if (hasRaw && !hasComp) return 'raw';
+    if (hasComp && !hasRaw) return 'component';
+    return undefined;
   };
 
   const refreshFocus = async (batchId: string) => {
@@ -322,6 +431,30 @@ const EmailGenerator: React.FC<Props> = ({
     }
   };
 
+  const openExistingBatch = (batch: EmailBatch) => {
+    setExistingChooser(null);
+    setFocusAndCache({ batch });
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const generateFromChooser = () => {
+    if (!existingChooser) return;
+    const reportId = existingChooser.reportId;
+    setExistingChooser(null);
+    void generate(reportId);
+  };
+
+  const chooserElement = existingChooser ? (
+    <ExistingBatchChooser
+      batches={existingChooser.batches}
+      onOpen={openExistingBatch}
+      onCreateNew={generateFromChooser}
+      onCancel={() => setExistingChooser(null)}
+    />
+  ) : null;
+
   // ----- Focus view: a single batch -----
   if (focus) {
     const { batch } = focus;
@@ -347,9 +480,35 @@ const EmailGenerator: React.FC<Props> = ({
             <IconArrowLeft size={14} /> {t.backToList}
           </button>
           <div className="focus-bar-text">
-            <h1 className="focus-bar-title">
-              {t.emailBatchTitle}
-            </h1>
+            {batchNameDraft !== null ? (
+              <input
+                autoFocus
+                className="focus-bar-title-input"
+                value={batchNameDraft}
+                onChange={(e) => setBatchNameDraft(e.target.value)}
+                onBlur={() => void commitBatchNameRename()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void commitBatchNameRename();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setBatchNameDraft(null);
+                  }
+                }}
+              />
+            ) : (
+              <h1
+                className="focus-bar-title focus-bar-title-editable"
+                onClick={() =>
+                  setBatchNameDraft(batch.batchName || batch.reportName || '')
+                }
+                title={t.edit}
+              >
+                {batch.batchName || batch.reportName || t.emailBatchTitle}
+                <IconEdit size={13} className="focus-bar-title-pencil" />
+              </h1>
+            )}
             <span className="focus-bar-meta">
               <span className="hint">{t.reportName}:</span>{' '}
               <button
@@ -449,6 +608,15 @@ const EmailGenerator: React.FC<Props> = ({
                   )}
                 </div>
                 <div className="btn-row">
+                  <button
+                    className="btn btn-sm soft-edit"
+                    onClick={() => setSupplierPickerTarget(e)}
+                    title={e.supplierId ? t.changeSupplier : t.assignSupplier}
+                    disabled={isRegen}
+                  >
+                    <IconEdit size={13} />{' '}
+                    {e.supplierId ? t.changeSupplier : t.assignSupplier}
+                  </button>
                   <select
                     className="input email-lang-select"
                     value={e.language}
@@ -526,6 +694,20 @@ const EmailGenerator: React.FC<Props> = ({
             onEnterEdit={() => setPlanModalReadOnly(false)}
           />
         )}
+
+        {supplierPickerTarget && (
+          <SupplierPickerModal
+            suppliers={suppliers}
+            currentSupplierId={supplierPickerTarget.supplierId}
+            typeFilter={emailSupplierTypeFilter(supplierPickerTarget)}
+            onCancel={() => setSupplierPickerTarget(null)}
+            onPick={(id) =>
+              changeEmailSupplier(batch.id, supplierPickerTarget, id)
+            }
+          />
+        )}
+
+        {chooserElement}
       </div>
     );
   }
@@ -539,9 +721,13 @@ const EmailGenerator: React.FC<Props> = ({
   const selectedHasNoGroups =
     !!selectedReport && selectedReport.report.groups.length === 0;
 
-  const filteredBatches = !listQuery.trim()
+  const visibleBatches = showArchived
     ? batches
-    : batches.filter((b) => matchesQuery(b, listQuery));
+    : batches.filter((b) => !b.archived);
+  const archivedBatchesCount = batches.filter((b) => b.archived).length;
+  const filteredBatches = !listQuery.trim()
+    ? visibleBatches
+    : visibleBatches.filter((b) => matchesQuery(b, listQuery));
 
   return (
     <div className="main">
@@ -551,6 +737,16 @@ const EmailGenerator: React.FC<Props> = ({
         {batches.length > 0 && (
           <span className="page-header-count">{batches.length}</span>
         )}
+        <button
+          type="button"
+          className="btn btn-sm"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => setSettingsOpen(true)}
+          title={t.settings}
+          aria-label={t.settings}
+        >
+          <IconSettings size={14} />
+        </button>
       </div>
       {taskBanner}
 
@@ -587,7 +783,7 @@ const EmailGenerator: React.FC<Props> = ({
               />
               <button
                 className="compute-hero-cta"
-                onClick={() => generate(selectedReportId)}
+                onClick={() => requestGenerate(selectedReportId)}
                 disabled={!selectedReportId || selectedHasNoGroups || busy}
               >
                 {busy ? t.loading : t.generateEmails} →
@@ -628,6 +824,7 @@ const EmailGenerator: React.FC<Props> = ({
               <table className="table">
                 <thead>
                   <tr>
+                    <th>{t.batchName}</th>
                     <th>{t.reportName}</th>
                     <th>{t.selectedPlan}</th>
                     <th>{t.generatedAtLabel}</th>
@@ -650,11 +847,31 @@ const EmailGenerator: React.FC<Props> = ({
                     return (
                       <tr
                         key={b.id}
-                        className="row-clickable"
+                        className={`row-clickable${b.archived ? ' row-archived' : ''}`}
                         onClick={() => setFocusAndCache({ batch: b })}
                         title={t.preview}
                       >
                         <td className="col-name col-wrap">
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                setFocusAndCache({ batch: b });
+                              }}
+                              title={t.preview}
+                            >
+                              {b.batchName || b.reportName}
+                            </button>
+                            {b.archived && (
+                              <span className="tag" title={t.archivedTag}>
+                                {t.archivedTag}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="col-wrap">
                           <div className="cell-with-end-tag">
                             {rowReportMissing && (
                               <span
@@ -820,6 +1037,46 @@ const EmailGenerator: React.FC<Props> = ({
           readOnly={planModalReadOnly}
           onEnterEdit={() => setPlanModalReadOnly(false)}
         />
+      )}
+
+      {chooserElement}
+
+      {settingsOpen && (
+        <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <ModalHeader
+              icon={<IconSettings size={18} />}
+              tone="edit"
+              title={t.settings}
+              onClose={() => setSettingsOpen(false)}
+            />
+            <div className="modal-body">
+              <label className="settings-toggle-row">
+                <span>
+                  {t.showArchived}
+                  {archivedBatchesCount > 0 && (
+                    <span className="hint" style={{ marginLeft: 6 }}>
+                      ({archivedBatchesCount})
+                    </span>
+                  )}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(ev) => setShowArchived(ev.target.checked)}
+                />
+              </label>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn primary-filled"
+                onClick={() => setSettingsOpen(false)}
+              >
+                {t.close}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {loaderMessage && <LoadingOverlay message={loaderMessage} />}

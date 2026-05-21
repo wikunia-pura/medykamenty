@@ -18,8 +18,9 @@ type Bottleneck = MaxProducibleResult['bottlenecks'][number];
 // cards alive across view-switches AND app restarts. The MaxProducible view
 // is conditionally rendered in App.tsx and unmounts on navigation, so React
 // state alone would reset on return; localStorage carries it through to the
-// next session as well. Stale results are acceptable here because the
-// prominent Refresh button lets the user recompute on demand.
+// next session as well. On entry the view auto-recomputes against current
+// stock, so the persisted results just render as a placeholder while the
+// fresh compute runs — they cannot linger as stale numbers.
 const STORAGE_KEY = 'cutis.maxProducible.state';
 
 interface PersistedState {
@@ -94,7 +95,7 @@ const MaxProducibleView: React.FC = () => {
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [productModalReadOnly, setProductModalReadOnly] = useState(false);
 
-  const reload = async () => {
+  const reload = async (): Promise<string[]> => {
     const [ps, rm, cs] = await Promise.all([
       window.electronAPI.listProducts(),
       window.electronAPI.listRawMaterials(),
@@ -104,16 +105,21 @@ const MaxProducibleView: React.FC = () => {
     setRawMaterials(rm);
     setComponents(cs);
     const existingIds = new Set(ps.map((p) => p.id));
-    setProductIds((prev) => prev.filter((id) => existingIds.has(id)));
+    const filteredProductIds = productIds.filter((id) => existingIds.has(id));
+    setProductIds(filteredProductIds);
     setResults((prev) => prev.filter((r) => existingIds.has(r.productId)));
     setExpandedIds((prev) => prev.filter((id) => existingIds.has(id)));
+    return filteredProductIds;
   };
 
   useEffect(() => {
     void (async () => {
       setLoaderMessage(t.loading);
       try {
-        await reload();
+        const filteredIds = await reload();
+        if (filteredIds.length > 0) {
+          await compute(filteredIds);
+        }
       } finally {
         setLoaderMessage(null);
       }
@@ -158,13 +164,14 @@ const MaxProducibleView: React.FC = () => {
     );
   };
 
-  const compute = async () => {
-    if (productIds.length === 0) return;
+  const compute = async (ids?: string[]) => {
+    const targetIds = ids ?? productIds;
+    if (targetIds.length === 0) return;
     setBusy(true);
     setLoaderMessage(t.loaderComputing);
     try {
       const next = await Promise.all(
-        productIds.map((id) => window.electronAPI.maxProducible(id)),
+        targetIds.map((id) => window.electronAPI.maxProducible(id)),
       );
       setResults(next);
     } finally {
@@ -200,7 +207,7 @@ const MaxProducibleView: React.FC = () => {
             <button
               className="compute-hero-cta"
               disabled={productIds.length === 0 || busy}
-              onClick={compute}
+              onClick={() => compute()}
             >
               {busy ? t.loading : t.compute} →
             </button>
@@ -213,7 +220,7 @@ const MaxProducibleView: React.FC = () => {
           <button
             type="button"
             className="btn primary-filled maxprod-refresh-btn"
-            onClick={compute}
+            onClick={() => compute()}
             disabled={busy || productIds.length === 0}
             title={t.maxProducibleRefresh}
           >

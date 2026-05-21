@@ -6,7 +6,7 @@ import WorkflowTemplateEditorModal from '../components/WorkflowTemplateEditorMod
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
-import { IconEdit, IconTrash, IconPlus } from '../components/Icons';
+import { IconEdit, IconTrash, IconPlus, IconDuplicate } from '../components/Icons';
 import HoverTooltip from '../components/HoverTooltip';
 import type { TaskType } from '../../shared/types';
 
@@ -190,6 +190,16 @@ const WorkflowTemplates: React.FC = () => {
                           title={t.edit}
                         >
                           <IconEdit size={13} /> {t.edit}
+                        </button>
+                        <button
+                          className="btn btn-sm soft-success"
+                          onClick={async () => {
+                            await window.electronAPI.duplicateWorkflowTemplate(wt.id);
+                            await reload();
+                          }}
+                          title={t.duplicate}
+                        >
+                          <IconDuplicate size={13} /> {t.duplicate}
                         </button>
                         <button
                           className="btn btn-sm soft-danger"

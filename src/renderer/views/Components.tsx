@@ -19,7 +19,7 @@ import NumberInput from '../components/NumberInput';
 import ColumnPicker from '../components/ColumnPicker';
 import HoverTooltip from '../components/HoverTooltip';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
-import { IconEdit, IconTrash, IconPlus, IconStar, IconClose, IconEye } from '../components/Icons';
+import { IconEdit, IconTrash, IconPlus, IconStar, IconClose, IconEye, IconDuplicate } from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
 import { useEscapeKey } from '../utils/useEscapeKey';
@@ -512,6 +512,16 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
                         <IconEdit size={13} /> {t.edit}
                       </button>
                       <button
+                        className="btn btn-sm soft-success"
+                        onClick={async () => {
+                          await window.electronAPI.duplicateComponent(c.id);
+                          await reload();
+                        }}
+                        title={t.duplicate}
+                      >
+                        <IconDuplicate size={13} /> {t.duplicate}
+                      </button>
+                      <button
                         className="btn btn-sm soft-danger"
                         onClick={() => setConfirmDelete(c)}
                         title={t.delete}
@@ -642,7 +652,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
             <div className="form-row">
               <label>{t.suppliers}</label>
               <SupplierMultiPicker
-                suppliers={suppliers}
+                suppliers={suppliers.filter((s) => s.type !== 'raw')}
                 selectedIds={editing.supplierIds ?? []}
                 preferredId={editing.preferredSupplierId}
                 onChange={(ids, pref) =>

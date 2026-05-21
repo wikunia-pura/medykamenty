@@ -7,7 +7,6 @@ import type {
   OrderStatus,
   Product,
   ProductionPlan,
-  ShortageLine,
   ShortageReportEntry,
   TaskInstance,
   TaskStatus,
@@ -25,11 +24,14 @@ import {
   IconCheck,
   IconArrowLeft,
   IconMail,
+  IconNote,
   IconTrash,
 } from '../components/Icons';
 import NumberInput from '../components/NumberInput';
 import HoverTooltip from '../components/HoverTooltip';
+import ShortageReportTooltip from '../components/ShortageReportTooltip';
 import PlanEditorModal from '../components/PlanEditorModal';
+import TaskNoteDialog from '../components/TaskNoteDialog';
 import TaskProgressBar, { type TaskAction } from '../components/TaskProgressBar';
 import { useEscapeKey } from '../utils/useEscapeKey';
 
@@ -43,7 +45,7 @@ interface Props {
     view: 'stockImport' | 'shortageReport' | 'emailGenerator',
     orderId: string,
     taskId: string,
-    extras?: { planId?: string },
+    extras?: { focusReportId?: string; focusBatchId?: string; planId?: string },
   ) => void;
 }
 
@@ -73,7 +75,15 @@ const OrderDetails: React.FC<Props> = ({
     useState<ShortageReportEntry | null>(null);
   const [addingTask, setAddingTask] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskInstance | null>(null);
+  const [editingNoteFor, setEditingNoteFor] = useState<TaskInstance | null>(null);
   const [picking, setPicking] = useState<'template' | 'newReport' | null>(null);
+  // When the user clicks a "run special task" link on an order that already has
+  // multiple linked reports or batches, we ask which one to open instead of
+  // dumping them on the generic list view.
+  const [pickingTaskTarget, setPickingTaskTarget] = useState<{
+    kind: 'report' | 'batch';
+    task: TaskInstance;
+  } | null>(null);
   const [editingOrder, setEditingOrder] = useState<Partial<Order> | null>(null);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -93,8 +103,17 @@ const OrderDetails: React.FC<Props> = ({
       setTemplates(tpls);
       setPlans(pls);
       setProducts(prods);
-      setReports(reps.filter((r) => r.orderId === orderId));
-      setBatches(bs.filter((b) => b.orderId === orderId));
+      const orderReports = reps.filter((r) => r.orderId === orderId);
+      const orderReportIds = new Set(orderReports.map((r) => r.id));
+      setReports(orderReports);
+      // Include batches that don't carry orderId yet but were generated from a
+      // report that is now linked to this order — handles batches created
+      // before the report→order link existed.
+      setBatches(
+        bs.filter(
+          (b) => b.orderId === orderId || (!!b.reportId && orderReportIds.has(b.reportId)),
+        ),
+      );
       setDataLoaded(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -184,6 +203,36 @@ const OrderDetails: React.FC<Props> = ({
         setOrder(updated);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    }
+    // For the two "special" task types, skip the generic list view when this
+    // order already has linked items — go straight to the single one, or let
+    // the user pick when there's more than one.
+    if (task.type === 'generate_shortage') {
+      if (reports.length === 1) {
+        const r = reports[0];
+        onNavigateForTask('shortageReport', orderId, task.id, {
+          focusReportId: r.id,
+          planId: r.planId,
+        });
+        return;
+      }
+      if (reports.length > 1) {
+        setPickingTaskTarget({ kind: 'report', task });
+        return;
+      }
+    } else if (task.type === 'generate_emails') {
+      if (batches.length === 1) {
+        const b = batches[0];
+        onNavigateForTask('emailGenerator', orderId, task.id, {
+          focusBatchId: b.id,
+          planId: b.planId,
+        });
+        return;
+      }
+      if (batches.length > 1) {
+        setPickingTaskTarget({ kind: 'batch', task });
         return;
       }
     }
@@ -400,6 +449,8 @@ const OrderDetails: React.FC<Props> = ({
                   await setTaskStatus(task, action.status);
                 } else if (action.kind === 'open') {
                   await onTaskClick(task);
+                } else if (action.kind === 'editNote') {
+                  setEditingNoteFor(task);
                 }
               }}
             />
@@ -449,6 +500,9 @@ const OrderDetails: React.FC<Props> = ({
                         {task.startDate} → {task.endDate}
                       </span>
                     </div>
+                    {task.note && (
+                      <div className="workflow-task-note">{task.note}</div>
+                    )}
                   </div>
                   <div className="workflow-task-status-controls">
                     {task.status === 'todo' && (
@@ -491,6 +545,15 @@ const OrderDetails: React.FC<Props> = ({
                         ↺ {t.markTodo}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className={`btn btn-sm task-note-btn${task.note ? ' has-note' : ''}`}
+                      onClick={() => setEditingNoteFor(task)}
+                      title={task.note ? t.taskEditNote : t.taskAddNote}
+                    >
+                      <IconNote size={13} />{' '}
+                      {task.note ? t.taskEditNote : t.taskAddNote}
+                    </button>
                     <button
                       type="button"
                       className="btn btn-sm soft-edit"
@@ -566,10 +629,6 @@ const OrderDetails: React.FC<Props> = ({
                 </tr>
               )}
               {reports.map((r) => {
-                const missing = [...r.report.rawLines, ...r.report.componentLines]
-                  .filter((l) => l.shortage > 0)
-                  .sort((a, b) => b.shortage - a.shortage);
-                const groups = r.report.groups.length;
                 const linkedPlan = plans.find((p) => p.id === r.planId);
                 const livePlanName = linkedPlan?.name ?? r.planName;
                 const planMissing = dataLoaded && !!r.planId && !linkedPlan;
@@ -603,46 +662,7 @@ const OrderDetails: React.FC<Props> = ({
                       {new Date(r.computedAt).toLocaleString()}
                     </td>
                     <td>
-                      {missing.length === 0 ? (
-                        <span className="tag success">{t.noShortages}</span>
-                      ) : (
-                        <HoverTooltip
-                          trigger={
-                            <span className="shortage-summary">
-                              <strong className="shortage-count">
-                                {missing.length}
-                              </strong>
-                              <span className="hint">
-                                {missing.length === 1
-                                  ? 'brakująca pozycja'
-                                  : 'brakujących pozycji'}
-                                {' · '}
-                                {groups} {groups === 1 ? 'dostawca' : 'dostawców'}
-                              </span>
-                            </span>
-                          }
-                        >
-                          <div className="shortage-tooltip-header">
-                            {t.shortageReport} — {missing.length}{' '}
-                            {missing.length === 1 ? 'pozycja' : 'pozycji'}
-                          </div>
-                          <ul className="shortage-tooltip-list">
-                            {missing.map((line: ShortageLine) => (
-                              <li key={`${line.itemKind}-${line.itemId}`}>
-                                <span className="shortage-tooltip-name">
-                                  {line.itemName}
-                                </span>
-                                <span className="shortage-tooltip-amount">
-                                  {line.shortage.toFixed(
-                                    line.unit === 'pcs' ? 0 : 2,
-                                  )}{' '}
-                                  {line.unit}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </HoverTooltip>
-                      )}
+                      <ShortageReportTooltip entry={r} batches={batches} />
                     </td>
                     <td
                       className="actions actions-sticky"
@@ -657,6 +677,14 @@ const OrderDetails: React.FC<Props> = ({
                               await window.electronAPI.updateShortageReport(r.id, {
                                 orderId: null,
                               });
+                              const inherited = batches.filter(
+                                (b) => b.reportId === r.id,
+                              );
+                              for (const b of inherited) {
+                                await window.electronAPI.updateEmailBatch(b.id, {
+                                  orderId: null,
+                                });
+                              }
                               await reload();
                             } catch (err) {
                               setError(
@@ -715,6 +743,7 @@ const OrderDetails: React.FC<Props> = ({
           <table className="table">
             <thead>
               <tr>
+                <th>{t.batchName}</th>
                 <th>{t.reportName}</th>
                 <th>{t.selectedPlan}</th>
                 <th>{t.generatedAtLabel}</th>
@@ -725,7 +754,7 @@ const OrderDetails: React.FC<Props> = ({
             <tbody>
               {batches.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="hint">
+                  <td colSpan={6} className="hint">
                     {t.noData}
                   </td>
                 </tr>
@@ -763,13 +792,26 @@ const OrderDetails: React.FC<Props> = ({
                           className="link-button"
                           onClick={(ev) => {
                             ev.stopPropagation();
-                            onNavigateToReport(b.planId, b.reportId);
+                            onNavigateToBatch(b.id);
                           }}
-                          title={
-                            reportMissing
-                              ? t.linkedReportDeleted
-                              : t.goToShortageReport
-                          }
+                          title={t.preview}
+                        >
+                          {b.batchName || b.reportName}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="col-wrap" onClick={(ev) => ev.stopPropagation()}>
+                      <div className="cell-with-end-tag">
+                        {reportMissing && (
+                          <span className="tag danger" title={t.linkedReportDeleted}>
+                            {t.linkedReportDeletedTag}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => onNavigateToReport(b.planId, b.reportId)}
+                          title={reportMissing ? t.linkedReportDeleted : t.goToShortageReport}
                           disabled={reportMissing}
                         >
                           {b.reportName}
@@ -917,6 +959,56 @@ const OrderDetails: React.FC<Props> = ({
         />
       )}
 
+      {pickingTaskTarget?.kind === 'report' && (
+        <PickerDialog
+          title={t.pickReportToOpen}
+          icon={<IconEdit size={18} />}
+          options={reports.map((r) => ({
+            id: r.id,
+            label: r.reportName,
+            sub: new Date(r.computedAt).toLocaleString(),
+          }))}
+          onCancel={() => setPickingTaskTarget(null)}
+          onPick={(id) => {
+            const r = reports.find((x) => x.id === id);
+            const task = pickingTaskTarget.task;
+            setPickingTaskTarget(null);
+            if (r) {
+              onNavigateForTask('shortageReport', orderId, task.id, {
+                focusReportId: r.id,
+                planId: r.planId,
+              });
+            }
+          }}
+        />
+      )}
+
+      {pickingTaskTarget?.kind === 'batch' && (
+        <PickerDialog
+          title={t.pickEmailBatchToOpen}
+          icon={<IconMail size={18} />}
+          options={batches.map((b) => ({
+            id: b.id,
+            label: b.batchName || b.reportName,
+            sub: `${new Date(b.generatedAt).toLocaleString()} · ${b.emails.length} ${
+              b.emails.length === 1 ? 'email' : 'emaile'
+            }`,
+          }))}
+          onCancel={() => setPickingTaskTarget(null)}
+          onPick={(id) => {
+            const b = batches.find((x) => x.id === id);
+            const task = pickingTaskTarget.task;
+            setPickingTaskTarget(null);
+            if (b) {
+              onNavigateForTask('emailGenerator', orderId, task.id, {
+                focusBatchId: b.id,
+                planId: b.planId,
+              });
+            }
+          }}
+        />
+      )}
+
       {addingTask && (
         <TaskEditorDialog
           mode="add"
@@ -927,6 +1019,28 @@ const OrderDetails: React.FC<Props> = ({
               const updated = await window.electronAPI.addOrderTask(orderId, input);
               setOrder(updated);
               setAddingTask(false);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      )}
+
+      {editingNoteFor && (
+        <TaskNoteDialog
+          task={editingNoteFor}
+          onCancel={() => setEditingNoteFor(null)}
+          onSave={async (note) => {
+            const taskId = editingNoteFor.id;
+            setBusy(true);
+            try {
+              const updated = await window.electronAPI.updateOrderTask(orderId, taskId, {
+                note,
+              });
+              setOrder(updated);
+              setEditingNoteFor(null);
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -952,6 +1066,7 @@ const OrderDetails: React.FC<Props> = ({
                   type: patch.type,
                   ...(patch.startDate ? { startDate: patch.startDate } : {}),
                   ...(patch.endDate ? { endDate: patch.endDate } : {}),
+                  note: patch.note ?? '',
                 },
               );
               setOrder(updated);
@@ -1093,6 +1208,7 @@ const TaskEditorDialog: React.FC<{
     durationDays: number;
     startDate?: string;
     endDate?: string;
+    note?: string;
   }) => void | Promise<void>;
 }> = ({ mode, initial, onCancel, onSave }) => {
   const t = useT();
@@ -1102,6 +1218,7 @@ const TaskEditorDialog: React.FC<{
   const [durationDays, setDurationDays] = useState<number>(1);
   const [startDate, setStartDate] = useState<string>(initial?.startDate ?? '');
   const [endDate, setEndDate] = useState<string>(initial?.endDate ?? '');
+  const [note, setNote] = useState<string>(initial?.note ?? '');
 
   const typeOptions: { value: TaskType; label: string }[] = [
     { value: 'custom', label: t.taskTypeCustom },
@@ -1177,6 +1294,16 @@ const TaskEditorDialog: React.FC<{
               </div>
             </>
           )}
+          <div className="form-row">
+            <label className="form-label">{t.taskNote}</label>
+            <textarea
+              className="input"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder={t.taskNotePlaceholder}
+              rows={3}
+            />
+          </div>
         </div>
         <div className="modal-footer">
           <button type="button" className="btn" onClick={onCancel}>
@@ -1192,6 +1319,7 @@ const TaskEditorDialog: React.FC<{
                 type,
                 durationDays,
                 ...(mode === 'edit' ? { startDate, endDate } : {}),
+                note,
               })
             }
           >

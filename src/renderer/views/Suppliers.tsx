@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
-import type { Supplier, Lang } from '../../shared/types';
+import type { Supplier, SupplierType, Lang } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import BlockedByDialog from '../components/BlockedByDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
-import { IconEdit, IconTrash, IconPlus } from '../components/Icons';
+import { IconEdit, IconTrash, IconPlus, IconDuplicate } from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
 import SearchableSelect from '../components/SearchableSelect';
@@ -39,6 +39,7 @@ const Suppliers: React.FC = () => {
   const COLUMNS: ColumnDef[] = useMemo(
     () => [
       { id: 'name', label: t.name, required: true },
+      { id: 'type', label: t.supplierType, defaultVisible: true },
       { id: 'email', label: t.email, defaultVisible: true },
       { id: 'phone', label: t.phone, defaultVisible: true },
       { id: 'contactPerson', label: t.contactPerson, defaultVisible: true },
@@ -48,6 +49,12 @@ const Suppliers: React.FC = () => {
     ],
     [t],
   );
+
+  const typeLabel = (type: SupplierType | undefined): string => {
+    if (type === 'raw') return t.supplierTypeRaw;
+    if (type === 'component') return t.supplierTypeComponent;
+    return '';
+  };
   const {
     isVisible,
     toggle,
@@ -61,6 +68,8 @@ const Suppliers: React.FC = () => {
     switch (id) {
       case 'name':
         return <th key={id} className="col-w-lg">{t.name}</th>;
+      case 'type':
+        return <th key={id} className="col-w-sm">{t.supplierType}</th>;
       case 'email':
         return <th key={id} className="col-w-lg">{t.email}</th>;
       case 'phone':
@@ -82,6 +91,8 @@ const Suppliers: React.FC = () => {
     switch (id) {
       case 'name':
         return <td key={id} className="col-name">{s.name}</td>;
+      case 'type':
+        return <td key={id}>{typeLabel(s.type)}</td>;
       case 'email':
         return <td key={id}>{s.email}</td>;
       case 'phone':
@@ -126,6 +137,7 @@ const Suppliers: React.FC = () => {
       phone: '',
       notes: '',
       preferredEmailLanguage: 'pl',
+      type: 'raw',
     });
 
   const onSave = async () => {
@@ -134,6 +146,7 @@ const Suppliers: React.FC = () => {
     const payload = {
       name: editing.name.trim(),
       email: editing.email?.trim() ?? '',
+      type: editing.type,
       phone: editing.phone?.trim() || undefined,
       contactPerson: editing.contactPerson?.trim() || undefined,
       paymentTerms: editing.paymentTerms?.trim() || undefined,
@@ -310,6 +323,16 @@ const Suppliers: React.FC = () => {
                         <IconEdit size={13} /> {t.edit}
                       </button>
                       <button
+                        className="btn btn-sm soft-success"
+                        onClick={async () => {
+                          await window.electronAPI.duplicateSupplier(s.id);
+                          await reload();
+                        }}
+                        title={t.duplicate}
+                      >
+                        <IconDuplicate size={13} /> {t.duplicate}
+                      </button>
+                      <button
                         className="btn btn-sm soft-danger"
                         onClick={() => setConfirmDelete(s)}
                         title={t.delete}
@@ -345,6 +368,22 @@ const Suppliers: React.FC = () => {
                   className="input"
                   value={editing.name ?? ''}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.supplierType}</label>
+                <SearchableSelect
+                  options={[
+                    { value: 'raw', label: t.supplierTypeRaw },
+                    { value: 'component', label: t.supplierTypeComponent },
+                  ]}
+                  value={editing.type ?? ''}
+                  onChange={(val) =>
+                    setEditing({
+                      ...editing,
+                      type: (val || undefined) as SupplierType | undefined,
+                    })
+                  }
                 />
               </div>
               <div className="form-row">

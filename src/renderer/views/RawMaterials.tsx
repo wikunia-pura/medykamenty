@@ -26,6 +26,7 @@ import {
   IconImport,
   IconClose,
   IconSettings,
+  IconDuplicate,
 } from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
@@ -482,6 +483,16 @@ const RawMaterials: React.FC = () => {
                         <IconEdit size={13} /> {t.edit}
                       </button>
                       <button
+                        className="btn btn-sm soft-success"
+                        onClick={async () => {
+                          await window.electronAPI.duplicateRawMaterial(rm.id);
+                          await reload();
+                        }}
+                        title={t.duplicate}
+                      >
+                        <IconDuplicate size={13} /> {t.duplicate}
+                      </button>
+                      <button
                         className="btn btn-sm soft-danger"
                         onClick={() => setConfirmDelete(rm)}
                         title={t.delete}
@@ -546,7 +557,7 @@ const RawMaterials: React.FC = () => {
             <div className="form-row">
               <label>{t.suppliers}</label>
               <SupplierMultiPicker
-                suppliers={suppliers}
+                suppliers={suppliers.filter((s) => s.type !== 'component')}
                 selectedIds={editing.supplierIds ?? []}
                 preferredId={editing.preferredSupplierId}
                 onChange={(ids, pref) =>

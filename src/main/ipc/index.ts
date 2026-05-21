@@ -39,6 +39,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.SUPPLIERS_CREATE, (_e, input) => db.createSupplier(input));
   ipcMain.handle(IPC.SUPPLIERS_UPDATE, (_e, id: string, patch) => db.updateSupplier(id, patch));
   ipcMain.handle(IPC.SUPPLIERS_DELETE, (_e, id: string) => db.deleteSupplier(id));
+  ipcMain.handle(IPC.SUPPLIERS_DUPLICATE, (_e, id: string) => db.duplicateSupplier(id));
 
   // ---- Raw materials ----
   ipcMain.handle(IPC.RAW_LIST, () => db.listRawMaterials());
@@ -46,6 +47,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.RAW_CREATE, (_e, input) => db.createRawMaterial(input));
   ipcMain.handle(IPC.RAW_UPDATE, (_e, id: string, patch) => db.updateRawMaterial(id, patch));
   ipcMain.handle(IPC.RAW_DELETE, (_e, id: string) => db.deleteRawMaterial(id));
+  ipcMain.handle(IPC.RAW_DUPLICATE, (_e, id: string) => db.duplicateRawMaterial(id));
 
   ipcMain.handle(IPC.RAW_XLSX_IMPORT, async (_e, mode: RawMaterialsImportMode) => {
     const win = getMainWindow();
@@ -71,6 +73,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.COMP_CREATE, (_e, input) => db.createComponent(input));
   ipcMain.handle(IPC.COMP_UPDATE, (_e, id: string, patch) => db.updateComponent(id, patch));
   ipcMain.handle(IPC.COMP_DELETE, (_e, id: string) => db.deleteComponent(id));
+  ipcMain.handle(IPC.COMP_DUPLICATE, (_e, id: string) => db.duplicateComponent(id));
 
   // ---- Products ----
   ipcMain.handle(IPC.PRODUCTS_LIST, () => db.listProducts());
@@ -346,8 +349,16 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.SHORTAGE_REPORT_DELETE, (_e, id: string) => db.deleteShortageReport(id));
   ipcMain.handle(
     IPC.SHORTAGE_REPORT_UPDATE,
-    (_e, id: string, patch: { reportName?: string; orderId?: string | null }) =>
-      db.updateShortageReport(id, patch),
+    (
+      _e,
+      id: string,
+      patch: { reportName?: string; orderId?: string | null; archived?: boolean },
+    ) => db.updateShortageReport(id, patch),
+  );
+  ipcMain.handle(
+    IPC.SHORTAGE_REPORT_SET_SUPPLIER_RECEIVED,
+    (_e, reportId: string, supplierId: string, receivedAt: string | null) =>
+      db.setReportSupplierReceived(reportId, supplierId, receivedAt),
   );
   ipcMain.handle(IPC.PLAN_COMPUTE_COST, (_e, planId: string) => computeCost(planId, db));
 
@@ -364,9 +375,24 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.EMAIL_BATCH_GET, (_e, id: string) => db.getEmailBatch(id));
   ipcMain.handle(IPC.EMAIL_BATCH_DELETE, (_e, id: string) => db.deleteEmailBatch(id));
   ipcMain.handle(
+    IPC.EMAIL_BATCH_UPDATE,
+    (_e, id: string, patch: { batchName?: string; orderId?: string | null }) =>
+      db.updateEmailBatch(id, patch),
+  );
+  ipcMain.handle(
     IPC.EMAIL_BATCH_UPDATE_EMAIL,
-    (_e, batchId: string, emailId: string, patch: { body?: string; subject?: string }) =>
-      db.updateBatchEmail(batchId, emailId, patch),
+    (
+      _e,
+      batchId: string,
+      emailId: string,
+      patch: {
+        body?: string;
+        subject?: string;
+        supplierId?: string;
+        supplierName?: string;
+        to?: string;
+      },
+    ) => db.updateBatchEmail(batchId, emailId, patch),
   );
   ipcMain.handle(
     IPC.EMAIL_BATCH_MARK_SENT,
@@ -395,6 +421,9 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.WORKFLOW_TEMPLATE_DELETE, (_e, id: string) =>
     db.deleteWorkflowTemplate(id),
   );
+  ipcMain.handle(IPC.WORKFLOW_TEMPLATE_DUPLICATE, (_e, id: string) =>
+    db.duplicateWorkflowTemplate(id),
+  );
 
   // ---- Orders ----
   ipcMain.handle(IPC.ORDERS_LIST, () => db.listOrders());
@@ -402,6 +431,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.ORDERS_CREATE, (_e, input) => db.createOrder(input));
   ipcMain.handle(IPC.ORDERS_UPDATE, (_e, id: string, patch) => db.updateOrder(id, patch));
   ipcMain.handle(IPC.ORDERS_DELETE, (_e, id: string) => db.deleteOrder(id));
+  ipcMain.handle(IPC.ORDERS_DUPLICATE, (_e, id: string) => db.duplicateOrder(id));
   ipcMain.handle(
     IPC.ORDERS_ATTACH_WORKFLOW,
     (_e, orderId: string, templateId: string) =>

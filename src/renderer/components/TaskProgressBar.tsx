@@ -3,11 +3,12 @@ import { createPortal } from 'react-dom';
 import type { TaskInstance, TaskStatus } from '../../shared/types';
 import { useT } from '../i18n';
 import HoverTooltip from './HoverTooltip';
-import { IconCheck, IconClose } from './Icons';
+import { IconCheck, IconClose, IconNote } from './Icons';
 
 export type TaskAction =
   | { kind: 'setStatus'; status: TaskStatus }
-  | { kind: 'open' };
+  | { kind: 'open' }
+  | { kind: 'editNote' };
 
 interface Props {
   tasks: TaskInstance[];
@@ -145,6 +146,7 @@ const TaskProgressBar: React.FC<Props> = ({
       <div className="task-tooltip-dates">
         {task.startDate} → {task.endDate}
       </div>
+      {task.note && <div className="task-tooltip-note">{task.note}</div>}
     </>
   );
 
@@ -250,6 +252,9 @@ const TaskProgressBar: React.FC<Props> = ({
               <div className="task-action-popover-dates">
                 {activeTask.startDate} → {activeTask.endDate}
               </div>
+              {activeTask.note && (
+                <div className="task-action-popover-note">{activeTask.note}</div>
+              )}
             </div>
             <div className="task-action-popover-footer">
               <div className="task-action-popover-actions">
@@ -287,6 +292,17 @@ const TaskProgressBar: React.FC<Props> = ({
                     }
                   >
                     <IconCheck size={12} /> {t.markDone}
+                  </button>
+                )}
+                {onTaskAction && (
+                  <button
+                    type="button"
+                    className="btn btn-sm task-action-btn task-action-note-btn"
+                    onClick={() => void runAction(activeTask, { kind: 'editNote' })}
+                    title={activeTask.note ? t.taskEditNote : t.taskAddNote}
+                  >
+                    <IconNote size={12} />{' '}
+                    {activeTask.note ? t.taskEditNote : t.taskAddNote}
                   </button>
                 )}
                 {activeTask.type !== 'custom' && onTaskAction && (

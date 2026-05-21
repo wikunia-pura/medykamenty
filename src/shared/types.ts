@@ -4,10 +4,17 @@ export type Lang = 'pl' | 'en';
 
 export type Unit = 'g' | 'kg' | 'ml' | 'l';
 
+// What the supplier provides. Drives which picker shows them (raw materials
+// vs. packaging components) and which RFQ email template is used. Optional
+// for legacy suppliers without a category — those still appear in both
+// pickers until the user assigns a type.
+export type SupplierType = 'raw' | 'component';
+
 export interface Supplier {
   id: UUID;
   name: string;
   email: string;
+  type?: SupplierType;
   phone?: string;
   contactPerson?: string;
   paymentTerms?: string;
@@ -513,6 +520,13 @@ export interface ShortageReportEntry {
   computedAt: ISODate;
   report: ShortageReport;
   orderId?: UUID;
+  // Per-supplier delivery receipts. supplierId is missing for the
+  // "unassigned" group (we use the literal '__none__' there to make the
+  // entry addressable). receivedAt is an ISO timestamp.
+  supplierReceipts?: { supplierId: string; receivedAt: ISODate }[];
+  // Archived reports are hidden from the default list view and cascade
+  // their archived flag to any email batches generated from them.
+  archived?: boolean;
 }
 
 export interface CostBreakdownLine {
@@ -554,11 +568,19 @@ export interface EmailBatch {
   planId: UUID;
   planName: string;
   reportName: string;
+  // User-editable label for the batch itself (independent of the linked report
+  // name). Defaults to the report name when not set, so the user can rename it
+  // to something like "RFQ — Plan Q2 — pre-Easter" to distinguish multiple
+  // batches generated for the same order.
+  batchName: string;
   reportComputedAt: ISODate;
   generatedAt: ISODate;
   language: Lang;
   emails: RFQEmailRecord[];
   orderId?: UUID;
+  // Mirrors the archived flag of the linked shortage report so the email
+  // batch list can hide it when the source report is archived.
+  archived?: boolean;
 }
 
 export interface MaxProducibleResult {
@@ -615,6 +637,9 @@ export interface TaskInstance {
   startDate: DateOnly;
   endDate: DateOnly;
   completedAt?: ISODate;
+  // Free-form note attached to a task instance; shown in the progress bar
+  // popover/tooltip and the workflow task list.
+  note?: string;
 }
 
 export interface OrderWorkflow {
@@ -635,4 +660,6 @@ export interface Order {
   workflow?: OrderWorkflow;
   createdAt: ISODate;
   updatedAt: ISODate;
+  // Archived orders are hidden from the default list view.
+  archived?: boolean;
 }

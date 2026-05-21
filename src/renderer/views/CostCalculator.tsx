@@ -22,8 +22,9 @@ interface Props {
 }
 
 // Persist selection + computed reports + expanded card ids across view-switches
-// and app restarts, matching the MaxProducible view. The Refresh button is the
-// recompute path, so stale results from a previous session are acceptable.
+// and app restarts. On entry the view auto-recomputes against the current
+// source data, so the persisted reports just render as a placeholder while the
+// fresh compute runs — they cannot linger as stale numbers.
 const STORAGE_KEY = 'cutis.costCalculator.state';
 
 interface PersistedState {
@@ -81,7 +82,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [productModalReadOnly, setProductModalReadOnly] = useState(false);
 
-  const reload = async () => {
+  const reload = async (): Promise<string[]> => {
     const [ps, pr, rm, cs] = await Promise.all([
       window.electronAPI.listPlans(),
       window.electronAPI.listProducts(),
@@ -93,16 +94,21 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
     setRawMaterials(rm);
     setComponents(cs);
     const existingIds = new Set(ps.map((p) => p.id));
-    setPlanIds((prev) => prev.filter((id) => existingIds.has(id)));
+    const filteredPlanIds = planIds.filter((id) => existingIds.has(id));
+    setPlanIds(filteredPlanIds);
     setReports((prev) => prev.filter((r) => existingIds.has(r.planId)));
     setExpandedIds((prev) => prev.filter((id) => existingIds.has(id)));
+    return filteredPlanIds;
   };
 
   useEffect(() => {
     void (async () => {
       setLoaderMessage(t.loading);
       try {
-        await reload();
+        const filteredIds = await reload();
+        if (filteredIds.length > 0) {
+          await compute(filteredIds);
+        }
       } finally {
         setLoaderMessage(null);
       }
@@ -175,14 +181,15 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
     );
   };
 
-  const compute = async () => {
-    if (planIds.length === 0) return;
+  const compute = async (ids?: string[]) => {
+    const targetIds = ids ?? planIds;
+    if (targetIds.length === 0) return;
     setBusy(true);
     setLoaderMessage(t.loaderComputing);
     setError(null);
     try {
       const next = await Promise.all(
-        planIds.map((id) => window.electronAPI.computeCost(id)),
+        targetIds.map((id) => window.electronAPI.computeCost(id)),
       );
       setReports(next);
     } catch (err) {
@@ -234,7 +241,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
             <button
               className="compute-hero-cta"
               disabled={planIds.length === 0 || busy}
-              onClick={compute}
+              onClick={() => compute()}
             >
               {busy ? t.loading : t.computeCost} →
             </button>
@@ -248,7 +255,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
           <button
             type="button"
             className="btn primary-filled maxprod-refresh-btn"
-            onClick={compute}
+            onClick={() => compute()}
             disabled={busy || planIds.length === 0}
             title={t.maxProducibleRefresh}
           >

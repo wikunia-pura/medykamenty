@@ -36,6 +36,7 @@ export interface ElectronAPI {
   createSupplier(input: Omit<Supplier, 'id' | 'createdAt' | 'updatedAt'>): Promise<Supplier>;
   updateSupplier(id: string, patch: Partial<Supplier>): Promise<Supplier>;
   deleteSupplier(id: string): Promise<{ ok: boolean; blockedBy?: string[] }>;
+  duplicateSupplier(id: string): Promise<Supplier>;
 
   // Raw materials
   listRawMaterials(): Promise<RawMaterial[]>;
@@ -45,6 +46,7 @@ export interface ElectronAPI {
   ): Promise<RawMaterial>;
   updateRawMaterial(id: string, patch: Partial<RawMaterial>): Promise<RawMaterial>;
   deleteRawMaterial(id: string): Promise<{ ok: boolean; blockedBy?: string[] }>;
+  duplicateRawMaterial(id: string): Promise<RawMaterial>;
   importRawMaterialsXlsx(mode: RawMaterialsImportMode): Promise<{
     ok: boolean;
     summary?: RawMaterialsImportSummary;
@@ -59,6 +61,7 @@ export interface ElectronAPI {
   ): Promise<PackagingComponent>;
   updateComponent(id: string, patch: Partial<PackagingComponent>): Promise<PackagingComponent>;
   deleteComponent(id: string): Promise<{ ok: boolean; blockedBy?: string[] }>;
+  duplicateComponent(id: string): Promise<PackagingComponent>;
 
   // Products
   listProducts(): Promise<Product[]>;
@@ -135,7 +138,12 @@ export interface ElectronAPI {
   deleteShortageReport(id: string): Promise<{ ok: boolean }>;
   updateShortageReport(
     id: string,
-    patch: { reportName?: string; orderId?: string | null },
+    patch: { reportName?: string; orderId?: string | null; archived?: boolean },
+  ): Promise<ShortageReportEntry | undefined>;
+  setReportSupplierReceived(
+    reportId: string,
+    supplierId: string,
+    receivedAt: string | null,
   ): Promise<ShortageReportEntry | undefined>;
 
   // Email batches (RFQ history)
@@ -146,10 +154,20 @@ export interface ElectronAPI {
   listEmailBatches(): Promise<EmailBatch[]>;
   getEmailBatch(id: string): Promise<EmailBatch | undefined>;
   deleteEmailBatch(id: string): Promise<{ ok: boolean }>;
+  updateEmailBatch(
+    id: string,
+    patch: { batchName?: string; orderId?: string | null },
+  ): Promise<EmailBatch | undefined>;
   updateBatchEmail(
     batchId: string,
     emailId: string,
-    patch: { body?: string; subject?: string },
+    patch: {
+      body?: string;
+      subject?: string;
+      supplierId?: string;
+      supplierName?: string;
+      to?: string;
+    },
   ): Promise<EmailBatch | undefined>;
   markEmailSent(
     batchId: string,
@@ -168,6 +186,7 @@ export interface ElectronAPI {
   createOrder(input: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>): Promise<Order>;
   updateOrder(id: string, patch: Partial<Order>): Promise<Order>;
   deleteOrder(id: string): Promise<{ ok: boolean }>;
+  duplicateOrder(id: string): Promise<Order>;
   attachWorkflowToOrder(orderId: string, templateId: string): Promise<Order>;
   detachWorkflowFromOrder(orderId: string): Promise<Order>;
   updateOrderTask(
@@ -179,6 +198,7 @@ export interface ElectronAPI {
     orderId: string,
     input: Omit<TaskInstance, 'id' | 'startDate' | 'endDate' | 'status'> & {
       durationDays: number;
+      note?: string;
     },
     insertAtIndex?: number,
   ): Promise<Order>;
@@ -196,6 +216,7 @@ export interface ElectronAPI {
     patch: Partial<WorkflowTemplate>,
   ): Promise<WorkflowTemplate>;
   deleteWorkflowTemplate(id: string): Promise<{ ok: boolean }>;
+  duplicateWorkflowTemplate(id: string): Promise<WorkflowTemplate>;
 
   // Reverse
   maxProducible(productId: string): Promise<MaxProducibleResult>;

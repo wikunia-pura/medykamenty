@@ -5,6 +5,7 @@ export const IPC = {
   SUPPLIERS_CREATE: 'suppliers:create',
   SUPPLIERS_UPDATE: 'suppliers:update',
   SUPPLIERS_DELETE: 'suppliers:delete',
+  SUPPLIERS_DUPLICATE: 'suppliers:duplicate',
 
   // Raw materials
   RAW_LIST: 'rawMaterials:list',
@@ -12,6 +13,7 @@ export const IPC = {
   RAW_CREATE: 'rawMaterials:create',
   RAW_UPDATE: 'rawMaterials:update',
   RAW_DELETE: 'rawMaterials:delete',
+  RAW_DUPLICATE: 'rawMaterials:duplicate',
   RAW_XLSX_IMPORT: 'rawMaterials:xlsx-import',
 
   // Components
@@ -20,6 +22,7 @@ export const IPC = {
   COMP_CREATE: 'components:create',
   COMP_UPDATE: 'components:update',
   COMP_DELETE: 'components:delete',
+  COMP_DUPLICATE: 'components:duplicate',
 
   // Products
   PRODUCTS_LIST: 'products:list',
@@ -67,12 +70,14 @@ export const IPC = {
   SHORTAGE_REPORT_GET: 'shortageReport:get',
   SHORTAGE_REPORT_DELETE: 'shortageReport:delete',
   SHORTAGE_REPORT_UPDATE: 'shortageReport:update',
+  SHORTAGE_REPORT_SET_SUPPLIER_RECEIVED: 'shortageReport:set-supplier-received',
 
   // Email batches (RFQ history)
   EMAIL_BATCH_CREATE: 'emailBatch:create',
   EMAIL_BATCH_LIST: 'emailBatch:list',
   EMAIL_BATCH_GET: 'emailBatch:get',
   EMAIL_BATCH_DELETE: 'emailBatch:delete',
+  EMAIL_BATCH_UPDATE: 'emailBatch:update',
   EMAIL_BATCH_UPDATE_EMAIL: 'emailBatch:update-email',
   EMAIL_BATCH_MARK_SENT: 'emailBatch:mark-sent',
   EMAIL_BATCH_REGENERATE_EMAIL: 'emailBatch:regenerate-email',
@@ -83,6 +88,7 @@ export const IPC = {
   ORDERS_CREATE: 'orders:create',
   ORDERS_UPDATE: 'orders:update',
   ORDERS_DELETE: 'orders:delete',
+  ORDERS_DUPLICATE: 'orders:duplicate',
   ORDERS_ATTACH_WORKFLOW: 'orders:attach-workflow',
   ORDERS_DETACH_WORKFLOW: 'orders:detach-workflow',
   ORDERS_UPDATE_TASK: 'orders:update-task',
@@ -96,6 +102,7 @@ export const IPC = {
   WORKFLOW_TEMPLATE_CREATE: 'workflowTemplate:create',
   WORKFLOW_TEMPLATE_UPDATE: 'workflowTemplate:update',
   WORKFLOW_TEMPLATE_DELETE: 'workflowTemplate:delete',
+  WORKFLOW_TEMPLATE_DUPLICATE: 'workflowTemplate:duplicate',
 
   // Reverse
   REVERSE_MAX_PRODUCIBLE: 'reverse:max-producible',

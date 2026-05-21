@@ -130,6 +130,18 @@ const OrderEditorModal: React.FC<Props> = ({ editing, setEditing, onCancel, onSa
               rows={3}
             />
           </div>
+          {!isNew && (
+            <label className="settings-toggle-row" style={{ marginTop: 6 }}>
+              <span>{t.archivedField}</span>
+              <input
+                type="checkbox"
+                checked={!!editing.archived}
+                onChange={(e) =>
+                  setEditing({ ...editing, archived: e.target.checked })
+                }
+              />
+            </label>
+          )}
         </div>
         <div className="modal-footer">
           <button type="button" className="btn" onClick={onCancel}>

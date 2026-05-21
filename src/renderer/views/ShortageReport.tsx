@@ -2,9 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav, useNavigation } from '../navigation';
 import type {
+  EmailBatch,
   Order,
   ProductionPlan,
   Product,
+  RFQEmailRecord,
+  ShortageGroup,
   ShortageLine,
   ShortageReport,
   ShortageReportEntry,
@@ -15,16 +18,20 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import NoPlansEmptyState from '../components/NoPlansEmptyState';
 import {
+  IconArchive,
+  IconArrowLeft,
+  IconCheck,
+  IconClose,
+  IconEdit,
   IconMail,
   IconPlus,
+  IconSettings,
   IconTrash,
-  IconEdit,
-  IconArrowLeft,
-  IconClose,
 } from '../components/Icons';
 import SearchableSelect from '../components/SearchableSelect';
+import SupplierPickerModal from '../components/SupplierPickerModal';
 import PlanEditorModal from '../components/PlanEditorModal';
-import HoverTooltip from '../components/HoverTooltip';
+import ShortageReportTooltip from '../components/ShortageReportTooltip';
 import ModalHeader from '../components/ModalHeader';
 import { useEscapeKey } from '../utils/useEscapeKey';
 
@@ -82,14 +89,21 @@ const ShortageReportView: React.FC<Props> = ({
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [batches, setBatches] = useState<EmailBatch[]>([]);
+  const [supplierActionKey, setSupplierActionKey] = useState<string | null>(null);
   const [focus, setFocus] = useState<FocusState | null>(cache.focus);
   const [history, setHistory] = useState<ShortageReportEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [reassigningKey, setReassigningKey] = useState<string | null>(null);
+  // Group whose supplier the user is currently changing via the modal.
+  // null = modal closed.
+  const [groupPickerTarget, setGroupPickerTarget] = useState<ShortageGroup | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ShortageReportEntry | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [editingPlan, setEditingPlan] = useState<Partial<ProductionPlan> | null>(null);
@@ -120,20 +134,33 @@ const ShortageReportView: React.FC<Props> = ({
     return ps;
   };
 
+  const loadBatches = async () => {
+    try {
+      const bs = await window.electronAPI.listEmailBatches();
+      setBatches(bs);
+      return bs;
+    } catch (err) {
+      console.error('Failed to load email batches', err);
+      return [];
+    }
+  };
+
   useEffect(() => {
     void (async () => {
       setLoaderMessage(t.loading);
       try {
-        const [ps, ss, pr, os] = await Promise.all([
+        const [ps, ss, pr, os, bs] = await Promise.all([
           window.electronAPI.listPlans(),
           window.electronAPI.listSuppliers(),
           window.electronAPI.listProducts(),
           window.electronAPI.listOrders().catch(() => [] as Order[]),
+          window.electronAPI.listEmailBatches().catch(() => [] as EmailBatch[]),
         ]);
         setPlans(ps);
         setSuppliers(ss);
         setProducts(pr);
         setOrders(os);
+        setBatches(bs);
         if (!selectedPlanId && ps[0]) onSelectPlan(ps[0].id);
         await loadHistory();
         setDataLoaded(true);
@@ -259,6 +286,64 @@ const ShortageReportView: React.FC<Props> = ({
     }
   };
 
+  // Bulk-reassign every line in `group` to `newSupplierId` — propagates the
+  // change to each underlying raw material / component (adds the supplier to
+  // `supplierIds`, sets it as `preferredSupplierId`) and re-runs the shortage
+  // compute so the line moves to the new group on screen.
+  const reassignGroup = async (group: ShortageGroup, newSupplierId: string) => {
+    if (!focus || focus.mode !== 'edit') return;
+    if (!newSupplierId || newSupplierId === group.supplierId) return;
+    setBusy(true);
+    setLoaderMessage(t.loading);
+    setError(null);
+    try {
+      const lines = [...group.rawLines, ...group.componentLines];
+      for (const line of lines) {
+        if (line.itemKind === 'raw') {
+          const rm = await window.electronAPI.getRawMaterial(line.itemId);
+          if (!rm) continue;
+          const merged = Array.from(new Set([...(rm.supplierIds ?? []), newSupplierId]));
+          await window.electronAPI.updateRawMaterial(line.itemId, {
+            supplierIds: merged,
+            preferredSupplierId: newSupplierId,
+          });
+        } else {
+          const c = await window.electronAPI.getComponent(line.itemId);
+          if (!c) continue;
+          const merged = Array.from(new Set([...(c.supplierIds ?? []), newSupplierId]));
+          await window.electronAPI.updateComponent(line.itemId, {
+            supplierIds: merged,
+            preferredSupplierId: newSupplierId,
+          });
+        }
+      }
+      const r = await window.electronAPI.computeShortages(
+        focus.planId,
+        orderTaskContextOrderId,
+      );
+      const list = await loadHistory();
+      const newest = list.find((e) => e.planId === focus.planId);
+      setFocusAndCache({ ...focus, report: r, entryId: newest?.id ?? null });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+      setGroupPickerTarget(null);
+    }
+  };
+
+  // Detect whether a group contains raw materials, components, or a mix —
+  // drives the supplier-type filter on the picker so the user only sees
+  // suppliers relevant to what they're reassigning.
+  const groupTypeFilter = (group: ShortageGroup): 'raw' | 'component' | undefined => {
+    const hasRaw = group.rawLines.length > 0;
+    const hasComp = group.componentLines.length > 0;
+    if (hasRaw && !hasComp) return 'raw';
+    if (hasComp && !hasRaw) return 'component';
+    return undefined;
+  };
+
   const openEntry = (
     entry: ShortageReportEntry,
     mode: ReportMode,
@@ -346,12 +431,6 @@ const ShortageReportView: React.FC<Props> = ({
   const fmt = (n: number, unit: ShortageLine['unit']) =>
     n.toFixed(unit === 'pcs' ? 0 : 2);
 
-  const missingLines = (e: ShortageReportEntry): ShortageLine[] => {
-    return [...e.report.rawLines, ...e.report.componentLines]
-      .filter((l) => l.shortage > 0)
-      .sort((a, b) => b.shortage - a.shortage);
-  };
-
   const hasPlans = plans.length > 0;
 
   // ID of the report whose order link is being changed. Drives the
@@ -377,6 +456,101 @@ const ShortageReportView: React.FC<Props> = ({
     } finally {
       setBusy(false);
       setPickerEntryId(null);
+    }
+  };
+
+  const setReportArchived = async (entryId: string, archived: boolean) => {
+    setBusy(true);
+    try {
+      await window.electronAPI.updateShortageReport(entryId, { archived });
+      await loadHistory();
+      // The cascade also flips the archived flag on linked email batches,
+      // so refresh that cache too.
+      await loadBatches();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // For a given supplier group, find the latest RFQ email record across all
+  // email batches that were generated from the currently focused report.
+  // Returns the most-recent match (or null if none) so the user can toggle
+  // its sent status directly from the shortage report view.
+  const findLatestEmailForGroup = (
+    g: ShortageGroup,
+  ): { batch: EmailBatch; email: RFQEmailRecord } | null => {
+    if (!focus?.entryId) return null;
+    const reportBatches = batches
+      .filter((b) => b.reportId === focus.entryId)
+      .sort(
+        (a, b) =>
+          new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime(),
+      );
+    for (const b of reportBatches) {
+      const email = b.emails.find((e) => {
+        if (g.supplierId) return e.supplierId === g.supplierId;
+        // Unassigned group: match the email with no supplierId.
+        return !e.supplierId;
+      });
+      if (email) return { batch: b, email };
+    }
+    return null;
+  };
+
+  const supplierReceiptKey = (g: ShortageGroup): string => g.supplierId ?? '__none__';
+
+  const getGroupReceipt = (g: ShortageGroup): { receivedAt: string } | null => {
+    const entry = focus?.entryId
+      ? history.find((e) => e.id === focus.entryId)
+      : null;
+    const key = supplierReceiptKey(g);
+    const found = (entry?.supplierReceipts ?? []).find(
+      (r) => r.supplierId === key,
+    );
+    return found ? { receivedAt: found.receivedAt } : null;
+  };
+
+  const toggleEmailSentForGroup = async (g: ShortageGroup) => {
+    const match = findLatestEmailForGroup(g);
+    if (!match) return;
+    const actionKey = `mail:${supplierReceiptKey(g)}`;
+    setSupplierActionKey(actionKey);
+    setError(null);
+    try {
+      const nextSentAt = match.email.sentAt ? null : new Date().toISOString();
+      await window.electronAPI.markEmailSent(
+        match.batch.id,
+        match.email.id,
+        nextSentAt,
+      );
+      await loadBatches();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSupplierActionKey(null);
+    }
+  };
+
+  const toggleReceiptForGroup = async (g: ShortageGroup) => {
+    if (!focus?.entryId) return;
+    const actionKey = `receipt:${supplierReceiptKey(g)}`;
+    setSupplierActionKey(actionKey);
+    setError(null);
+    try {
+      const current = getGroupReceipt(g);
+      const nextReceivedAt = current ? null : new Date().toISOString();
+      await window.electronAPI.setReportSupplierReceived(
+        focus.entryId,
+        supplierReceiptKey(g),
+        nextReceivedAt,
+      );
+      await loadHistory();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSupplierActionKey(null);
     }
   };
 
@@ -472,9 +646,6 @@ const ShortageReportView: React.FC<Props> = ({
                 )}
               </span>
             )}
-            <span className={`tag ${mode === 'edit' ? 'warn' : ''}`}>
-              {mode === 'edit' ? t.editMode : t.previewMode}
-            </span>
           </div>
           <div className="btn-row">
             {focus.entryId && (
@@ -490,7 +661,13 @@ const ShortageReportView: React.FC<Props> = ({
                 ) : (
                   <button
                     className="btn soft-edit"
-                    onClick={() => setPickerEntryId(focus.entryId)}
+                    onClick={() => {
+                      if (orderTaskContextOrderId) {
+                        void setReportOrder(focus.entryId!, orderTaskContextOrderId);
+                      } else {
+                        setPickerEntryId(focus.entryId);
+                      }
+                    }}
                     disabled={orders.length === 0}
                     title={t.linkOrder}
                   >
@@ -499,7 +676,7 @@ const ShortageReportView: React.FC<Props> = ({
                 )}
               </>
             )}
-            {mode === 'preview' && (
+            {mode === 'preview' ? (
               <button
                 className="btn primary"
                 onClick={() =>
@@ -509,6 +686,31 @@ const ShortageReportView: React.FC<Props> = ({
               >
                 <IconEdit size={13} /> {t.edit}
               </button>
+            ) : (
+              <>
+                {focus.entryId && focusedEntry && (
+                  <button
+                    className="btn soft-neutral"
+                    onClick={() =>
+                      void setReportArchived(focus.entryId!, !focusedEntry.archived)
+                    }
+                    title={focusedEntry.archived ? t.unarchiveReport : t.archiveReport}
+                    disabled={busy}
+                  >
+                    <IconArchive size={13} />{' '}
+                    {focusedEntry.archived ? t.unarchiveReport : t.archiveReport}
+                  </button>
+                )}
+                <button
+                  className="btn primary"
+                  onClick={() =>
+                    setFocusAndCache({ ...focus, mode: 'preview' })
+                  }
+                  title={t.finishEditing}
+                >
+                  <IconCheck size={13} /> {t.finishEditing}
+                </button>
+              </>
             )}
             <button
               className="btn primary-filled"
@@ -524,7 +726,7 @@ const ShortageReportView: React.FC<Props> = ({
 
         {pickerEntryId && (
           <ReportOrderPicker
-            orders={orders}
+            orders={orders.filter((o) => o.status !== 'completed' && o.status !== 'cancelled')}
             onCancel={() => setPickerEntryId(null)}
             onPick={(orderId) => void setReportOrder(pickerEntryId, orderId)}
           />
@@ -558,19 +760,85 @@ const ShortageReportView: React.FC<Props> = ({
         {report.groups.map((g) => {
           const lines = [...g.rawLines, ...g.componentLines];
           if (lines.length === 0) return null;
+          const groupKey = supplierReceiptKey(g);
+          const emailMatch = findLatestEmailForGroup(g);
+          const receipt = getGroupReceipt(g);
+          const mailBusy = supplierActionKey === `mail:${groupKey}`;
+          const receiptBusy = supplierActionKey === `receipt:${groupKey}`;
+          const mailSent = !!emailMatch?.email.sentAt;
           return (
-            <div key={g.supplierId ?? '__none__'} className="card">
+            <div key={groupKey} className="card">
               <div className="card-header">
                 <div className="card-title">
                   {g.supplierName}{' '}
+                  <span className="hint">({lines.length})</span>
                   {g.supplierEmail && (
                     <span className="hint" style={{ marginLeft: 8 }}>
                       &lt;{g.supplierEmail}&gt;
                     </span>
                   )}
                 </div>
-                <div className="hint">{lines.length} pozycji</div>
+                <div className="btn-row">
+                  {mode === 'edit' && (
+                    <button
+                      className="btn btn-sm soft-edit"
+                      onClick={() => setGroupPickerTarget(g)}
+                      title={g.supplierId ? t.changeSupplier : t.assignSupplier}
+                    >
+                      <IconEdit size={13} />{' '}
+                      {g.supplierId ? t.changeSupplier : t.assignSupplier}
+                    </button>
+                  )}
+                  {emailMatch && (
+                    <button
+                      className={`btn btn-sm ${mailSent ? 'soft-danger' : 'soft-success'}`}
+                      onClick={() => void toggleEmailSentForGroup(g)}
+                      disabled={mailBusy}
+                      title={
+                        mailSent
+                          ? `${t.sentAtLabel}: ${new Date(emailMatch.email.sentAt!).toLocaleString()}`
+                          : t.markSent
+                      }
+                    >
+                      <IconCheck size={13} />{' '}
+                      {mailSent ? t.unmarkSent : t.markSent}
+                    </button>
+                  )}
+                  <button
+                    className={`btn btn-sm ${receipt ? 'soft-danger' : 'soft-success'}`}
+                    onClick={() => void toggleReceiptForGroup(g)}
+                    disabled={receiptBusy || !focus.entryId}
+                    title={
+                      receipt
+                        ? `${t.receivedAtLabel}: ${new Date(receipt.receivedAt).toLocaleString()}`
+                        : t.markReceived
+                    }
+                  >
+                    <IconCheck size={13} />{' '}
+                    {receipt ? t.unmarkReceived : t.markReceived}
+                  </button>
+                </div>
               </div>
+              {(mailSent || receipt) && (
+                <div className="supplier-status-row">
+                  {mailSent && emailMatch && (
+                    <span className="tag success">
+                      <IconCheck size={11} /> {t.mailSentBadge}{' '}
+                      <span className="hint" style={{ marginLeft: 4 }}>
+                        {new Date(emailMatch.email.sentAt!).toLocaleString()}
+                      </span>
+                    </span>
+                  )}
+                  {receipt && (
+                    <span className="tag success">
+                      <IconCheck size={11} /> {t.receivedBadge}{' '}
+                      <span className="hint" style={{ marginLeft: 4 }}>
+                        {new Date(receipt.receivedAt).toLocaleString()}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              )}
               <table className="table shortage-table">
                 <colgroup>
                   <col style={{ width: '22%' }} />
@@ -668,6 +936,16 @@ const ShortageReportView: React.FC<Props> = ({
             onEnterEdit={() => setPlanModalReadOnly(false)}
           />
         )}
+
+        {groupPickerTarget && (
+          <SupplierPickerModal
+            suppliers={suppliers}
+            currentSupplierId={groupPickerTarget.supplierId}
+            typeFilter={groupTypeFilter(groupPickerTarget)}
+            onCancel={() => setGroupPickerTarget(null)}
+            onPick={(id) => reassignGroup(groupPickerTarget, id)}
+          />
+        )}
       </div>
     );
   }
@@ -681,6 +959,16 @@ const ShortageReportView: React.FC<Props> = ({
         {history.length > 0 && (
           <span className="page-header-count">{history.length}</span>
         )}
+        <button
+          type="button"
+          className="btn btn-sm"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => setSettingsOpen(true)}
+          title={t.settings}
+          aria-label={t.settings}
+        >
+          <IconSettings size={14} />
+        </button>
       </div>
       {taskBanner}
 
@@ -719,7 +1007,9 @@ const ShortageReportView: React.FC<Props> = ({
         </div>
       )}
 
-      {history.length > 0 && (
+      {history.length > 0 && (() => {
+        const visibleHistory = history.filter((e) => showArchived || !e.archived);
+        return (
         <div className="card">
           <div className="card-header">
             <div>
@@ -749,23 +1039,39 @@ const ShortageReportView: React.FC<Props> = ({
                 </tr>
               </thead>
               <tbody>
-                {history.map((e) => {
-                  const missing = missingLines(e);
-                  const groups = e.report.groups.length;
+                {visibleHistory.map((e) => {
                   const linkedPlan = plans.find((p) => p.id === e.planId);
                   const livePlanName = linkedPlan?.name ?? e.planName;
                   const planMissing = dataLoaded && !!e.planId && !linkedPlan;
                   const linkedOrder = e.orderId
                     ? orders.find((o) => o.id === e.orderId)
                     : null;
+                  const orderStatusLabel = linkedOrder
+                    ? linkedOrder.status === 'draft'
+                      ? t.orderStatusDraft
+                      : linkedOrder.status === 'in_progress'
+                        ? t.orderStatusInProgress
+                        : linkedOrder.status === 'completed'
+                          ? t.orderStatusCompleted
+                          : t.orderStatusCancelled
+                    : null;
                   return (
                   <tr
                     key={e.id}
-                    className="row-clickable"
+                    className={`row-clickable${e.archived ? ' row-archived' : ''}`}
                     onClick={() => openEntry(e, 'preview')}
                     title={t.preview}
                   >
-                    <td className="col-name col-wrap">{e.reportName}</td>
+                    <td className="col-name col-wrap">
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span>{e.reportName}</span>
+                        {e.archived && (
+                          <span className="tag" title={t.archivedTag}>
+                            {t.archivedTag}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="col-wrap">
                       <div className="cell-with-end-tag">
                         {planMissing && (
@@ -792,14 +1098,22 @@ const ShortageReportView: React.FC<Props> = ({
                     </td>
                     <td className="col-wrap" onClick={(ev) => ev.stopPropagation()}>
                       {linkedOrder ? (
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => onNavigateToOrder?.(linkedOrder.id)}
-                          title={t.orderDetails}
-                        >
-                          {linkedOrder.name}
-                        </button>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => onNavigateToOrder?.(linkedOrder.id)}
+                            title={t.orderDetails}
+                          >
+                            {linkedOrder.name}
+                          </button>
+                          <span
+                            className={`badge order-status-${linkedOrder.status}`}
+                            title={`${t.orderStatus}: ${orderStatusLabel}`}
+                          >
+                            {orderStatusLabel}
+                          </span>
+                        </div>
                       ) : dataLoaded && e.orderId ? (
                         <span className="tag danger" title={t.orderDeleted}>
                           {t.orderDeletedTag}
@@ -810,41 +1124,7 @@ const ShortageReportView: React.FC<Props> = ({
                     </td>
                     <td className="hint">{new Date(e.computedAt).toLocaleString()}</td>
                     <td>
-                      {missing.length === 0 ? (
-                        <span className="tag success">{t.noShortages}</span>
-                      ) : (
-                        <HoverTooltip
-                          trigger={
-                            <span className="shortage-summary">
-                              <strong className="shortage-count">{missing.length}</strong>
-                              <span className="hint">
-                                {missing.length === 1
-                                  ? 'brakująca pozycja'
-                                  : 'brakujących pozycji'}
-                                {' · '}
-                                {groups} {groups === 1 ? 'dostawca' : 'dostawców'}
-                              </span>
-                            </span>
-                          }
-                        >
-                          <div className="shortage-tooltip-header">
-                            {t.shortageReport} — {missing.length}{' '}
-                            {missing.length === 1 ? 'pozycja' : 'pozycji'}
-                          </div>
-                          <ul className="shortage-tooltip-list">
-                            {missing.map((line) => (
-                              <li key={`${line.itemKind}-${line.itemId}`}>
-                                <span className="shortage-tooltip-name">
-                                  {line.itemName}
-                                </span>
-                                <span className="shortage-tooltip-amount">
-                                  {fmt(line.shortage, line.unit)} {line.unit}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </HoverTooltip>
-                      )}
+                      <ShortageReportTooltip entry={e} batches={batches} />
                     </td>
                     <td
                       className="actions actions-sticky"
@@ -862,7 +1142,13 @@ const ShortageReportView: React.FC<Props> = ({
                         ) : (
                           <button
                             className="btn btn-sm soft-success"
-                            onClick={() => setPickerEntryId(e.id)}
+                            onClick={() => {
+                              if (orderTaskContextOrderId) {
+                                void setReportOrder(e.id, orderTaskContextOrderId);
+                              } else {
+                                setPickerEntryId(e.id);
+                              }
+                            }}
                             disabled={orders.length === 0}
                             title={t.linkOrder}
                           >
@@ -900,7 +1186,8 @@ const ShortageReportView: React.FC<Props> = ({
             </table>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {confirmDelete && (
         <ConfirmDialog
@@ -934,6 +1221,49 @@ const ShortageReportView: React.FC<Props> = ({
         />
       )}
 
+      {settingsOpen && (
+        <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <ModalHeader
+              icon={<IconSettings size={18} />}
+              tone="edit"
+              title={t.settings}
+              onClose={() => setSettingsOpen(false)}
+            />
+            <div className="modal-body">
+              {(() => {
+                const archivedCount = history.filter((e) => e.archived).length;
+                return (
+                  <label className="settings-toggle-row">
+                    <span>
+                      {t.showArchived}
+                      {archivedCount > 0 && (
+                        <span className="hint" style={{ marginLeft: 6 }}>
+                          ({archivedCount})
+                        </span>
+                      )}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={showArchived}
+                      onChange={(ev) => setShowArchived(ev.target.checked)}
+                    />
+                  </label>
+                );
+              })()}
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn primary-filled"
+                onClick={() => setSettingsOpen(false)}
+              >
+                {t.close}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {(() => {
         const nextEntry = history.find((e) => e.report.groups.length > 0);
         if (!nextEntry) return null;
@@ -955,7 +1285,7 @@ const ShortageReportView: React.FC<Props> = ({
 
       {pickerEntryId && (
         <ReportOrderPicker
-          orders={orders}
+          orders={orders.filter((o) => o.status !== 'completed' && o.status !== 'cancelled')}
           onCancel={() => setPickerEntryId(null)}
           onPick={(orderId) => void setReportOrder(pickerEntryId, orderId)}
         />

@@ -68,6 +68,7 @@ export interface T {
   preview: string;
   previewMode: string;
   editMode: string;
+  finishEditing: string;
   backToList: string;
   // Common fields
   name: string;
@@ -87,6 +88,9 @@ export interface T {
   preferredSupplier: string;
   alternativeSuppliers: string;
   preferredEmailLanguage: string;
+  supplierType: string;
+  supplierTypeRaw: string;
+  supplierTypeComponent: string;
   contactPerson: string;
   paymentTerms: string;
   packageSize: string;
@@ -274,6 +278,9 @@ export interface T {
   version: string;
   selectProduct: string;
   selectSupplier: string;
+  assignSupplier: string;
+  changeSupplier: string;
+  unassignedSupplier: string;
   unitsShort: string;
   // Max producible
   maxProducibleHero: string;
@@ -406,6 +413,11 @@ export interface T {
   olderReportsHint: string;
   computedAtLabel: string;
   deleteReportConfirm: string;
+  archiveReport: string;
+  unarchiveReport: string;
+  archivedTag: string;
+  archivedField: string;
+  showArchived: string;
   // Email generator
   emailGeneratorHeroTitle: string;
   emailGeneratorHeroHint: string;
@@ -422,8 +434,20 @@ export interface T {
   unmarkSent: string;
   sentAtLabel: string;
   sentBadge: string;
+  mailSentBadge: string;
+  markReceived: string;
+  unmarkReceived: string;
+  receivedAtLabel: string;
+  receivedBadge: string;
   deleteBatchConfirm: string;
   emailBatchTitle: string;
+  existingBatchChooserTitle: string;
+  existingBatchChooserHint: string;
+  existingBatchChooserHintOne: string;
+  existingBatchOpenAction: string;
+  existingBatchOpenLatestAction: string;
+  existingBatchCreateNewAction: string;
+  existingBatchCancelAction: string;
   // Navigation history
   navBack: string;
   navForward: string;
@@ -476,6 +500,10 @@ export interface T {
   taskStartDate: string;
   taskEndDate: string;
   taskDuration: string;
+  taskNote: string;
+  taskNotePlaceholder: string;
+  taskAddNote: string;
+  taskEditNote: string;
   totalDuration: string;
   days: string;
   markInProgress: string;
@@ -502,6 +530,9 @@ export interface T {
   goToReportsView: string;
   linkOrder: string;
   unlinkOrder: string;
+  pickReportToOpen: string;
+  pickEmailBatchToOpen: string;
+  batchName: string;
 }
 
 const pl: T = {
@@ -575,6 +606,7 @@ const pl: T = {
   preview: 'Podgląd',
   previewMode: 'Tryb podglądu',
   editMode: 'Tryb edycji',
+  finishEditing: 'Zakończ edycję',
   backToList: 'Wróć',
   error: 'Błąd',
   warning: 'Ostrzeżenie',
@@ -595,6 +627,9 @@ const pl: T = {
   preferredSupplier: 'Preferowany dostawca',
   alternativeSuppliers: 'Alternatywni dostawcy',
   preferredEmailLanguage: 'Domyślny język maili',
+  supplierType: 'Typ dostawcy',
+  supplierTypeRaw: 'Surowce',
+  supplierTypeComponent: 'Komponenty',
   contactPerson: 'Osoba kontaktowa',
   paymentTerms: 'Warunki płatności',
   packageSize: 'Wielkość opakowania [kg]',
@@ -782,6 +817,9 @@ const pl: T = {
   version: 'wersja',
   selectProduct: 'Wybierz produkt',
   selectSupplier: 'Wybierz dostawcę',
+  assignSupplier: 'Przypisz dostawcę',
+  changeSupplier: 'Zmień dostawcę',
+  unassignedSupplier: 'Bez przypisanego dostawcy',
   unitsShort: 'szt.',
   maxProducibleHero: 'Możesz wyprodukować',
   maxProducibleHeroHint: 'Wybierz jeden lub kilka produktów, aby zobaczyć ile sztuk można złożyć z aktualnych stanów.',
@@ -904,10 +942,15 @@ const pl: T = {
   defineProductsFirstHint:
     'Najpierw zdefiniuj produkty (z recepturami), aby móc utworzyć plan produkcji.',
   goToProductsCta: 'Przejdź do produktów',
-  olderReportsTitle: 'Wcześniejsze raporty',
+  olderReportsTitle: 'Raporty',
   olderReportsHint: 'Historia obliczonych zapotrzebowań',
   computedAtLabel: 'Obliczono',
   deleteReportConfirm: 'Usunąć raport',
+  archiveReport: 'Archiwizuj',
+  unarchiveReport: 'Przywróć z archiwum',
+  archivedTag: 'archiwalny',
+  archivedField: 'Archiwalne',
+  showArchived: 'Pokaż archiwalne',
   emailGeneratorHeroTitle: 'Wygeneruj maile RFQ',
   emailGeneratorHeroHint:
     'Wybierz raport zapotrzebowania — to on wskazuje dostawców, do których wyślesz zapytania.',
@@ -921,11 +964,25 @@ const pl: T = {
   emailsCount: 'maili',
   sentCount: 'wysłane',
   markSent: 'Oznacz jako wysłany',
-  unmarkSent: 'Cofnij oznaczenie',
+  unmarkSent: 'Cofnij maila',
   sentAtLabel: 'Wysłano',
   sentBadge: 'wysłany',
+  mailSentBadge: 'mail wysłany',
+  markReceived: 'Oznacz jako otrzymane',
+  unmarkReceived: 'Cofnij otrzymanie',
+  receivedAtLabel: 'Otrzymano',
+  receivedBadge: 'otrzymane',
   deleteBatchConfirm: 'Usunąć partię maili',
   emailBatchTitle: 'Maile RFQ',
+  existingBatchChooserTitle: 'Paczka maili już istnieje',
+  existingBatchChooserHint:
+    'Dla tego raportu istnieją już paczki maili RFQ. Otwórz wybraną lub wygeneruj nową.',
+  existingBatchChooserHintOne:
+    'Dla tego raportu istnieje już paczka maili RFQ. Otwórz ją lub wygeneruj nową.',
+  existingBatchOpenAction: 'Otwórz tę paczkę',
+  existingBatchOpenLatestAction: 'Otwórz najnowszą',
+  existingBatchCreateNewAction: 'Wygeneruj nową paczkę',
+  existingBatchCancelAction: 'Anuluj',
   navBack: 'Wstecz',
   navForward: 'Naprzód',
   navHistory: 'Nawigacja',
@@ -976,6 +1033,10 @@ const pl: T = {
   taskStartDate: 'Start',
   taskEndDate: 'Koniec',
   taskDuration: 'Czas trwania',
+  taskNote: 'Notatka',
+  taskNotePlaceholder: 'Dodatkowe informacje dla tego zadania (opcjonalne)',
+  taskAddNote: 'Dodaj notatkę',
+  taskEditNote: 'Edytuj notatkę',
   totalDuration: 'Łącznie',
   days: 'dni',
   markInProgress: 'Rozpocznij',
@@ -1002,6 +1063,9 @@ const pl: T = {
   goToReportsView: 'Otwórz widok raportów',
   linkOrder: 'Powiąż z zamówieniem',
   unlinkOrder: 'Odepnij zamówienie',
+  pickReportToOpen: 'Wybierz raport do otwarcia',
+  pickEmailBatchToOpen: 'Wybierz wpis mailowy do otwarcia',
+  batchName: 'Nazwa paczki',
 };
 
 const en: T = {
@@ -1075,6 +1139,7 @@ const en: T = {
   preview: 'Preview',
   previewMode: 'Preview mode',
   editMode: 'Edit mode',
+  finishEditing: 'Finish editing',
   backToList: 'Back',
   error: 'Error',
   warning: 'Warning',
@@ -1095,6 +1160,9 @@ const en: T = {
   preferredSupplier: 'Preferred supplier',
   alternativeSuppliers: 'Alternative suppliers',
   preferredEmailLanguage: 'Default email language',
+  supplierType: 'Supplier type',
+  supplierTypeRaw: 'Raw materials',
+  supplierTypeComponent: 'Components',
   contactPerson: 'Contact person',
   paymentTerms: 'Payment terms',
   packageSize: 'Package size [kg]',
@@ -1282,6 +1350,9 @@ const en: T = {
   version: 'version',
   selectProduct: 'Select product',
   selectSupplier: 'Select supplier',
+  assignSupplier: 'Assign supplier',
+  changeSupplier: 'Change supplier',
+  unassignedSupplier: 'No supplier assigned',
   unitsShort: 'pcs',
   maxProducibleHero: 'You can produce',
   maxProducibleHeroHint: 'Pick one or more products to see how many units you can assemble from current stock.',
@@ -1404,10 +1475,15 @@ const en: T = {
   defineProductsFirstHint:
     'Define products (with recipes) first before you can create a production plan.',
   goToProductsCta: 'Go to products',
-  olderReportsTitle: 'Earlier reports',
+  olderReportsTitle: 'Reports',
   olderReportsHint: 'History of computed shortages',
   computedAtLabel: 'Computed',
   deleteReportConfirm: 'Delete report',
+  archiveReport: 'Archive',
+  unarchiveReport: 'Restore from archive',
+  archivedTag: 'archived',
+  archivedField: 'Archived',
+  showArchived: 'Show archived',
   emailGeneratorHeroTitle: 'Generate RFQ emails',
   emailGeneratorHeroHint:
     'Pick a shortage report — it determines which suppliers will receive the quote requests.',
@@ -1424,8 +1500,22 @@ const en: T = {
   unmarkSent: 'Unmark sent',
   sentAtLabel: 'Sent',
   sentBadge: 'sent',
+  mailSentBadge: 'email sent',
+  markReceived: 'Mark as received',
+  unmarkReceived: 'Unmark received',
+  receivedAtLabel: 'Received',
+  receivedBadge: 'received',
   deleteBatchConfirm: 'Delete email batch',
   emailBatchTitle: 'RFQ emails',
+  existingBatchChooserTitle: 'Email batch already exists',
+  existingBatchChooserHint:
+    'There are already RFQ email batches for this report. Open one or generate a new batch.',
+  existingBatchChooserHintOne:
+    'An RFQ email batch already exists for this report. Open it or generate a new one.',
+  existingBatchOpenAction: 'Open this batch',
+  existingBatchOpenLatestAction: 'Open latest',
+  existingBatchCreateNewAction: 'Generate new batch',
+  existingBatchCancelAction: 'Cancel',
   navBack: 'Back',
   navForward: 'Forward',
   navHistory: 'Navigation',
@@ -1476,6 +1566,10 @@ const en: T = {
   taskStartDate: 'Start',
   taskEndDate: 'End',
   taskDuration: 'Duration',
+  taskNote: 'Note',
+  taskNotePlaceholder: 'Additional information for this task (optional)',
+  taskAddNote: 'Add note',
+  taskEditNote: 'Edit note',
   totalDuration: 'Total',
   days: 'days',
   markInProgress: 'Start',
@@ -1502,6 +1596,9 @@ const en: T = {
   goToReportsView: 'Open reports view',
   linkOrder: 'Link to order',
   unlinkOrder: 'Unlink order',
+  pickReportToOpen: 'Pick a report to open',
+  pickEmailBatchToOpen: 'Pick an email batch to open',
+  batchName: 'Email batch name',
 };
 
 export const translations: Record<Lang, T> = { pl, en };

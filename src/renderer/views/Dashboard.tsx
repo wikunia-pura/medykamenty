@@ -9,6 +9,7 @@ import type {
   TaskInstance,
 } from '../../shared/types';
 import { IconImport } from '../components/Icons';
+import TaskNoteDialog from '../components/TaskNoteDialog';
 import TaskProgressBar, { type TaskAction } from '../components/TaskProgressBar';
 import drugsUrl from '../assets/drugs2.webp';
 
@@ -49,27 +50,35 @@ const Dashboard: React.FC<Props> = ({
   const [counts, setCounts] = useState<Counts | null>(null);
   const [latestReport, setLatestReport] = useState<ShortageReportEntry | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingNote, setEditingNote] =
+    useState<{ orderId: string; task: TaskInstance } | null>(null);
 
   const reload = async () => {
-    const [products, rawMaterials, components, suppliers, plans, reports, orderList] =
-      await Promise.all([
-        window.electronAPI.listProducts(),
-        window.electronAPI.listRawMaterials(),
-        window.electronAPI.listComponents(),
-        window.electronAPI.listSuppliers(),
-        window.electronAPI.listPlans(),
-        window.electronAPI.listShortageReports(),
-        window.electronAPI.listOrders(),
-      ]);
-    setCounts({
-      products: products.length,
-      rawMaterials: rawMaterials.length,
-      components: components.length,
-      suppliers: suppliers.length,
-      plans: plans.length,
-    });
-    setLatestReport(reports[0] ?? null);
-    setOrders(orderList);
+    setLoading(true);
+    try {
+      const [products, rawMaterials, components, suppliers, plans, reports, orderList] =
+        await Promise.all([
+          window.electronAPI.listProducts(),
+          window.electronAPI.listRawMaterials(),
+          window.electronAPI.listComponents(),
+          window.electronAPI.listSuppliers(),
+          window.electronAPI.listPlans(),
+          window.electronAPI.listShortageReports(),
+          window.electronAPI.listOrders(),
+        ]);
+      setCounts({
+        products: products.length,
+        rawMaterials: rawMaterials.length,
+        components: components.length,
+        suppliers: suppliers.length,
+        plans: plans.length,
+      });
+      setLatestReport(reports[0] ?? null);
+      setOrders(orderList);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onTaskAction = async (order: Order, task: TaskInstance, action: TaskAction) => {
@@ -102,6 +111,8 @@ const Dashboard: React.FC<Props> = ({
         }
       }
       onNavigateForTask(target, order.id, task.id);
+    } else if (action.kind === 'editNote') {
+      setEditingNote({ orderId: order.id, task });
     }
   };
 
@@ -192,26 +203,43 @@ const Dashboard: React.FC<Props> = ({
       <h2 className="dashboard-section-head" style={{ marginTop: 8 }}>
         {t.dashboardYourData}
       </h2>
-      <div className="dashboard-grid">
-        {dataTiles.map((tile) => (
-          <button
-            key={tile.key}
-            className={`dashboard-tile dashboard-tile-${tile.accent}`}
-            onClick={() => onNavigate(tile.key)}
-          >
-            <span className="dashboard-tile-icon">{tile.icon}</span>
-            <span className="dashboard-tile-count">{tile.value}</span>
-            <span className="dashboard-tile-label">{tile.label}</span>
-          </button>
-        ))}
-      </div>
+      {loading && !counts ? (
+        <div className="dashboard-grid">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="dashboard-tile dashboard-tile-skeleton" aria-hidden>
+              <span className="dashboard-tile-icon skeleton-block" />
+              <span className="skeleton-block skeleton-line skeleton-line-lg" />
+              <span className="skeleton-block skeleton-line skeleton-line-sm" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="dashboard-grid">
+          {dataTiles.map((tile) => (
+            <button
+              key={tile.key}
+              className={`dashboard-tile dashboard-tile-${tile.accent}`}
+              onClick={() => onNavigate(tile.key)}
+            >
+              <span className="dashboard-tile-icon">{tile.icon}</span>
+              <span className="dashboard-tile-count">{tile.value}</span>
+              <span className="dashboard-tile-label">{tile.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <h2 className="dashboard-section-head">
         {t.dashboardActiveOrders}
         <span className="dashboard-section-hint">{t.dashboardActiveOrdersHint}</span>
       </h2>
 
-      {activeOrders.length === 0 ? (
+      {loading && orders.length === 0 ? (
+        <div className="dashboard-section-loader" role="status" aria-live="polite">
+          <div className="loading-spinner" aria-hidden />
+          <span className="dashboard-section-loader-text">{t.loading}</span>
+        </div>
+      ) : activeOrders.length === 0 ? (
         <div className="dashboard-empty">
           <span className="dashboard-empty-icon">▤</span>
           <div>
@@ -283,7 +311,14 @@ const Dashboard: React.FC<Props> = ({
         )}
       </h2>
 
-      {!latestReport && (
+      {loading && !latestReport && (
+        <div className="dashboard-section-loader" role="status" aria-live="polite">
+          <div className="loading-spinner" aria-hidden />
+          <span className="dashboard-section-loader-text">{t.loading}</span>
+        </div>
+      )}
+
+      {!loading && !latestReport && (
         <div className="dashboard-empty">
           <span className="dashboard-empty-icon">⚠</span>
           <div>
@@ -383,6 +418,24 @@ const Dashboard: React.FC<Props> = ({
         </span>
         <span className="dashboard-hero-arrow">→</span>
       </button>
+
+      {editingNote && (
+        <TaskNoteDialog
+          task={editingNote.task}
+          onCancel={() => setEditingNote(null)}
+          onSave={async (note) => {
+            const { orderId, task } = editingNote;
+            try {
+              await window.electronAPI.updateOrderTask(orderId, task.id, { note });
+              await reload();
+            } catch (err) {
+              console.error('Failed to save task note', err);
+            } finally {
+              setEditingNote(null);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -9,12 +9,14 @@ const CH = {
   SUPPLIERS_CREATE: 'suppliers:create',
   SUPPLIERS_UPDATE: 'suppliers:update',
   SUPPLIERS_DELETE: 'suppliers:delete',
+  SUPPLIERS_DUPLICATE: 'suppliers:duplicate',
 
   RAW_LIST: 'rawMaterials:list',
   RAW_GET: 'rawMaterials:get',
   RAW_CREATE: 'rawMaterials:create',
   RAW_UPDATE: 'rawMaterials:update',
   RAW_DELETE: 'rawMaterials:delete',
+  RAW_DUPLICATE: 'rawMaterials:duplicate',
   RAW_XLSX_IMPORT: 'rawMaterials:xlsx-import',
 
   COMP_LIST: 'components:list',
@@ -22,6 +24,7 @@ const CH = {
   COMP_CREATE: 'components:create',
   COMP_UPDATE: 'components:update',
   COMP_DELETE: 'components:delete',
+  COMP_DUPLICATE: 'components:duplicate',
 
   PRODUCTS_LIST: 'products:list',
   PRODUCTS_GET: 'products:get',
@@ -64,11 +67,13 @@ const CH = {
   SHORTAGE_REPORT_GET: 'shortageReport:get',
   SHORTAGE_REPORT_DELETE: 'shortageReport:delete',
   SHORTAGE_REPORT_UPDATE: 'shortageReport:update',
+  SHORTAGE_REPORT_SET_SUPPLIER_RECEIVED: 'shortageReport:set-supplier-received',
 
   EMAIL_BATCH_CREATE: 'emailBatch:create',
   EMAIL_BATCH_LIST: 'emailBatch:list',
   EMAIL_BATCH_GET: 'emailBatch:get',
   EMAIL_BATCH_DELETE: 'emailBatch:delete',
+  EMAIL_BATCH_UPDATE: 'emailBatch:update',
   EMAIL_BATCH_UPDATE_EMAIL: 'emailBatch:update-email',
   EMAIL_BATCH_MARK_SENT: 'emailBatch:mark-sent',
   EMAIL_BATCH_REGENERATE_EMAIL: 'emailBatch:regenerate-email',
@@ -78,6 +83,7 @@ const CH = {
   ORDERS_CREATE: 'orders:create',
   ORDERS_UPDATE: 'orders:update',
   ORDERS_DELETE: 'orders:delete',
+  ORDERS_DUPLICATE: 'orders:duplicate',
   ORDERS_ATTACH_WORKFLOW: 'orders:attach-workflow',
   ORDERS_DETACH_WORKFLOW: 'orders:detach-workflow',
   ORDERS_UPDATE_TASK: 'orders:update-task',
@@ -90,6 +96,7 @@ const CH = {
   WORKFLOW_TEMPLATE_CREATE: 'workflowTemplate:create',
   WORKFLOW_TEMPLATE_UPDATE: 'workflowTemplate:update',
   WORKFLOW_TEMPLATE_DELETE: 'workflowTemplate:delete',
+  WORKFLOW_TEMPLATE_DUPLICATE: 'workflowTemplate:duplicate',
 
   REVERSE_MAX_PRODUCIBLE: 'reverse:max-producible',
 
@@ -128,6 +135,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createSupplier: (input: any) => ipcRenderer.invoke(CH.SUPPLIERS_CREATE, input),
   updateSupplier: (id: string, patch: any) => ipcRenderer.invoke(CH.SUPPLIERS_UPDATE, id, patch),
   deleteSupplier: (id: string) => ipcRenderer.invoke(CH.SUPPLIERS_DELETE, id),
+  duplicateSupplier: (id: string) => ipcRenderer.invoke(CH.SUPPLIERS_DUPLICATE, id),
 
   // Raw materials
   listRawMaterials: () => ipcRenderer.invoke(CH.RAW_LIST),
@@ -135,6 +143,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createRawMaterial: (input: any) => ipcRenderer.invoke(CH.RAW_CREATE, input),
   updateRawMaterial: (id: string, patch: any) => ipcRenderer.invoke(CH.RAW_UPDATE, id, patch),
   deleteRawMaterial: (id: string) => ipcRenderer.invoke(CH.RAW_DELETE, id),
+  duplicateRawMaterial: (id: string) => ipcRenderer.invoke(CH.RAW_DUPLICATE, id),
   importRawMaterialsXlsx: (mode: 'merge' | 'overwrite') =>
     ipcRenderer.invoke(CH.RAW_XLSX_IMPORT, mode),
 
@@ -144,6 +153,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createComponent: (input: any) => ipcRenderer.invoke(CH.COMP_CREATE, input),
   updateComponent: (id: string, patch: any) => ipcRenderer.invoke(CH.COMP_UPDATE, id, patch),
   deleteComponent: (id: string) => ipcRenderer.invoke(CH.COMP_DELETE, id),
+  duplicateComponent: (id: string) => ipcRenderer.invoke(CH.COMP_DUPLICATE, id),
 
   // Products
   listProducts: () => ipcRenderer.invoke(CH.PRODUCTS_LIST),
@@ -219,8 +229,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteShortageReport: (id: string) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_DELETE, id),
   updateShortageReport: (
     id: string,
-    patch: { reportName?: string; orderId?: string | null },
+    patch: { reportName?: string; orderId?: string | null; archived?: boolean },
   ) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_UPDATE, id, patch),
+  setReportSupplierReceived: (
+    reportId: string,
+    supplierId: string,
+    receivedAt: string | null,
+  ) =>
+    ipcRenderer.invoke(
+      CH.SHORTAGE_REPORT_SET_SUPPLIER_RECEIVED,
+      reportId,
+      supplierId,
+      receivedAt,
+    ),
 
   // Email batches (RFQ history)
   generateEmails: (
@@ -230,10 +251,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listEmailBatches: () => ipcRenderer.invoke(CH.EMAIL_BATCH_LIST),
   getEmailBatch: (id: string) => ipcRenderer.invoke(CH.EMAIL_BATCH_GET, id),
   deleteEmailBatch: (id: string) => ipcRenderer.invoke(CH.EMAIL_BATCH_DELETE, id),
+  updateEmailBatch: (
+    id: string,
+    patch: { batchName?: string; orderId?: string | null },
+  ) => ipcRenderer.invoke(CH.EMAIL_BATCH_UPDATE, id, patch),
   updateBatchEmail: (
     batchId: string,
     emailId: string,
-    patch: { body?: string; subject?: string },
+    patch: {
+      body?: string;
+      subject?: string;
+      supplierId?: string;
+      supplierName?: string;
+      to?: string;
+    },
   ) => ipcRenderer.invoke(CH.EMAIL_BATCH_UPDATE_EMAIL, batchId, emailId, patch),
   markEmailSent: (batchId: string, emailId: string, sentAt: string | null) =>
     ipcRenderer.invoke(CH.EMAIL_BATCH_MARK_SENT, batchId, emailId, sentAt),
@@ -249,6 +280,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createOrder: (input: any) => ipcRenderer.invoke(CH.ORDERS_CREATE, input),
   updateOrder: (id: string, patch: any) => ipcRenderer.invoke(CH.ORDERS_UPDATE, id, patch),
   deleteOrder: (id: string) => ipcRenderer.invoke(CH.ORDERS_DELETE, id),
+  duplicateOrder: (id: string) => ipcRenderer.invoke(CH.ORDERS_DUPLICATE, id),
   attachWorkflowToOrder: (orderId: string, templateId: string) =>
     ipcRenderer.invoke(CH.ORDERS_ATTACH_WORKFLOW, orderId, templateId),
   detachWorkflowFromOrder: (orderId: string) =>
@@ -271,6 +303,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(CH.WORKFLOW_TEMPLATE_UPDATE, id, patch),
   deleteWorkflowTemplate: (id: string) =>
     ipcRenderer.invoke(CH.WORKFLOW_TEMPLATE_DELETE, id),
+  duplicateWorkflowTemplate: (id: string) =>
+    ipcRenderer.invoke(CH.WORKFLOW_TEMPLATE_DUPLICATE, id),
 
   // Reverse
   maxProducible: (productId: string) => ipcRenderer.invoke(CH.REVERSE_MAX_PRODUCIBLE, productId),

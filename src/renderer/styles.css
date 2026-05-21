@@ -192,6 +192,24 @@ a:hover {
   flex: 1;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.sidebar-nav::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+}
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .nav-item {
@@ -350,6 +368,14 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+
+.supplier-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 12px 0;
 }
 
 .card-header-toggle {
@@ -530,6 +556,20 @@ body.dark-mode .btn.warn:hover:not(:disabled) {
   background: rgba(192, 138, 22, 0.18);
   border-color: var(--warning);
 }
+.btn.soft-neutral {
+  background: rgba(120, 120, 120, 0.1);
+  border-color: rgba(120, 120, 120, 0.25);
+  color: var(--text-muted);
+}
+.btn.soft-neutral:hover:not(:disabled) {
+  background: rgba(120, 120, 120, 0.18);
+  border-color: var(--text-muted);
+}
+.btn.soft-neutral.active {
+  background: rgba(120, 120, 120, 0.22);
+  border-color: var(--text-muted);
+  color: var(--text);
+}
 body.dark-mode .btn.soft-edit {
   background: rgba(100, 126, 245, 0.18);
   border-color: rgba(100, 126, 245, 0.4);
@@ -549,6 +589,20 @@ body.dark-mode .btn.soft-warn {
   background: rgba(192, 138, 22, 0.22);
   border-color: rgba(192, 138, 22, 0.45);
   color: #f0ca73;
+}
+body.dark-mode .btn.soft-neutral {
+  background: rgba(170, 178, 195, 0.15);
+  border-color: rgba(170, 178, 195, 0.35);
+  color: var(--text-muted);
+}
+body.dark-mode .btn.soft-neutral:hover:not(:disabled) {
+  background: rgba(170, 178, 195, 0.22);
+  border-color: var(--text-muted);
+}
+body.dark-mode .btn.soft-neutral.active {
+  background: rgba(170, 178, 195, 0.3);
+  border-color: var(--text);
+  color: var(--text);
 }
 .btn.ghost {
   background: transparent;
@@ -827,11 +881,17 @@ body.dark-mode .table tr:hover td {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .orders-name-cell .orders-name-text {
   min-width: 0;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.orders-list-table td,
+.orders-list-table th {
+  white-space: nowrap;
 }
 .col-w-match,
 .col-match {
@@ -2236,6 +2296,26 @@ body.dark-mode .callout-hint {
 .row-clickable {
   cursor: pointer;
 }
+.row-clickable.row-archived td {
+  opacity: 0.6;
+}
+
+/* Settings modal toggle row: label on the left, control on the right */
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.settings-toggle-row input[type='checkbox'] {
+  margin: 0;
+  cursor: pointer;
+}
 .row-clickable:hover td {
   background: rgba(79, 109, 240, 0.08) !important;
 }
@@ -2572,6 +2652,54 @@ body.dark-mode .shortage-tooltip-amount {
   border-top: 1px solid var(--border);
   text-align: center;
 }
+.hover-tooltip.shortage-tooltip-wide {
+  min-width: 520px;
+  max-width: 720px;
+}
+.shortage-tooltip-wide .shortage-tooltip-list li {
+  align-items: center;
+}
+.shortage-tooltip-line-status {
+  display: grid;
+  grid-template-columns: 110px 100px;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding-left: 12px;
+  margin-left: 4px;
+  border-left: 1px solid var(--border);
+}
+.shortage-tooltip-status-slot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 18px;
+}
+.shortage-tooltip-line-status.is-empty {
+  position: relative;
+}
+.shortage-tooltip-line-status.is-empty::after {
+  content: '—';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.shortage-tooltip-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 2px solid var(--border);
+}
+.shortage-tooltip-section-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
 .cell-hover-wrap-right .cell-hover-tooltip-right {
   left: auto;
   right: 0;
@@ -2624,6 +2752,69 @@ body.dark-mode .count-bubble:hover {
 }
 body.dark-mode .email-card-sent {
   background: linear-gradient(0deg, rgba(80, 200, 140, 0.06), rgba(80, 200, 140, 0.06));
+}
+
+.existing-batch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.existing-batch-row {
+  margin: 0;
+}
+.existing-batch-row-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.12s ease, background 0.12s ease, transform 0.05s ease;
+}
+.existing-batch-row-btn:hover {
+  border-color: var(--primary);
+  background: var(--bg-hover, rgba(79, 109, 240, 0.06));
+}
+.existing-batch-row-btn:active {
+  transform: translateY(1px);
+}
+.existing-batch-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.existing-batch-row-title {
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.existing-batch-row-meta {
+  font-size: 12px;
+}
+.existing-batch-row-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.existing-batch-row-arrow {
+  transform: rotate(180deg);
+  opacity: 0.5;
 }
 
 .focus-bar-title-input {
@@ -3367,6 +3558,63 @@ body.dark-mode .dashboard-welcome-image {
   border: 1px dashed var(--border);
   border-radius: 12px;
   background: var(--bg-elev);
+}
+
+.dashboard-section-loader {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: var(--bg-elev);
+  color: var(--text-muted);
+}
+.dashboard-section-loader .loading-spinner {
+  width: 22px;
+  height: 22px;
+  border-width: 2px;
+}
+.dashboard-section-loader-text {
+  font-size: 13px;
+}
+
+.dashboard-tile-skeleton {
+  cursor: default;
+  pointer-events: none;
+}
+.dashboard-tile-skeleton::before {
+  background: rgba(127, 127, 127, 0.18);
+}
+.skeleton-block {
+  background: linear-gradient(
+    90deg,
+    rgba(127, 127, 127, 0.10) 0%,
+    rgba(127, 127, 127, 0.22) 50%,
+    rgba(127, 127, 127, 0.10) 100%
+  );
+  background-size: 200% 100%;
+  animation: dashboard-skeleton-shimmer 1.2s linear infinite;
+  border-radius: 6px;
+  display: inline-block;
+}
+.skeleton-line {
+  height: 14px;
+  width: 70%;
+}
+.skeleton-line-lg {
+  height: 26px;
+  width: 50%;
+  border-radius: 8px;
+}
+.skeleton-line-sm {
+  height: 12px;
+  width: 60%;
+}
+@keyframes dashboard-skeleton-shimmer {
+  to {
+    background-position: -200% 0;
+  }
 }
 .dashboard-empty-icon {
   flex: 0 0 auto;
@@ -4707,6 +4955,15 @@ body.dark-mode .workflow-section-divider {
   white-space: nowrap;
 }
 
+.workflow-task-note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .workflow-task-status-controls {
   display: flex;
   align-items: center;
@@ -5229,6 +5486,17 @@ body.dark-mode .task-action-popover {
   font-variant-numeric: tabular-nums;
 }
 
+.task-action-popover-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text);
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+}
+
 .task-action-popover-footer {
   padding: 10px 14px 12px;
   border-top: 1px solid var(--border);
@@ -5244,16 +5512,97 @@ body.dark-mode .task-action-popover-footer {
 
 .task-action-popover-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .task-action-popover-actions > .task-action-btn {
-  flex: 1 1 0;
+  flex: 1 1 calc(50% - 6px);
   min-width: 0;
   justify-content: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.task-action-popover-actions > .task-action-note-btn {
+  flex: 1 1 100%;
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.task-action-popover-actions > .task-action-note-btn:hover {
+  color: var(--text);
+  border-style: solid;
+}
+
+/* Note button on each workflow task row. Dashed when the task has no note
+   yet (call-to-action affordance), solid + tinted once a note is attached. */
+.workflow-task-status-controls .task-note-btn {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.workflow-task-status-controls .task-note-btn:hover {
+  color: var(--text);
+  border-style: solid;
+}
+
+.workflow-task-status-controls .task-note-btn.has-note {
+  border-style: solid;
+  color: var(--text);
+  background: rgba(255, 196, 0, 0.12);
+  border-color: rgba(255, 196, 0, 0.4);
+}
+
+body.dark-mode .workflow-task-status-controls .task-note-btn.has-note {
+  background: rgba(255, 214, 102, 0.14);
+  border-color: rgba(255, 214, 102, 0.45);
+}
+
+/* Note editor modal */
+
+.task-note-modal-task {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  background: rgba(127, 127, 127, 0.07);
+  border-left: 3px solid var(--accent, #888);
+  border-radius: 4px;
+}
+
+body.dark-mode .task-note-modal-task {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.task-note-modal-task-name {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.task-note-modal-task-dates {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-note-textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.task-note-modal .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.task-note-modal .task-note-modal-clear {
+  margin-right: auto;
 }
 
 /* Inline status select: a small select that visually reads as a status badge,
@@ -5351,6 +5700,17 @@ body.dark-mode .status-inline-select.order-status-cancelled {
   font-size: 12px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+.task-tooltip .task-tooltip-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text);
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
 }
 
 /* Order task banner (shown under a view's header when reached via a workflow task) */
