@@ -1443,6 +1443,7 @@ export default class Database {
       ...current,
       ...patch,
       llm: { ...current.llm, ...(patch.llm ?? {}) },
+      bsx: patch.bsx ? { ...(current.bsx ?? {}), ...patch.bsx } : current.bsx,
     };
     this.settingsStore.set('settings', updated);
     return updated;

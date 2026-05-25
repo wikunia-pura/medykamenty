@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
-import type { StockRow, ImportSummary, RawMaterial, PackagingComponent } from '../../shared/types';
+import type {
+  StockRow,
+  ImportSummary,
+  RawMaterial,
+  PackagingComponent,
+  AppSettings,
+} from '../../shared/types';
 import type { ViewKey } from './types';
 import DropZone from '../components/DropZone';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
@@ -11,7 +17,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
-import { IconTrash, IconPlus, IconCheck, IconEdit } from '../components/Icons';
+import { IconTrash, IconPlus, IconCheck, IconEdit, IconImport, IconChevronDown, IconChevronRight } from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import UnmatchedRowModal, { type ResolveAction } from '../components/UnmatchedRowModal';
@@ -58,6 +64,8 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
   const [rawSnapshot, setRawSnapshot] = useState<SnapshotInfo>(null);
   const [compSnapshot, setCompSnapshot] = useState<SnapshotInfo>(null);
   const [adoptBusy, setAdoptBusy] = useState(false);
+  const [bsxSettings, setBsxSettings] = useState<AppSettings['bsx']>(undefined);
+  const [xlsxOpen, setXlsxOpen] = useState(false);
   const [rawQuery, setRawQuery] = useState('');
   const [compQuery, setCompQuery] = useState('');
   const [rawUnmatchedOnly, setRawUnmatchedOnly] = useState(false);
@@ -109,10 +117,11 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
   const stockColumns = useColumnPrefs('stockImport', STOCK_COLUMNS);
 
   const loadCurrent = async () => {
-    const [stock, rms, cs] = await Promise.all([
+    const [stock, rms, cs, settings] = await Promise.all([
       window.electronAPI.getCurrentStock(),
       window.electronAPI.listRawMaterials(),
       window.electronAPI.listComponents(),
+      window.electronAPI.getSettings(),
     ]);
     setRawRows(stock.raw);
     setCompRows(stock.components);
@@ -120,6 +129,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     setComponents(cs);
     setRawSnapshot(stock.rawSnapshot);
     setCompSnapshot(stock.componentSnapshot);
+    setBsxSettings(settings.bsx);
   };
 
   // Creates a brand-new catalog entry from the row and links the snapshot to it.
@@ -344,6 +354,25 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
 
   const setStagedKind = (path: string, kind: 'raw' | 'component') =>
     setStaged((prev) => prev.map((f) => (f.path === path ? { ...f, kind } : f)));
+
+  const startBsxImport = async () => {
+    setError(null);
+    setSummary(null);
+    setBusy(true);
+    setLoaderMessage(t.bsxImporting);
+    try {
+      const res = await window.electronAPI.importStockFromBsx();
+      setSummary(res);
+      setRawExpanded(false);
+      setCompExpanded(false);
+      await loadCurrent();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+  };
 
   const startImport = async () => {
     if (staged.length === 0) return;
@@ -700,23 +729,94 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         symbolu lub nazwie. Pozycje wieloznaczne lub nierozpoznane można rozstrzygnąć ręcznie.
       </p>
 
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">{t.selectXlsxFiles}</div>
-        </div>
+      {(() => {
+        const bsxConfigured = Boolean(
+          bsxSettings?.cloudKey && bsxSettings?.username && bsxSettings?.hasPassword,
+        );
+        // Show "Ostatnio pobrano" only when one of the current snapshots was
+        // sourced from BSX (sourceFile prefix). Pick the more recent of the two.
+        const fromBsx = [rawSnapshot, compSnapshot]
+          .filter((s): s is NonNullable<typeof rawSnapshot> => !!s)
+          .filter((s) => s.sourceFile.startsWith('BSX'));
+        const lastBsxAt = fromBsx
+          .map((s) => s.importedAt)
+          .sort()
+          .pop();
+        return (
+          <div
+            className="bsx-banner"
+            role="region"
+            aria-label={t.bsxFetchStock}
+          >
+            <div className="bsx-banner-icon" aria-hidden="true">
+              <IconImport size={32} />
+            </div>
+            <div className="bsx-banner-body">
+              <h2 className="bsx-banner-title">{t.bsxFetchStock}</h2>
+              <p className="bsx-banner-subtitle">{t.bsxFetchStockSubtitle}</p>
+              {lastBsxAt && (
+                <div className="bsx-banner-meta">
+                  {t.bsxLastFetched}: {new Date(lastBsxAt).toLocaleString()}
+                </div>
+              )}
+              {!bsxConfigured && (
+                <div className="bsx-banner-warning">{t.bsxNotConfigured}</div>
+              )}
+            </div>
+            <div className="bsx-banner-action">
+              <button
+                className="bsx-banner-cta"
+                disabled={busy || !bsxConfigured}
+                onClick={startBsxImport}
+              >
+                <IconImport size={18} />
+                {busy ? t.bsxImporting : t.bsxFetchStock}
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
-        <DropZone
-          title={t.dropZoneTitle}
-          subtitle={t.dropZoneSubtitle}
-          dragOverLabel={t.dropZoneDragOver}
-          accept=".xlsx"
-          multiple
-          disabled={busy}
-          selectedFiles={staged}
-          removeFileLabel={t.removeFile}
-          onFilesSelected={onFilesSelected}
-          onRemoveFile={removeStaged}
-        />
+      <div className="xlsx-banner" role="region" aria-label={t.manualXlsxImport}>
+        <div className="xlsx-banner-icon" aria-hidden="true">
+          <IconImport size={20} />
+        </div>
+        <div className="xlsx-banner-body">
+          <h3 className="xlsx-banner-title">{t.manualXlsxImport}</h3>
+          <p className="xlsx-banner-subtitle">{t.manualXlsxImportHint}</p>
+        </div>
+        <button
+          type="button"
+          className="xlsx-banner-cta"
+          onClick={() => setXlsxOpen((v) => !v)}
+          aria-expanded={xlsxOpen}
+        >
+          {xlsxOpen ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+          {xlsxOpen ? t.hide : t.show}
+        </button>
+      </div>
+
+      {xlsxOpen && (
+        <div className="card secondary-section">
+          <div className="card-header">
+            <div className="card-title">{t.selectXlsxFiles}</div>
+          </div>
+          <p className="hint" style={{ marginTop: 0 }}>
+            {t.manualXlsxImportHint}
+          </p>
+
+          <DropZone
+            title={t.dropZoneTitle}
+            subtitle={t.dropZoneSubtitle}
+            dragOverLabel={t.dropZoneDragOver}
+            accept=".xlsx"
+            multiple
+            disabled={busy}
+            selectedFiles={staged}
+            removeFileLabel={t.removeFile}
+            onFilesSelected={onFilesSelected}
+            onRemoveFile={removeStaged}
+          />
 
         {staged.length > 0 && (
           <>
@@ -766,15 +866,16 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
             </div>
           </>
         )}
+        </div>
+      )}
 
-        {error && <div className="error-text" style={{ marginTop: 8 }}>{error}</div>}
-        {summary && (
-          <div className="hint" style={{ marginTop: 8 }}>
-            {t.rowsImported}: {(summary.rawCount ?? 0) + (summary.componentCount ?? 0)} ·{' '}
-            {t.rowsUnmatched}: {summary.unmatched}
-          </div>
-        )}
-      </div>
+      {error && <div className="error-text" style={{ marginTop: 8 }}>{error}</div>}
+      {summary && (
+        <div className="hint" style={{ marginTop: 8 }}>
+          {t.rowsImported}: {(summary.rawCount ?? 0) + (summary.componentCount ?? 0)} ·{' '}
+          {t.rowsUnmatched}: {summary.unmatched}
+        </div>
+      )}
 
       {rawRows.length === 0 && compRows.length === 0 && (
         <div className="card">{t.noStockYet}</div>

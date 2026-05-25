@@ -211,6 +211,33 @@ export interface T {
   stockSourceFile: string;
   stockUnmatchedOnly: string;
   stockAllMatched: string;
+  // BSX integration
+  bsxIntegration: string;
+  bsxImportButton: string;
+  bsxCloudKey: string;
+  bsxUsername: string;
+  bsxPassword: string;
+  bsxPasswordStored: string;
+  bsxPasswordNotStored: string;
+  bsxSetPassword: string;
+  bsxClearPassword: string;
+  bsxRawIdstock: string;
+  bsxComponentIdstock: string;
+  bsxTestConnection: string;
+  bsxConnectionOk: string;
+  bsxConnectionFailed: string;
+  bsxMissingConfig: string;
+  bsxImporting: string;
+  bsxShowWarehouses: string;
+  bsxWarehousesHint: string;
+  bsxLastFetched: string;
+  bsxFetchStock: string;
+  bsxFetchStockSubtitle: string;
+  bsxNotConfigured: string;
+  manualXlsxImport: string;
+  manualXlsxImportHint: string;
+  show: string;
+  hide: string;
   // Production plan
   planName: string;
   reportName: string;
@@ -754,6 +781,32 @@ const pl: T = {
   stockSourceFile: 'Plik źródłowy',
   stockUnmatchedOnly: 'Tylko niedopasowane',
   stockAllMatched: 'Wszystkie pozycje zostały dopasowane.',
+  bsxIntegration: 'Integracja z BSX',
+  bsxImportButton: 'Pobierz z BSX',
+  bsxCloudKey: 'Klucz do chmury',
+  bsxUsername: 'Login (e-mail)',
+  bsxPassword: 'Hasło',
+  bsxPasswordStored: 'Hasło zapisane (zaszyfrowane lokalnie)',
+  bsxPasswordNotStored: 'Brak hasła',
+  bsxSetPassword: 'Zapisz hasło',
+  bsxClearPassword: 'Usuń hasło',
+  bsxRawIdstock: 'ID magazynu surowców',
+  bsxComponentIdstock: 'ID magazynu komponentów',
+  bsxTestConnection: 'Testuj połączenie',
+  bsxConnectionOk: 'Połączenie OK',
+  bsxConnectionFailed: 'Błąd połączenia',
+  bsxMissingConfig: 'Najpierw uzupełnij dane BSX w Ustawieniach.',
+  bsxImporting: 'Pobieranie z BSX…',
+  bsxShowWarehouses: 'Pokaż dostępne magazyny',
+  bsxWarehousesHint: 'Przypisz właściwe ID poniżej. Dla większości użytkowników magazyn surowców to ID 6, komponentów to ID 7.',
+  bsxLastFetched: 'Ostatnio pobrano',
+  bsxFetchStock: 'Pobierz stany',
+  bsxFetchStockSubtitle: 'Połącz się z BSX i pobierz aktualne stany magazynowe surowców oraz komponentów',
+  bsxNotConfigured: 'Skonfiguruj integrację z BSX w Ustawieniach, aby pobierać stany automatycznie.',
+  manualXlsxImport: 'Import ręczny z pliku xlsx',
+  manualXlsxImportHint: 'Alternatywne źródło — jeżeli BSX jest niedostępne lub chcesz wczytać snapshot z pliku.',
+  show: 'Pokaż',
+  hide: 'Ukryj',
   planName: 'Nazwa planu',
   reportName: 'Nazwa raportu',
   selectedPlan: 'Wybrany plan',
@@ -1287,6 +1340,32 @@ const en: T = {
   stockSourceFile: 'Source file',
   stockUnmatchedOnly: 'Unmatched only',
   stockAllMatched: 'All entries matched.',
+  bsxIntegration: 'BSX integration',
+  bsxImportButton: 'Fetch from BSX',
+  bsxCloudKey: 'Cloud key',
+  bsxUsername: 'Username (email)',
+  bsxPassword: 'Password',
+  bsxPasswordStored: 'Password stored (encrypted locally)',
+  bsxPasswordNotStored: 'No password',
+  bsxSetPassword: 'Save password',
+  bsxClearPassword: 'Clear password',
+  bsxRawIdstock: 'Raw materials warehouse ID',
+  bsxComponentIdstock: 'Components warehouse ID',
+  bsxTestConnection: 'Test connection',
+  bsxConnectionOk: 'Connection OK',
+  bsxConnectionFailed: 'Connection failed',
+  bsxMissingConfig: 'Configure BSX credentials in Settings first.',
+  bsxImporting: 'Fetching from BSX…',
+  bsxShowWarehouses: 'Show available warehouses',
+  bsxWarehousesHint: 'Assign the right IDs below. For most setups, raw materials warehouse is ID 6 and components is ID 7.',
+  bsxLastFetched: 'Last fetched',
+  bsxFetchStock: 'Fetch stock',
+  bsxFetchStockSubtitle: 'Connect to BSX and pull current stock levels for raw materials and components',
+  bsxNotConfigured: 'Configure BSX integration in Settings to fetch stock automatically.',
+  manualXlsxImport: 'Manual xlsx import',
+  manualXlsxImportHint: 'Alternative source — use when BSX is unavailable or to load a snapshot from a file.',
+  show: 'Show',
+  hide: 'Hide',
   planName: 'Plan name',
   reportName: 'Report name',
   selectedPlan: 'Selected plan',

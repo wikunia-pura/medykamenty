@@ -357,6 +357,17 @@ export interface ProductionPlan {
   actualProduced?: ProductionPlanItem[];
 }
 
+export interface BsxIntegrationSettings {
+  cloudKey?: string;
+  username?: string;
+  rawIdstock?: number;
+  componentIdstock?: number;
+  // Set to true when a password has been stored via safeStorage in the main
+  // process. The password itself never crosses the IPC boundary back to the
+  // renderer.
+  hasPassword?: boolean;
+}
+
 export interface AppSettings {
   language: Lang;
   darkMode: boolean;
@@ -367,6 +378,7 @@ export interface AppSettings {
   llm: {
     useByDefault: boolean;
   };
+  bsx?: BsxIntegrationSettings;
 }
 
 export interface StoreSchema {

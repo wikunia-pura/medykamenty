@@ -5842,3 +5842,168 @@ body.dark-mode .clickable-row:hover {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
 }
+
+/* ===== BSX hero banner =====
+ * Dominant CTA card on the StockImport view. Pulls the user's eye toward the
+ * BSX integration as the primary stock source; xlsx upload sits below as a
+ * secondary fallback. */
+.bsx-banner {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 24px 28px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-2);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.bsx-banner-icon {
+  width: 64px;
+  height: 64px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.bsx-banner-body {
+  flex: 1;
+  min-width: 240px;
+}
+
+.bsx-banner-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.01em;
+}
+
+.bsx-banner-subtitle {
+  font-size: 13px;
+  opacity: 0.9;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.bsx-banner-meta {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 8px;
+}
+
+.bsx-banner-action {
+  flex-shrink: 0;
+}
+
+.bsx-banner-cta {
+  background: #fff;
+  color: var(--primary);
+  border: none;
+  border-radius: var(--radius);
+  padding: 14px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bsx-banner-cta:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+}
+
+.bsx-banner-cta:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.bsx-banner-warning {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-top: 10px;
+  font-size: 12px;
+  display: inline-block;
+}
+
+/* Smaller, neutral-grey variant of .bsx-banner used for the secondary
+ * (xlsx) entry point. Same anatomy as the primary banner so the page reads
+ * as a clear hierarchy: vivid hero, muted alternative. */
+.xlsx-banner {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-1);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.xlsx-banner-icon {
+  width: 40px;
+  height: 40px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.xlsx-banner-body {
+  flex: 1;
+  min-width: 220px;
+}
+
+.xlsx-banner-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 2px 0;
+  color: var(--text);
+}
+
+.xlsx-banner-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.xlsx-banner-cta {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.xlsx-banner-cta:hover:not(:disabled) {
+  background: var(--bg-sidebar);
+  color: var(--text-inverse);
+  border-color: var(--bg-sidebar);
+}
+
+.secondary-section {
+  margin-top: 8px;
+}

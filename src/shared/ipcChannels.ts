@@ -46,6 +46,13 @@ export const IPC = {
   STOCK_DELETE_SNAPSHOT: 'stock:delete-snapshot',
   STOCK_DELETE_KIND: 'stock:delete-kind',
   STOCK_SUGGEST_MATCHES: 'stock:suggest-matches',
+  STOCK_IMPORT_BSX: 'stock:import-bsx',
+
+  // BSX integration (warehouse system)
+  BSX_TEST_CONNECTION: 'bsx:test-connection',
+  BSX_SET_PASSWORD: 'bsx:set-password',
+  BSX_CLEAR_PASSWORD: 'bsx:clear-password',
+  BSX_LIST_WAREHOUSES: 'bsx:list-warehouses',
 
   // Catalog aliases (smart fuzzy mappings learned from stock import)
   RAW_ALIAS_LIST: 'rawMaterials:alias-list',

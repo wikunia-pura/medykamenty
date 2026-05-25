@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
-import type { AppSettings, Lang } from '../../shared/types';
+import type { AppSettings, BsxIntegrationSettings, Lang } from '../../shared/types';
 import Toggle from '../components/Toggle';
 import SearchableSelect from '../components/SearchableSelect';
+import NumberInput from '../components/NumberInput';
 
 interface Props {
   settings: AppSettings;
@@ -83,6 +84,14 @@ const SettingsView: React.FC<Props> = ({ settings, onChange }) => {
         </div>
       </div>
 
+      <BsxSection
+        settings={settings}
+        onPatch={async (patch) => {
+          const next = await window.electronAPI.updateSettings({ bsx: patch });
+          onChange(next);
+        }}
+      />
+
       <div className="card">
         <h2 style={{ marginTop: 0 }}>{t.about}</h2>
         <div className="btn-row">
@@ -101,6 +110,200 @@ const SettingsView: React.FC<Props> = ({ settings, onChange }) => {
       </div>
 
       {info && <div className="card hint">{info}</div>}
+    </div>
+  );
+};
+
+interface BsxSectionProps {
+  settings: AppSettings;
+  onPatch: (patch: Partial<BsxIntegrationSettings>) => Promise<void>;
+}
+
+interface BsxWarehouse {
+  id: number;
+  title: string;
+  symbol?: string;
+  ownerName?: string;
+}
+
+const BsxSection: React.FC<BsxSectionProps> = ({ settings, onPatch }) => {
+  const t = useT();
+  const bsx = settings.bsx ?? {};
+  const [password, setPassword] = useState('');
+  const [testBusy, setTestBusy] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [pwBusy, setPwBusy] = useState(false);
+  const [warehouses, setWarehouses] = useState<BsxWarehouse[] | null>(null);
+  const [warehousesBusy, setWarehousesBusy] = useState(false);
+  const [warehousesError, setWarehousesError] = useState<string | null>(null);
+
+  const saveField = (field: keyof BsxIntegrationSettings, value: string | number | undefined) => {
+    void onPatch({ [field]: value } as Partial<BsxIntegrationSettings>);
+  };
+
+  const savePassword = async () => {
+    if (!password) return;
+    setPwBusy(true);
+    try {
+      await window.electronAPI.setBsxPassword(password);
+      setPassword('');
+      // Refresh settings so hasPassword updates without a manual reload.
+      await onPatch({});
+    } finally {
+      setPwBusy(false);
+    }
+  };
+
+  const clearPassword = async () => {
+    setPwBusy(true);
+    try {
+      await window.electronAPI.clearBsxPassword();
+      await onPatch({});
+    } finally {
+      setPwBusy(false);
+    }
+  };
+
+  const test = async () => {
+    setTestBusy(true);
+    setTestResult(null);
+    try {
+      const r = await window.electronAPI.testBsxConnection();
+      if (r.ok) setTestResult({ ok: true, message: t.bsxConnectionOk });
+      else setTestResult({ ok: false, message: `${t.bsxConnectionFailed}: ${r.error}` });
+    } finally {
+      setTestBusy(false);
+    }
+  };
+
+  const loadWarehouses = async () => {
+    setWarehousesBusy(true);
+    setWarehousesError(null);
+    try {
+      const r = await window.electronAPI.listBsxWarehouses();
+      if (r.ok) setWarehouses(r.warehouses);
+      else {
+        setWarehouses(null);
+        setWarehousesError(r.error);
+      }
+    } finally {
+      setWarehousesBusy(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>{t.bsxIntegration}</h2>
+      <div className="form-row">
+        <label>{t.bsxCloudKey}</label>
+        <input
+          className="input"
+          value={bsx.cloudKey ?? ''}
+          onChange={(e) => saveField('cloudKey', e.target.value || undefined)}
+          placeholder="CL-XXXXXXXXXX"
+        />
+      </div>
+      <div className="form-row">
+        <label>{t.bsxUsername}</label>
+        <input
+          className="input"
+          value={bsx.username ?? ''}
+          onChange={(e) => saveField('username', e.target.value || undefined)}
+          placeholder="user@example.com"
+        />
+      </div>
+      <div className="form-row">
+        <label>{t.bsxPassword}</label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            className="input"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={bsx.hasPassword ? '••••••••' : ''}
+            style={{ flex: 1 }}
+          />
+          <button className="btn" disabled={pwBusy || !password} onClick={savePassword}>
+            {t.bsxSetPassword}
+          </button>
+          {bsx.hasPassword && (
+            <button className="btn soft-danger" disabled={pwBusy} onClick={clearPassword}>
+              {t.bsxClearPassword}
+            </button>
+          )}
+        </div>
+        <div className="hint" style={{ marginTop: 4 }}>
+          {bsx.hasPassword ? t.bsxPasswordStored : t.bsxPasswordNotStored}
+        </div>
+      </div>
+      <div className="form-row">
+        <label>{t.bsxRawIdstock}</label>
+        <NumberInput
+          className="input"
+          value={bsx.rawIdstock}
+          onChange={(v) => saveField('rawIdstock', v ?? undefined)}
+        />
+      </div>
+      <div className="form-row">
+        <label>{t.bsxComponentIdstock}</label>
+        <NumberInput
+          className="input"
+          value={bsx.componentIdstock}
+          onChange={(v) => saveField('componentIdstock', v ?? undefined)}
+        />
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        <button className="btn" disabled={warehousesBusy} onClick={loadWarehouses}>
+          {warehousesBusy ? '…' : t.bsxShowWarehouses}
+        </button>
+        {warehousesError && (
+          <span className="tag danger" style={{ marginLeft: 8 }}>
+            {warehousesError}
+          </span>
+        )}
+        {warehouses && (
+          <>
+            <div className="hint" style={{ marginTop: 8 }}>
+              {t.bsxWarehousesHint}
+            </div>
+            <div className="table-wrap" style={{ marginTop: 8 }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th className="col-w-sm num">ID</th>
+                    <th>{t.name}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {warehouses.length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="hint">—</td>
+                    </tr>
+                  )}
+                  {warehouses.map((w) => (
+                    <tr key={w.id}>
+                      <td className="num">{w.id}</td>
+                      <td>{w.title}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="btn-row" style={{ marginTop: 12 }}>
+        <button className="btn" disabled={testBusy} onClick={test}>
+          {testBusy ? '…' : t.bsxTestConnection}
+        </button>
+        {testResult && (
+          <span className={testResult.ok ? 'tag success' : 'tag danger'}>
+            {testResult.message}
+          </span>
+        )}
+      </div>
     </div>
   );
 };

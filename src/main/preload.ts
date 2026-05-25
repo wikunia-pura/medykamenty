@@ -46,6 +46,12 @@ const CH = {
   STOCK_DELETE_SNAPSHOT: 'stock:delete-snapshot',
   STOCK_DELETE_KIND: 'stock:delete-kind',
   STOCK_SUGGEST_MATCHES: 'stock:suggest-matches',
+  STOCK_IMPORT_BSX: 'stock:import-bsx',
+
+  BSX_TEST_CONNECTION: 'bsx:test-connection',
+  BSX_SET_PASSWORD: 'bsx:set-password',
+  BSX_CLEAR_PASSWORD: 'bsx:clear-password',
+  BSX_LIST_WAREHOUSES: 'bsx:list-warehouses',
 
   RAW_ALIAS_LIST: 'rawMaterials:alias-list',
   RAW_ALIAS_ADD: 'rawMaterials:alias-add',
@@ -201,6 +207,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     source: { name: string; mpFirmaSymbol?: string },
     limit?: number,
   ) => ipcRenderer.invoke(CH.STOCK_SUGGEST_MATCHES, kind, source, limit),
+  importStockFromBsx: () => ipcRenderer.invoke(CH.STOCK_IMPORT_BSX),
+
+  // BSX integration (warehouse system)
+  testBsxConnection: () => ipcRenderer.invoke(CH.BSX_TEST_CONNECTION),
+  setBsxPassword: (password: string) => ipcRenderer.invoke(CH.BSX_SET_PASSWORD, password),
+  clearBsxPassword: () => ipcRenderer.invoke(CH.BSX_CLEAR_PASSWORD),
+  listBsxWarehouses: () => ipcRenderer.invoke(CH.BSX_LIST_WAREHOUSES),
 
   // Catalog aliases
   listRawMaterialAliases: () => ipcRenderer.invoke(CH.RAW_ALIAS_LIST),

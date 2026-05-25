@@ -12,6 +12,10 @@ import type {
   RawMaterialsImportMode,
   RecipeImportMode,
   RecipeImportResolutions,
+  AppSettings,
+  StockRow,
+  StockSnapshot,
+  ImportSummary,
 } from '../../shared/types';
 import { parseStockXlsx } from '../services/xlsxStockImporter';
 import { importRawMaterialsXlsx } from '../services/xlsxRawMaterialsImporter';
@@ -31,6 +35,137 @@ import { rewriteEmail, suggestMatch } from '../services/llmClient';
 import { seedDemo } from '../services/demoSeed';
 import * as authService from '../authService';
 import { getMigrationStatus, runMigration } from '../migrationService';
+import {
+  authenticate as bsxAuthenticate,
+  fetchStockForWarehouse,
+  fetchWarehouses as bsxFetchWarehouses,
+  fetchLatestPzPrices,
+  BsxError,
+  type BsxStockRow,
+  type BsxPzPrice,
+} from '../services/bsxClient';
+import {
+  setPassword as bsxSetPassword,
+  clearPassword as bsxClearPassword,
+  resolveBsxConfig,
+  exposedBsxSettings,
+} from '../bsxConfig';
+import { newId, nowIso } from '../utils/id';
+
+// Runs the alias + fuzzy matching pipeline against a freshly built snapshot
+// and persists it. Used by both the xlsx and the BSX import paths.
+async function matchAndPersistSnapshot(
+  db: Database,
+  snapshot: StockSnapshot,
+  kind: StockKind,
+): Promise<{ matched: number; ambiguous: number; unmatched: number }> {
+  const candidates =
+    kind === 'raw'
+      ? (await db.listRawMaterials()).map((r) => ({
+          id: r.id,
+          name: r.name,
+          mpFirmaSymbol: r.mpFirmaSymbol,
+        }))
+      : (await db.listComponents()).map((c) => ({
+          id: c.id,
+          name: c.name,
+          mpFirmaSymbol: c.mpFirmaSymbol,
+        }));
+
+  const aliases =
+    kind === 'raw' ? await db.listRawMaterialAliases() : await db.listComponentAliases();
+  const aliasMap = new Map<string, string>();
+  for (const a of aliases) {
+    aliasMap.set(normalizeAlias(a.alias), a.targetId);
+  }
+
+  let matched = 0;
+  let ambiguous = 0;
+  let unmatched = 0;
+
+  for (const row of snapshot.rows) {
+    const aliasHit = aliasMap.get(normalizeAlias(row.name));
+    if (aliasHit) {
+      if (kind === 'raw') row.matchedRawMaterialId = aliasHit;
+      else row.matchedComponentId = aliasHit;
+      row.matchConfidence = 1;
+      row.matchAmbiguous = false;
+      matched++;
+      if (typeof row.netPrice === 'number' && row.netPrice > 0) {
+        if (kind === 'raw')
+          await db.setRawMaterialLastPrice(aliasHit, row.netPrice, row.currency);
+        else await db.setComponentLastPrice(aliasHit, row.netPrice, row.currency);
+      }
+      continue;
+    }
+    const result = matchOne({ name: row.name, mpFirmaSymbol: row.mpFirmaSymbol }, candidates);
+    row.matchConfidence = result.confidence;
+    row.matchAmbiguous = result.ambiguous;
+    if (result.id && !result.ambiguous) {
+      if (kind === 'raw') row.matchedRawMaterialId = result.id;
+      else row.matchedComponentId = result.id;
+      matched++;
+      if (typeof row.netPrice === 'number' && row.netPrice > 0) {
+        if (kind === 'raw')
+          await db.setRawMaterialLastPrice(result.id, row.netPrice, row.currency);
+        else await db.setComponentLastPrice(result.id, row.netPrice, row.currency);
+      }
+    } else if (result.ambiguous) {
+      ambiguous++;
+    } else {
+      unmatched++;
+    }
+  }
+
+  await db.addStockSnapshot(snapshot);
+  return { matched, ambiguous, unmatched };
+}
+
+// Converts a BSX /mp/stock/list row into the app's internal StockRow. Prices
+// come from the latest PZ document for this product (model A — ostatnia cena
+// zakupu), looked up in `priceMap`; totals are derived as qty × unit price.
+// If the product has no matching PZ in the same warehouse, prices stay
+// undefined so the renderer surfaces the gap rather than silently zeroing.
+function mapBsxRowToStockRow(
+  row: BsxStockRow,
+  priceMap: Map<string, BsxPzPrice>,
+): StockRow {
+  const qty = parseFloat(String(row.pquantity ?? '0'));
+  const safeQty = Number.isFinite(qty) ? qty : 0;
+  const symbol =
+    (typeof row.psymbol === 'string' && row.psymbol.trim()) ||
+    (typeof row.pcatsymbol === 'string' && row.pcatsymbol.trim()) ||
+    undefined;
+  const producer =
+    (typeof row.pmansymbol === 'string' && row.pmansymbol.trim()) ||
+    (typeof row.pproducent === 'string' && row.pproducent.trim()) ||
+    undefined;
+
+  const price = priceMap.get(String(row.id));
+  const out: StockRow = {
+    rowKey: `bsx:${row.id}`,
+    name: String(row.pname ?? '').trim(),
+    qty: safeQty,
+    warehouse: (typeof row.idm_title === 'string' && row.idm_title) || undefined,
+    mpFirmaSymbol: symbol || undefined,
+    manufacturerSymbol: producer || undefined,
+  };
+  if (price) {
+    out.netPrice = price.netPrice;
+    out.vatPrice = price.vatPrice;
+    out.grossPrice = price.grossPrice;
+    out.currency = price.currency;
+    out.oNet = safeQty * price.netPrice;
+    out.oVat = safeQty * price.vatPrice;
+    out.oGross = safeQty * price.grossPrice;
+    // Record provenance in the notes column so the user can see which PZ a
+    // price came from at a glance — helpful when the underlying invoice is
+    // questioned.
+    const supplier = price.supplier ? ` (${price.supplier})` : '';
+    out.notes = `PZ ${price.pzNo || price.pzId} z ${price.pzDate}${supplier}`;
+  }
+  return out;
+}
 
 export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWindow | null): void {
   // ---- Suppliers ----
@@ -172,52 +307,10 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
 
       const importFile = async (filePath: string, kind: StockKind) => {
         const snapshot = await parseStockXlsx(filePath, kind);
-        const candidates =
-          kind === 'raw'
-            ? (await db.listRawMaterials()).map((r) => ({ id: r.id, name: r.name, mpFirmaSymbol: r.mpFirmaSymbol }))
-            : (await db.listComponents()).map((c) => ({ id: c.id, name: c.name, mpFirmaSymbol: c.mpFirmaSymbol }));
-
-        // Lookup table from user-trained aliases: normalized alias → target id.
-        const aliases =
-          kind === 'raw' ? await db.listRawMaterialAliases() : await db.listComponentAliases();
-        const aliasMap = new Map<string, string>();
-        for (const a of aliases) {
-          aliasMap.set(normalizeAlias(a.alias), a.targetId);
-        }
-
-        for (const row of snapshot.rows) {
-          const aliasHit = aliasMap.get(normalizeAlias(row.name));
-          if (aliasHit) {
-            if (kind === 'raw') row.matchedRawMaterialId = aliasHit;
-            else row.matchedComponentId = aliasHit;
-            row.matchConfidence = 1;
-            row.matchAmbiguous = false;
-            matched++;
-            if (typeof row.netPrice === 'number' && row.netPrice > 0) {
-              if (kind === 'raw') await db.setRawMaterialLastPrice(aliasHit, row.netPrice, row.currency);
-              else await db.setComponentLastPrice(aliasHit, row.netPrice, row.currency);
-            }
-            continue;
-          }
-          const result = matchOne({ name: row.name, mpFirmaSymbol: row.mpFirmaSymbol }, candidates);
-          row.matchConfidence = result.confidence;
-          row.matchAmbiguous = result.ambiguous;
-          if (result.id && !result.ambiguous) {
-            if (kind === 'raw') row.matchedRawMaterialId = result.id;
-            else row.matchedComponentId = result.id;
-            matched++;
-            // refresh last purchase price (netPrice = Netto S, unit net price)
-            if (typeof row.netPrice === 'number' && row.netPrice > 0) {
-              if (kind === 'raw') await db.setRawMaterialLastPrice(result.id, row.netPrice, row.currency);
-              else await db.setComponentLastPrice(result.id, row.netPrice, row.currency);
-            }
-          } else if (result.ambiguous) {
-            ambiguous++;
-          } else {
-            unmatched++;
-          }
-        }
-        await db.addStockSnapshot(snapshot);
+        const counts = await matchAndPersistSnapshot(db, snapshot, kind);
+        matched += counts.matched;
+        ambiguous += counts.ambiguous;
+        unmatched += counts.unmatched;
         snapshotIds.push(snapshot.id);
         if (kind === 'raw') rawCount = snapshot.rows.length;
         else componentCount = snapshot.rows.length;
@@ -245,6 +338,101 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       return { snapshotIds, rawCount, componentCount, matched, ambiguous, unmatched };
     },
   );
+
+  ipcMain.handle(IPC.STOCK_IMPORT_BSX, async (): Promise<ImportSummary> => {
+    const cfg = resolveBsxConfig(db);
+    const session = await bsxAuthenticate(cfg.cloudKey, cfg.username, cfg.password);
+    // Pull stock + PZ price history for both warehouses concurrently. PZ
+    // history is the expensive part (one extra call per PZ document) but
+    // it's required for model A and the user explicitly opted out of caching.
+    const [rawRows, compRows, rawPrices, compPrices] = await Promise.all([
+      fetchStockForWarehouse(session.sessionToken, cfg.rawIdstock),
+      fetchStockForWarehouse(session.sessionToken, cfg.componentIdstock),
+      fetchLatestPzPrices(session.sessionToken, cfg.rawIdstock),
+      fetchLatestPzPrices(session.sessionToken, cfg.componentIdstock),
+    ]);
+    const stamp = nowIso();
+
+    const buildSnapshot = (
+      bsxRows: BsxStockRow[],
+      kind: StockKind,
+      idstock: number,
+      priceMap: Map<string, BsxPzPrice>,
+    ): StockSnapshot => ({
+      id: newId(),
+      importedAt: stamp,
+      sourceFile: `BSX idstock=${idstock}`,
+      kind,
+      rows: bsxRows.map((r) => mapBsxRowToStockRow(r, priceMap)),
+    });
+
+    const rawSnap = buildSnapshot(rawRows, 'raw', cfg.rawIdstock, rawPrices);
+    const compSnap = buildSnapshot(compRows, 'component', cfg.componentIdstock, compPrices);
+
+    const snapshotIds: string[] = [];
+    let matched = 0;
+    let ambiguous = 0;
+    let unmatched = 0;
+
+    const rawCounts = await matchAndPersistSnapshot(db, rawSnap, 'raw');
+    snapshotIds.push(rawSnap.id);
+    matched += rawCounts.matched;
+    ambiguous += rawCounts.ambiguous;
+    unmatched += rawCounts.unmatched;
+
+    const compCounts = await matchAndPersistSnapshot(db, compSnap, 'component');
+    snapshotIds.push(compSnap.id);
+    matched += compCounts.matched;
+    ambiguous += compCounts.ambiguous;
+    unmatched += compCounts.unmatched;
+
+    return {
+      snapshotIds,
+      rawCount: rawSnap.rows.length,
+      componentCount: compSnap.rows.length,
+      matched,
+      ambiguous,
+      unmatched,
+    };
+  });
+
+  ipcMain.handle(IPC.BSX_TEST_CONNECTION, async () => {
+    try {
+      const cfg = resolveBsxConfig(db);
+      await bsxAuthenticate(cfg.cloudKey, cfg.username, cfg.password);
+      return { ok: true as const };
+    } catch (err) {
+      const msg = err instanceof BsxError ? err.message : (err as Error).message;
+      log.warn('[bsx] test connection failed:', msg);
+      return { ok: false as const, error: msg };
+    }
+  });
+
+  ipcMain.handle(IPC.BSX_SET_PASSWORD, (_e, password: string) => {
+    if (typeof password !== 'string' || password.length === 0) {
+      throw new Error('Password must be a non-empty string');
+    }
+    bsxSetPassword(password);
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC.BSX_CLEAR_PASSWORD, () => {
+    bsxClearPassword();
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC.BSX_LIST_WAREHOUSES, async () => {
+    try {
+      const cfg = resolveBsxConfig(db);
+      const session = await bsxAuthenticate(cfg.cloudKey, cfg.username, cfg.password);
+      const warehouses = await bsxFetchWarehouses(session.sessionToken);
+      return { ok: true as const, warehouses };
+    } catch (err) {
+      const msg = err instanceof BsxError ? err.message : (err as Error).message;
+      log.warn('[bsx] list warehouses failed:', msg);
+      return { ok: false as const, error: msg };
+    }
+  });
 
   ipcMain.handle(IPC.STOCK_LIST_SNAPSHOTS, () => db.listStockSnapshots());
   ipcMain.handle(IPC.STOCK_GET_CURRENT, async () => {
@@ -465,8 +653,20 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   );
 
   // ---- Settings ----
-  ipcMain.handle(IPC.SETTINGS_GET, () => db.getSettings());
-  ipcMain.handle(IPC.SETTINGS_UPDATE, (_e, patch) => db.updateSettings(patch));
+  const withBsxFlags = (s: AppSettings): AppSettings => ({
+    ...s,
+    bsx: exposedBsxSettings(s.bsx),
+  });
+  ipcMain.handle(IPC.SETTINGS_GET, () => withBsxFlags(db.getSettings()));
+  ipcMain.handle(IPC.SETTINGS_UPDATE, (_e, patch: Partial<AppSettings>) => {
+    // Renderer-side hasPassword is read-only; strip it before persisting so we
+    // never serialize the derived flag into electron-store.
+    if (patch.bsx && 'hasPassword' in patch.bsx) {
+      const { hasPassword: _unused, ...rest } = patch.bsx;
+      patch = { ...patch, bsx: rest };
+    }
+    return withBsxFlags(db.updateSettings(patch));
+  });
 
   // ---- Backup ----
   ipcMain.handle(IPC.BACKUP_EXPORT, async () => {

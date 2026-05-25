@@ -111,6 +111,16 @@ export interface ElectronAPI {
     source: { name: string; mpFirmaSymbol?: string },
     limit?: number,
   ): Promise<MatchSuggestion[]>;
+  importStockFromBsx(): Promise<ImportSummary>;
+
+  // BSX integration
+  testBsxConnection(): Promise<{ ok: true } | { ok: false; error: string }>;
+  setBsxPassword(password: string): Promise<{ ok: boolean }>;
+  clearBsxPassword(): Promise<{ ok: boolean }>;
+  listBsxWarehouses(): Promise<
+    | { ok: true; warehouses: { id: number; title: string; symbol?: string; ownerName?: string }[] }
+    | { ok: false; error: string }
+  >;
 
   // Catalog aliases (smart fuzzy mappings)
   listRawMaterialAliases(): Promise<CatalogAlias[]>;
