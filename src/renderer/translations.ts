@@ -238,6 +238,9 @@ export interface T {
   manualXlsxImportHint: string;
   show: string;
   hide: string;
+  bsxPricesLoading: string;
+  bsxPricesLoadingHint: string;
+  bsxPricesFailed: string;
   // Production plan
   planName: string;
   reportName: string;
@@ -807,6 +810,9 @@ const pl: T = {
   manualXlsxImportHint: 'Alternatywne źródło — jeżeli BSX jest niedostępne lub chcesz wczytać snapshot z pliku.',
   show: 'Pokaż',
   hide: 'Ukryj',
+  bsxPricesLoading: 'Doładowywanie cen z PZ…',
+  bsxPricesLoadingHint: 'Stany są już widoczne. Ceny netto/VAT/brutto pojawią się za ~30-60 sekund. Możesz w tym czasie rozstrzygać dopasowania.',
+  bsxPricesFailed: 'Błąd pobierania cen',
   planName: 'Nazwa planu',
   reportName: 'Nazwa raportu',
   selectedPlan: 'Wybrany plan',
@@ -1366,6 +1372,9 @@ const en: T = {
   manualXlsxImportHint: 'Alternative source — use when BSX is unavailable or to load a snapshot from a file.',
   show: 'Show',
   hide: 'Hide',
+  bsxPricesLoading: 'Loading prices from PZ…',
+  bsxPricesLoadingHint: 'Stock is already visible. Net/VAT/gross prices will appear in ~30-60 seconds. You can resolve matches in the meantime.',
+  bsxPricesFailed: 'Failed to fetch prices',
   planName: 'Plan name',
   reportName: 'Report name',
   selectedPlan: 'Selected plan',

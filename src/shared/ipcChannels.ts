@@ -47,6 +47,7 @@ export const IPC = {
   STOCK_DELETE_KIND: 'stock:delete-kind',
   STOCK_SUGGEST_MATCHES: 'stock:suggest-matches',
   STOCK_IMPORT_BSX: 'stock:import-bsx',
+  STOCK_LOAD_BSX_PRICES: 'stock:load-bsx-prices',
 
   // BSX integration (warehouse system)
   BSX_TEST_CONNECTION: 'bsx:test-connection',

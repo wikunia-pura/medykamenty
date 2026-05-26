@@ -6007,3 +6007,90 @@ body.dark-mode .clickable-row:hover {
 .secondary-section {
   margin-top: 8px;
 }
+
+/* Inline progress tag shown in snapshot card headers while BSX prices are
+ * loading in the background (Phase B of the import). Same visual weight as
+ * other tags but with a pulsing dot to signal "work in progress". */
+.tag.pricing-loading {
+  background: rgba(79, 109, 240, 0.12);
+  color: var(--primary);
+  border: 1px solid rgba(79, 109, 240, 0.35);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+body.dark-mode .tag.pricing-loading {
+  background: rgba(100, 126, 245, 0.18);
+  border-color: rgba(100, 126, 245, 0.45);
+}
+
+.spinner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+/* Full-width banner shown above snapshot cards while BSX prices are loading
+ * in the background. Hard to miss; sits between the hero CTA and the data
+ * tables so it's always visible regardless of scroll position. */
+.prices-loading-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(79, 109, 240, 0.10);
+  border: 1px solid rgba(79, 109, 240, 0.35);
+  border-left: 4px solid var(--primary);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+body.dark-mode .prices-loading-banner {
+  background: rgba(100, 126, 245, 0.14);
+  border-color: rgba(100, 126, 245, 0.45);
+  border-left-color: var(--primary);
+}
+
+.prices-loading-banner .spinner-dot {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.prices-loading-text {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.prices-loading-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Muted dash for cells with no data — distinguishes "permanently missing"
+ * from a legitimate zero. The "…" variant is shown only while BSX prices
+ * are still loading, so users don't read a transient gap as missing data. */
+.cell-empty {
+  color: var(--text-muted);
+  opacity: 0.55;
+}
+
+.cell-empty-loading {
+  color: var(--text-muted);
+  opacity: 0.65;
+  letter-spacing: 1px;
+}

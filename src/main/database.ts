@@ -726,6 +726,28 @@ export default class Database {
     return updated;
   }
 
+  // Bulk variant of updateSnapshotRow — applies patches to many rows in a
+  // single persist. Used by the BSX price backfill (~150 rows per snapshot)
+  // where the per-row method would be ~150× slower.
+  async updateSnapshotRows(
+    snapshotId: string,
+    patches: Map<string, Partial<StockRow>>,
+  ): Promise<{ updated: number } | undefined> {
+    if (patches.size === 0) return { updated: 0 };
+    const snap = await this.getSnapshotById(snapshotId);
+    if (!snap) return undefined;
+    let updated = 0;
+    for (let i = 0; i < snap.rows.length; i++) {
+      const patch = patches.get(snap.rows[i].rowKey);
+      if (!patch) continue;
+      const { rowKey: _ignored, ...safe } = patch;
+      snap.rows[i] = { ...snap.rows[i], ...safe };
+      updated++;
+    }
+    if (updated > 0) await this.persistSnapshot(snap);
+    return { updated };
+  }
+
   async deleteSnapshotRow(snapshotId: string, rowKey: string): Promise<{ ok: boolean }> {
     const snap = await this.getSnapshotById(snapshotId);
     if (!snap) return { ok: false };
@@ -750,6 +772,12 @@ export default class Database {
       .eq('kind', kind);
     if (error) throw new Error(`deleteSnapshotsByKind: ${error.message}`);
     return { ok: true, deleted: count ?? 0 };
+  }
+
+  // Public wrapper for IPC handlers that need to read a snapshot by id
+  // (e.g. BSX price backfill, which reads row.qty to derive line totals).
+  async getStockSnapshotById(id: string): Promise<StockSnapshot | undefined> {
+    return this.getSnapshotById(id);
   }
 
   private async getSnapshotById(id: string): Promise<StockSnapshot | undefined> {

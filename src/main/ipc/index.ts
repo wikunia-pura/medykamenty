@@ -339,35 +339,34 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     },
   );
 
+  // Phase A: pull stock state only. Fast (~2-3s for both warehouses) and
+  // sufficient for the renderer to show qty/name/match immediately. Prices
+  // are filled in by Phase B (STOCK_LOAD_BSX_PRICES), which the renderer
+  // kicks off right after this resolves.
   ipcMain.handle(IPC.STOCK_IMPORT_BSX, async (): Promise<ImportSummary> => {
     const cfg = resolveBsxConfig(db);
     const session = await bsxAuthenticate(cfg.cloudKey, cfg.username, cfg.password);
-    // Pull stock + PZ price history for both warehouses concurrently. PZ
-    // history is the expensive part (one extra call per PZ document) but
-    // it's required for model A and the user explicitly opted out of caching.
-    const [rawRows, compRows, rawPrices, compPrices] = await Promise.all([
+    const [rawRows, compRows] = await Promise.all([
       fetchStockForWarehouse(session.sessionToken, cfg.rawIdstock),
       fetchStockForWarehouse(session.sessionToken, cfg.componentIdstock),
-      fetchLatestPzPrices(session.sessionToken, cfg.rawIdstock),
-      fetchLatestPzPrices(session.sessionToken, cfg.componentIdstock),
     ]);
     const stamp = nowIso();
+    const emptyPriceMap = new Map<string, BsxPzPrice>();
 
     const buildSnapshot = (
       bsxRows: BsxStockRow[],
       kind: StockKind,
       idstock: number,
-      priceMap: Map<string, BsxPzPrice>,
     ): StockSnapshot => ({
       id: newId(),
       importedAt: stamp,
       sourceFile: `BSX idstock=${idstock}`,
       kind,
-      rows: bsxRows.map((r) => mapBsxRowToStockRow(r, priceMap)),
+      rows: bsxRows.map((r) => mapBsxRowToStockRow(r, emptyPriceMap)),
     });
 
-    const rawSnap = buildSnapshot(rawRows, 'raw', cfg.rawIdstock, rawPrices);
-    const compSnap = buildSnapshot(compRows, 'component', cfg.componentIdstock, compPrices);
+    const rawSnap = buildSnapshot(rawRows, 'raw', cfg.rawIdstock);
+    const compSnap = buildSnapshot(compRows, 'component', cfg.componentIdstock);
 
     const snapshotIds: string[] = [];
     let matched = 0;
@@ -420,6 +419,98 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     bsxClearPassword();
     return { ok: true };
   });
+
+  // Phase B: backfills purchase prices into snapshots created by Phase A.
+  // The renderer kicks this off right after STOCK_IMPORT_BSX resolves so the
+  // expensive PZ scan (~30-60s) happens with the stock already visible on
+  // screen. Patches are computed up-front from the price map keyed by
+  // BSX idproduct → StockRow.rowKey="bsx:${idproduct}"; rows whose product
+  // has no matching PZ are left untouched.
+  ipcMain.handle(
+    IPC.STOCK_LOAD_BSX_PRICES,
+    async (
+      _e,
+      snapshotIds: { raw?: string; component?: string },
+    ): Promise<{ ok: true; raw: number; component: number } | { ok: false; error: string }> => {
+      try {
+        const cfg = resolveBsxConfig(db);
+        const session = await bsxAuthenticate(cfg.cloudKey, cfg.username, cfg.password);
+        const [rawPrices, compPrices] = await Promise.all([
+          snapshotIds.raw
+            ? fetchLatestPzPrices(session.sessionToken, cfg.rawIdstock)
+            : Promise.resolve(new Map<string, BsxPzPrice>()),
+          snapshotIds.component
+            ? fetchLatestPzPrices(session.sessionToken, cfg.componentIdstock)
+            : Promise.resolve(new Map<string, BsxPzPrice>()),
+        ]);
+
+        const buildPatches = (
+          priceMap: Map<string, BsxPzPrice>,
+        ): Map<string, Partial<StockRow>> => {
+          // We don't know the qty for each row from here, so oNet/oVat/oGross
+          // are computed by Phase A having been called with qty already. We
+          // patch the unit prices here and re-derive totals from qty in
+          // updateSnapshotRows — but db doesn't read the row to derive, so
+          // we have to do it. Build a closure that reads qty from snapshot
+          // rows is the only honest way; pre-read snapshot for that.
+          const patches = new Map<string, Partial<StockRow>>();
+          for (const [idproduct, price] of priceMap) {
+            const supplier = price.supplier ? ` (${price.supplier})` : '';
+            patches.set(`bsx:${idproduct}`, {
+              netPrice: price.netPrice,
+              vatPrice: price.vatPrice,
+              grossPrice: price.grossPrice,
+              currency: price.currency,
+              notes: `PZ ${price.pzNo || price.pzId} z ${price.pzDate}${supplier}`,
+            });
+          }
+          return patches;
+        };
+
+        const applyToSnapshot = async (
+          snapshotId: string | undefined,
+          priceMap: Map<string, BsxPzPrice>,
+        ): Promise<number> => {
+          if (!snapshotId) return 0;
+          // Pre-read so we can compute per-row totals (qty × unit price).
+          const snap = await db.getStockSnapshotById(snapshotId);
+          if (!snap) return 0;
+          const patches = new Map<string, Partial<StockRow>>();
+          for (const row of snap.rows) {
+            if (!row.rowKey.startsWith('bsx:')) continue;
+            const price = priceMap.get(row.rowKey.slice(4));
+            if (!price) continue;
+            const supplier = price.supplier ? ` (${price.supplier})` : '';
+            patches.set(row.rowKey, {
+              netPrice: price.netPrice,
+              vatPrice: price.vatPrice,
+              grossPrice: price.grossPrice,
+              currency: price.currency,
+              oNet: row.qty * price.netPrice,
+              oVat: row.qty * price.vatPrice,
+              oGross: row.qty * price.grossPrice,
+              notes: `PZ ${price.pzNo || price.pzId} z ${price.pzDate}${supplier}`,
+            });
+          }
+          // buildPatches is kept above for future "skip pre-read" optimization;
+          // for now we use the row-aware version.
+          void buildPatches;
+          const res = await db.updateSnapshotRows(snapshotId, patches);
+          return res?.updated ?? 0;
+        };
+
+        const [rawUpdated, compUpdated] = await Promise.all([
+          applyToSnapshot(snapshotIds.raw, rawPrices),
+          applyToSnapshot(snapshotIds.component, compPrices),
+        ]);
+        return { ok: true, raw: rawUpdated, component: compUpdated };
+      } catch (err) {
+        const msg = err instanceof BsxError ? err.message : (err as Error).message;
+        log.warn('[bsx] load prices failed:', msg);
+        return { ok: false, error: msg };
+      }
+    },
+  );
 
   ipcMain.handle(IPC.BSX_LIST_WAREHOUSES, async () => {
     try {

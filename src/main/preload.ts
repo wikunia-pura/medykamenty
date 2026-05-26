@@ -47,6 +47,7 @@ const CH = {
   STOCK_DELETE_KIND: 'stock:delete-kind',
   STOCK_SUGGEST_MATCHES: 'stock:suggest-matches',
   STOCK_IMPORT_BSX: 'stock:import-bsx',
+  STOCK_LOAD_BSX_PRICES: 'stock:load-bsx-prices',
 
   BSX_TEST_CONNECTION: 'bsx:test-connection',
   BSX_SET_PASSWORD: 'bsx:set-password',
@@ -208,6 +209,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     limit?: number,
   ) => ipcRenderer.invoke(CH.STOCK_SUGGEST_MATCHES, kind, source, limit),
   importStockFromBsx: () => ipcRenderer.invoke(CH.STOCK_IMPORT_BSX),
+  loadBsxPrices: (snapshotIds: { raw?: string; component?: string }) =>
+    ipcRenderer.invoke(CH.STOCK_LOAD_BSX_PRICES, snapshotIds),
 
   // BSX integration (warehouse system)
   testBsxConnection: () => ipcRenderer.invoke(CH.BSX_TEST_CONNECTION),

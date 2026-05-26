@@ -66,6 +66,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
   const [adoptBusy, setAdoptBusy] = useState(false);
   const [bsxSettings, setBsxSettings] = useState<AppSettings['bsx']>(undefined);
   const [xlsxOpen, setXlsxOpen] = useState(false);
+  const [pricesLoading, setPricesLoading] = useState(false);
   const [rawQuery, setRawQuery] = useState('');
   const [compQuery, setCompQuery] = useState('');
   const [rawUnmatchedOnly, setRawUnmatchedOnly] = useState(false);
@@ -361,16 +362,40 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     setBusy(true);
     setLoaderMessage(t.bsxImporting);
     try {
+      // Phase A: stock snapshots (fast, ~2-3s). Show table immediately.
       const res = await window.electronAPI.importStockFromBsx();
       setSummary(res);
-      setRawExpanded(false);
-      setCompExpanded(false);
+      setRawExpanded(true);
+      setCompExpanded(true);
       await loadCurrent();
+      setLoaderMessage(null);
+      setBusy(false);
+
+      // Phase B: PZ price backfill (slow, ~30-60s). Fire-and-forget so the
+      // user can already work with the matched rows. The cards show an
+      // inline loader tag until this resolves and we re-fetch the snapshot.
+      const snapshotIds: { raw?: string; component?: string } = {};
+      if (res.snapshotIds[0]) snapshotIds.raw = res.snapshotIds[0];
+      if (res.snapshotIds[1]) snapshotIds.component = res.snapshotIds[1];
+      if (snapshotIds.raw || snapshotIds.component) {
+        setPricesLoading(true);
+        window.electronAPI
+          .loadBsxPrices(snapshotIds)
+          .then(async (priceRes) => {
+            if (!priceRes.ok) {
+              setError(`${t.bsxPricesFailed}: ${priceRes.error}`);
+            }
+            await loadCurrent();
+          })
+          .catch((err) => {
+            setError(`${t.bsxPricesFailed}: ${(err as Error).message}`);
+          })
+          .finally(() => setPricesLoading(false));
+      }
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setBusy(false);
       setLoaderMessage(null);
+      setBusy(false);
     }
   };
 
@@ -504,6 +529,21 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
       );
     };
 
+    // Renders a missing value as a muted dash so the user can tell empty data
+    // apart from a legitimate zero. Numeric columns set isPriceCol=true; while
+    // BSX prices are loading in the background we hide the dash for those
+    // columns so the page doesn't read as "data permanently missing".
+    const cell = (
+      value: number | string | undefined | null,
+      isPriceCol: boolean,
+    ): React.ReactNode => {
+      if (value === null || value === undefined || value === '') {
+        if (isPriceCol && pricesLoading) return <span className="cell-empty-loading">…</span>;
+        return <span className="cell-empty">—</span>;
+      }
+      return value;
+    };
+
     const cellFor = (id: string, r: StockRow): React.ReactNode => {
       switch (id) {
         case 'name':
@@ -513,27 +553,27 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         case 'qty':
           return <td key={id} className="num">{r.qty}</td>;
         case 'netUnit':
-          return <td key={id} className="num">{r.netPrice ?? ''}</td>;
+          return <td key={id} className="num">{cell(r.netPrice, true)}</td>;
         case 'vatUnit':
-          return <td key={id} className="num">{r.vatPrice ?? ''}</td>;
+          return <td key={id} className="num">{cell(r.vatPrice, true)}</td>;
         case 'grossUnit':
-          return <td key={id} className="num">{r.grossPrice ?? ''}</td>;
+          return <td key={id} className="num">{cell(r.grossPrice, true)}</td>;
         case 'currency':
-          return <td key={id}>{r.currency ?? ''}</td>;
+          return <td key={id}>{cell(r.currency, true)}</td>;
         case 'netTotal':
-          return <td key={id} className="num">{r.oNet ?? ''}</td>;
+          return <td key={id} className="num">{cell(r.oNet, true)}</td>;
         case 'vatTotal':
-          return <td key={id} className="num">{r.oVat ?? ''}</td>;
+          return <td key={id} className="num">{cell(r.oVat, true)}</td>;
         case 'grossTotal':
-          return <td key={id} className="num">{r.oGross ?? ''}</td>;
+          return <td key={id} className="num">{cell(r.oGross, true)}</td>;
         case 'symbol':
-          return <td key={id}>{r.mpFirmaSymbol ?? ''}</td>;
+          return <td key={id}>{cell(r.mpFirmaSymbol, false)}</td>;
         case 'manufacturer':
-          return <td key={id}>{r.manufacturerSymbol ?? ''}</td>;
+          return <td key={id}>{cell(r.manufacturerSymbol, false)}</td>;
         case 'warehouse':
-          return <td key={id}>{r.warehouse ?? ''}</td>;
+          return <td key={id}>{cell(r.warehouse, false)}</td>;
         case 'notes':
-          return <td key={id} className="col-wrap">{r.notes ?? ''}</td>;
+          return <td key={id} className="col-wrap">{cell(r.notes, true)}</td>;
         default:
           return null;
       }
@@ -689,6 +729,12 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
             {unmatched > 0 && (
               <span className="tag danger">
                 {t.rowsUnmatched}: {unmatched}
+              </span>
+            )}
+            {pricesLoading && snapshot.sourceFile.startsWith('BSX') && (
+              <span className="tag pricing-loading" title={t.bsxPricesLoading}>
+                <span className="spinner-dot" aria-hidden="true" />
+                {t.bsxPricesLoading}
               </span>
             )}
             <span className="hint">
@@ -874,6 +920,14 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         <div className="hint" style={{ marginTop: 8 }}>
           {t.rowsImported}: {(summary.rawCount ?? 0) + (summary.componentCount ?? 0)} ·{' '}
           {t.rowsUnmatched}: {summary.unmatched}
+        </div>
+      )}
+
+      {pricesLoading && (
+        <div className="prices-loading-banner" role="status" aria-live="polite">
+          <span className="spinner-dot" aria-hidden="true" />
+          <span className="prices-loading-text">{t.bsxPricesLoading}</span>
+          <span className="prices-loading-sub">{t.bsxPricesLoadingHint}</span>
         </div>
       )}
 

@@ -112,6 +112,9 @@ export interface ElectronAPI {
     limit?: number,
   ): Promise<MatchSuggestion[]>;
   importStockFromBsx(): Promise<ImportSummary>;
+  loadBsxPrices(snapshotIds: { raw?: string; component?: string }): Promise<
+    { ok: true; raw: number; component: number } | { ok: false; error: string }
+  >;
 
   // BSX integration
   testBsxConnection(): Promise<{ ok: true } | { ok: false; error: string }>;
