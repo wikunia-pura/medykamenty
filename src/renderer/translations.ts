@@ -112,6 +112,23 @@ export interface T {
   rawMaterialsImportModeOverwrite: string;
   rawMaterialsImportModeOverwriteDesc: string;
   rawMaterialsImportConfirm: string;
+  componentsImportXlsx: string;
+  componentsImportXlsxHint: string;
+  componentsImportSummary: string;
+  componentsImportComponentsCreated: string;
+  componentsImportComponentsUpdated: string;
+  componentsImportComponentsSkipped: string;
+  componentsImportComponentsDeleted: string;
+  componentsImportSuppliersCreated: string;
+  componentsImportSuppliersUpdated: string;
+  componentsImportWarnings: string;
+  componentsImportFailed: string;
+  componentsImportDialogTitle: string;
+  componentsImportModeMerge: string;
+  componentsImportModeMergeDesc: string;
+  componentsImportModeOverwrite: string;
+  componentsImportModeOverwriteDesc: string;
+  componentsImportConfirm: string;
   // Products
   capacityMl: string;
   density: string;
@@ -683,6 +700,26 @@ const pl: T = {
   rawMaterialsImportModeOverwriteDesc:
     'Plik staje się źródłem prawdy: usuwa z bazy surowce, których nie ma w pliku, oraz nadpisuje pola z pliku dla pozostałych (cena, waluta, MOQ, dostawca, notatki). Dostawcy są zachowywani w obu trybach.',
   rawMaterialsImportConfirm: 'Importuj',
+  componentsImportXlsx: 'Importuj plik z komponentami (xlsx)',
+  componentsImportXlsxHint:
+    'Wczyta arkusz z listą komponentów (kolumny: nazwa, dostawca, kontakt, mail, telefon, ilość, czas oczekiwania, warunki płatności, termin płatności, uwagi). Aplikacja utworzy/zaktualizuje dostawców i komponenty; typ komponentu zostanie rozpoznany z nazwy, a ręcznie wpisane pola pozostaną nietknięte.',
+  componentsImportSummary: 'Import zakończony',
+  componentsImportComponentsCreated: 'Komponenty utworzone',
+  componentsImportComponentsUpdated: 'Komponenty zaktualizowane',
+  componentsImportComponentsSkipped: 'Komponenty pominięte',
+  componentsImportComponentsDeleted: 'Komponenty usunięte',
+  componentsImportSuppliersCreated: 'Dostawcy utworzeni',
+  componentsImportSuppliersUpdated: 'Dostawcy zaktualizowani',
+  componentsImportWarnings: 'Ostrzeżenia',
+  componentsImportFailed: 'Nie udało się zaimportować pliku',
+  componentsImportDialogTitle: 'Import komponentów z pliku XLSX',
+  componentsImportModeMerge: 'Scal (aktualizuj istniejące)',
+  componentsImportModeMergeDesc:
+    'Aktualizuje komponenty, które już są w bazie (zachowuje ręcznie wprowadzone pola, odświeża ilość/MOQ, czas oczekiwania i preferowanego dostawcę), dodaje nowe. Komponenty spoza pliku pozostają nietknięte.',
+  componentsImportModeOverwrite: 'Zastąp (plik = źródło prawdy)',
+  componentsImportModeOverwriteDesc:
+    'Plik staje się źródłem prawdy: usuwa z bazy komponenty, których nie ma w pliku, oraz nadpisuje pola z pliku dla pozostałych (MOQ, czas oczekiwania, dostawca, notatki). Dostawcy są zachowywani w obu trybach.',
+  componentsImportConfirm: 'Importuj',
   capacityMl: 'Pojemność (ml)',
   density: 'Gęstość (g/ml)',
   laborCost: 'Koszt konfekcji (zł/szt.)',
@@ -1245,6 +1282,26 @@ const en: T = {
   rawMaterialsImportModeOverwriteDesc:
     'The file becomes the source of truth: deletes raw materials missing from the file and overwrites file-driven fields (price, currency, MOQ, supplier, notes) for the rest. Suppliers are preserved in both modes.',
   rawMaterialsImportConfirm: 'Import',
+  componentsImportXlsx: 'Import components file (xlsx)',
+  componentsImportXlsxHint:
+    'Loads a worksheet listing components (columns: name, supplier, contact, email, phone, quantity, lead time, payment terms, payment deadline, notes). The app creates/updates suppliers and components; the component type is inferred from the name and manually edited fields are preserved.',
+  componentsImportSummary: 'Import complete',
+  componentsImportComponentsCreated: 'Components created',
+  componentsImportComponentsUpdated: 'Components updated',
+  componentsImportComponentsSkipped: 'Components skipped',
+  componentsImportComponentsDeleted: 'Components deleted',
+  componentsImportSuppliersCreated: 'Suppliers created',
+  componentsImportSuppliersUpdated: 'Suppliers updated',
+  componentsImportWarnings: 'Warnings',
+  componentsImportFailed: 'Failed to import file',
+  componentsImportDialogTitle: 'Import components from XLSX',
+  componentsImportModeMerge: 'Merge (update existing)',
+  componentsImportModeMergeDesc:
+    'Updates components already in the database (keeps manually entered fields, refreshes quantity/MOQ, lead time and preferred supplier), and adds new ones. Components not in the file are left untouched.',
+  componentsImportModeOverwrite: 'Replace (file = source of truth)',
+  componentsImportModeOverwriteDesc:
+    'The file becomes the source of truth: deletes components missing from the file and overwrites file-driven fields (MOQ, lead time, supplier, notes) for the rest. Suppliers are preserved in both modes.',
+  componentsImportConfirm: 'Import',
   capacityMl: 'Capacity (ml)',
   density: 'Density (g/ml)',
   laborCost: 'Confection cost (PLN/unit)',

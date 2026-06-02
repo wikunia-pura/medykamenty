@@ -418,6 +418,20 @@ export interface RawMaterialsImportSummary {
   warnings: string[];
 }
 
+// Components import reuses the raw-materials merge/overwrite semantics. Kept as
+// a separate summary shape so the counters read naturally in the UI
+// ("komponenty" instead of "surowce").
+export interface ComponentsImportSummary {
+  mode: RawMaterialsImportMode;
+  componentsCreated: number;
+  componentsUpdated: number;
+  componentsSkipped: number;
+  componentsDeleted: number;
+  suppliersCreated: number;
+  suppliersUpdated: number;
+  warnings: string[];
+}
+
 export type RecipeImportMode = 'merge' | 'overwrite';
 
 export interface RecipeImportProductResult {

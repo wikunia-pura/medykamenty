@@ -19,6 +19,7 @@ import type {
 } from '../../shared/types';
 import { parseStockXlsx } from '../services/xlsxStockImporter';
 import { importRawMaterialsXlsx } from '../services/xlsxRawMaterialsImporter';
+import { importComponentsXlsx } from '../services/xlsxComponentsImporter';
 import {
   analyzeRecipesXlsx,
   commitRecipesXlsx,
@@ -209,6 +210,24 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.COMP_UPDATE, (_e, id: string, patch) => db.updateComponent(id, patch));
   ipcMain.handle(IPC.COMP_DELETE, (_e, id: string) => db.deleteComponent(id));
   ipcMain.handle(IPC.COMP_DUPLICATE, (_e, id: string) => db.duplicateComponent(id));
+
+  ipcMain.handle(IPC.COMP_XLSX_IMPORT, async (_e, mode: RawMaterialsImportMode) => {
+    const win = getMainWindow();
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Wybierz plik z komponentami (xlsx)',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { ok: false };
+    try {
+      const summary = await importComponentsXlsx(result.filePaths[0], mode, db);
+      db.updateSettings({ lastImportDir: path.dirname(result.filePaths[0]) });
+      return { ok: true, summary };
+    } catch (err) {
+      log.error('[components-import] failed:', err);
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
   // ---- Products ----
   ipcMain.handle(IPC.PRODUCTS_LIST, () => db.listProducts());

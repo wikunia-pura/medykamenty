@@ -23,6 +23,7 @@ export const IPC = {
   COMP_UPDATE: 'components:update',
   COMP_DELETE: 'components:delete',
   COMP_DUPLICATE: 'components:duplicate',
+  COMP_XLSX_IMPORT: 'components:xlsx-import',
 
   // Products
   PRODUCTS_LIST: 'products:list',

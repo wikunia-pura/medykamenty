@@ -10,6 +10,7 @@ import type {
   ImportSummary,
   RawMaterialsImportMode,
   RawMaterialsImportSummary,
+  ComponentsImportSummary,
   RecipeImportAnalysis,
   RecipeImportMode,
   RecipeImportResolutions,
@@ -62,6 +63,11 @@ export interface ElectronAPI {
   updateComponent(id: string, patch: Partial<PackagingComponent>): Promise<PackagingComponent>;
   deleteComponent(id: string): Promise<{ ok: boolean; blockedBy?: string[] }>;
   duplicateComponent(id: string): Promise<PackagingComponent>;
+  importComponentsXlsx(mode: RawMaterialsImportMode): Promise<{
+    ok: boolean;
+    summary?: ComponentsImportSummary;
+    error?: string;
+  }>;
 
   // Products
   listProducts(): Promise<Product[]>;

@@ -7,6 +7,8 @@ import type {
   PackingCapacityUnit,
   Supplier,
   ComponentType,
+  ComponentsImportSummary,
+  RawMaterialsImportMode,
 } from '../../shared/types';
 import { isSecondaryComponent, SECONDARY_COMPONENT_TYPES } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -19,7 +21,7 @@ import NumberInput from '../components/NumberInput';
 import ColumnPicker from '../components/ColumnPicker';
 import HoverTooltip from '../components/HoverTooltip';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
-import { IconEdit, IconTrash, IconPlus, IconStar, IconClose, IconEye, IconDuplicate } from '../components/Icons';
+import { IconEdit, IconTrash, IconPlus, IconStar, IconClose, IconEye, IconDuplicate, IconImport } from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
 import { useEscapeKey } from '../utils/useEscapeKey';
@@ -71,6 +73,11 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
   const [blockedBy, setBlockedBy] = useState<string[] | null>(null);
+  const [xlsxSummary, setXlsxSummary] = useState<ComponentsImportSummary | null>(null);
+  // XLSX import: when not null, the mode-selection modal is open with this
+  // mode pre-selected. The actual file pick happens in the main process after
+  // the user confirms the mode.
+  const [xlsxImportMode, setXlsxImportMode] = useState<RawMaterialsImportMode | null>(null);
 
   const closeEditor = () => {
     setEditing(null);
@@ -79,6 +86,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   };
 
   useEscapeKey(closeEditor, !!editing);
+  useEscapeKey(() => setXlsxSummary(null), !!xlsxSummary);
 
   const COLUMNS: ColumnDef[] = useMemo(
     () => [
@@ -358,6 +366,46 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     }
   };
 
+  const runImportXlsx = async (mode: RawMaterialsImportMode) => {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setLoaderMessage(t.loaderImporting);
+    try {
+      const res = await window.electronAPI.importComponentsXlsx(mode);
+      // User canceling the OS file picker returns ok:false with no error.
+      if (res.ok && res.summary) {
+        setXlsxSummary(res.summary);
+        setXlsxImportMode(null);
+        await reload();
+      } else {
+        setXlsxImportMode(null);
+        if (res.error) setError(`${t.componentsImportFailed}: ${res.error}`);
+      }
+    } catch (err) {
+      setError(`${t.componentsImportFailed}: ${(err as Error).message}`);
+      setXlsxImportMode(null);
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+  };
+
+  const onConfirmImportXlsx = async () => {
+    if (!xlsxImportMode) return;
+    await runImportXlsx(xlsxImportMode);
+  };
+
+  // When the list is empty, merge and overwrite are equivalent — skip the
+  // dialog and import straight away.
+  const onClickImportXlsx = () => {
+    if (items.length === 0) {
+      void runImportXlsx('merge');
+    } else {
+      setXlsxImportMode('merge');
+    }
+  };
+
   const onDelete = async (c: PackagingComponent) => {
     setConfirmDelete(null);
     const result = await window.electronAPI.deleteComponent(c.id);
@@ -454,6 +502,14 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
               onImport={onImport}
               busy={busy}
             />
+            <button
+              className="btn btn-import"
+              onClick={onClickImportXlsx}
+              disabled={busy}
+              title={t.componentsImportXlsxHint}
+            >
+              <IconImport size={13} /> {t.componentsImportXlsx}
+            </button>
             <ColumnPicker
               columns={orderedColumns}
               isVisible={isVisible}
@@ -761,6 +817,23 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         />
       )}
 
+      {xlsxImportMode !== null && (
+        <ComponentsImportModeDialog
+          mode={xlsxImportMode}
+          onChange={setXlsxImportMode}
+          onCancel={() => setXlsxImportMode(null)}
+          onConfirm={onConfirmImportXlsx}
+          busy={busy}
+        />
+      )}
+
+      {xlsxSummary && (
+        <ComponentsXlsxImportSummaryModal
+          summary={xlsxSummary}
+          onClose={() => setXlsxSummary(null)}
+        />
+      )}
+
       {blockedBy && (
         <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />
       )}
@@ -942,6 +1015,158 @@ const DependenciesEditor: React.FC<DependenciesEditorProps> = ({
           })}
         </tbody>
       </table>
+    </div>
+  );
+};
+
+// ---------- XLSX import: mode picker ----------
+
+interface ComponentsModeDialogProps {
+  mode: RawMaterialsImportMode;
+  onChange: (m: RawMaterialsImportMode) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  busy: boolean;
+}
+
+const ComponentsImportModeDialog: React.FC<ComponentsModeDialogProps> = ({
+  mode,
+  onChange,
+  onCancel,
+  onConfirm,
+  busy,
+}) => {
+  const t = useT();
+  useEscapeKey(onCancel, !busy);
+  return (
+    <div className="modal-overlay" onClick={busy ? undefined : onCancel}>
+      <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
+        <ModalHeader
+          icon={<IconImport size={18} />}
+          tone="add"
+          title={t.componentsImportDialogTitle}
+          onClose={onCancel}
+        />
+        <div className="modal-body">
+          <label className="form-row" style={{ alignItems: 'flex-start', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="comp-import-mode"
+              checked={mode === 'merge'}
+              onChange={() => onChange('merge')}
+              disabled={busy}
+              style={{ marginTop: 4 }}
+            />
+            <div style={{ marginLeft: 8 }}>
+              <strong>{t.componentsImportModeMerge}</strong>
+              <div className="hint" style={{ marginTop: 4 }}>
+                {t.componentsImportModeMergeDesc}
+              </div>
+            </div>
+          </label>
+          <label className="form-row" style={{ alignItems: 'flex-start', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="comp-import-mode"
+              checked={mode === 'overwrite'}
+              onChange={() => onChange('overwrite')}
+              disabled={busy}
+              style={{ marginTop: 4 }}
+            />
+            <div style={{ marginLeft: 8 }}>
+              <strong>{t.componentsImportModeOverwrite}</strong>
+              <div className="hint" style={{ marginTop: 4 }}>
+                {t.componentsImportModeOverwriteDesc}
+              </div>
+            </div>
+          </label>
+        </div>
+        <div className="modal-footer">
+          <button className="btn" onClick={onCancel} disabled={busy}>
+            {t.cancel}
+          </button>
+          <button
+            className={`btn ${mode === 'overwrite' ? 'danger' : 'primary-filled'}`}
+            onClick={onConfirm}
+            disabled={busy}
+          >
+            {t.componentsImportConfirm}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+interface ComponentsXlsxSummaryModalProps {
+  summary: ComponentsImportSummary;
+  onClose: () => void;
+}
+
+const ComponentsXlsxImportSummaryModal: React.FC<ComponentsXlsxSummaryModalProps> = ({
+  summary,
+  onClose,
+}) => {
+  const t = useT();
+  useEscapeKey(onClose);
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
+        <ModalHeader
+          icon={<IconImport size={18} />}
+          tone="add"
+          title={t.componentsImportSummary}
+          onClose={onClose}
+        />
+        <div className="modal-body">
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+            <li>
+              {t.componentsImportComponentsCreated}: <strong>{summary.componentsCreated}</strong>
+            </li>
+            <li>
+              {t.componentsImportComponentsUpdated}: <strong>{summary.componentsUpdated}</strong>
+            </li>
+            {summary.componentsSkipped > 0 && (
+              <li>
+                {t.componentsImportComponentsSkipped}: <strong>{summary.componentsSkipped}</strong>
+              </li>
+            )}
+            {summary.componentsDeleted > 0 && (
+              <li>
+                {t.componentsImportComponentsDeleted}: <strong>{summary.componentsDeleted}</strong>
+              </li>
+            )}
+            <li>
+              {t.componentsImportSuppliersCreated}: <strong>{summary.suppliersCreated}</strong>
+            </li>
+            <li>
+              {t.componentsImportSuppliersUpdated}: <strong>{summary.suppliersUpdated}</strong>
+            </li>
+          </ul>
+          {summary.warnings.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ marginBottom: 6 }}>
+                <strong>{t.componentsImportWarnings}</strong> ({summary.warnings.length})
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+                {summary.warnings.slice(0, 20).map((w, i) => (
+                  <li key={i} className="hint">
+                    {w}
+                  </li>
+                ))}
+                {summary.warnings.length > 20 && (
+                  <li className="hint">… +{summary.warnings.length - 20}</li>
+                )}
+              </ul>
+            </div>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn primary-filled" onClick={onClose}>
+            <IconClose size={13} /> {t.close}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

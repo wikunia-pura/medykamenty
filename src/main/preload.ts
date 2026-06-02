@@ -25,6 +25,7 @@ const CH = {
   COMP_UPDATE: 'components:update',
   COMP_DELETE: 'components:delete',
   COMP_DUPLICATE: 'components:duplicate',
+  COMP_XLSX_IMPORT: 'components:xlsx-import',
 
   PRODUCTS_LIST: 'products:list',
   PRODUCTS_GET: 'products:get',
@@ -161,6 +162,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateComponent: (id: string, patch: any) => ipcRenderer.invoke(CH.COMP_UPDATE, id, patch),
   deleteComponent: (id: string) => ipcRenderer.invoke(CH.COMP_DELETE, id),
   duplicateComponent: (id: string) => ipcRenderer.invoke(CH.COMP_DUPLICATE, id),
+  importComponentsXlsx: (mode: 'merge' | 'overwrite') =>
+    ipcRenderer.invoke(CH.COMP_XLSX_IMPORT, mode),
 
   // Products
   listProducts: () => ipcRenderer.invoke(CH.PRODUCTS_LIST),
