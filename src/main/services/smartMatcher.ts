@@ -29,8 +29,6 @@ export interface Suggestion {
 const DIACRITICS = /[̀-ͯ]/g;
 // Parenthetical chunks (), [], {} are usually descriptive noise.
 const PAREN_NOISE = /[([{][^)\]}]*[)\]}]/g;
-// Unit-ish tokens commonly appended to MP Firma rows.
-const UNIT_TOKENS = /\b(kg|g|gram|gramy|ml|l|szt|sztuk|szt\.|opak|opakowanie|%)\b/g;
 // Common product-form noise words (Polish + English) — stripped before scoring.
 const FORM_NOISE = new Set([
   'spray',
@@ -64,6 +62,11 @@ const INVISIBLE_CHARS = /[​-‍⁠﻿­]/gu;
 
 export function normalize(s: string): string {
   if (!s) return '';
+  // Numbers and units are IDENTITY for components ("Butelka 100 ml" vs
+  // "...200 ml", "Taśma ML 60 mb" vs "...120 mb", "CBD 1" vs "CBD 10") — they
+  // must survive normalization, otherwise distinct items collapse to one key
+  // and their stocks get summed. We therefore keep digits and unit tokens, and
+  // only split digit↔letter boundaries so "100ml" and "100 ml" tokenize alike.
   return s
     .replace(INVISIBLE_CHARS, '')
     .normalize('NFD')
@@ -72,17 +75,19 @@ export function normalize(s: string): string {
     .replace(PAREN_NOISE, ' ')
     .replace(/&/g, ' ')
     .replace(PUNCT, ' ')
-    .replace(UNIT_TOKENS, ' ')
-    .replace(/\d+/g, ' ')
+    .replace(/(\d)(\p{L})/gu, '$1 $2')
+    .replace(/(\p{L})(\d)/gu, '$1 $2')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
 function tokenize(normalized: string): string[] {
   if (!normalized) return [];
+  // Keep single-character tokens: product-line codes ("Cutis P" vs "Cutis Ł")
+  // and bare numbers ("CBD 1" vs "CBD 10") are discriminating, not noise.
   return normalized
     .split(' ')
-    .filter((t) => t.length >= 2 && !FORM_NOISE.has(t));
+    .filter((t) => t.length >= 1 && !FORM_NOISE.has(t));
 }
 
 function levenshtein(a: string, b: string): number {
