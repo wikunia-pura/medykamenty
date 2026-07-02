@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useT, useLang } from '../i18n';
 import { HeaderNav } from '../navigation';
 import type {
@@ -99,6 +99,22 @@ const MaxProducibleView: React.FC = () => {
   const [pendingExpired, setPendingExpired] = useState<
     { batches: ExpiredBatchRef[]; targetIds: string[]; base: MaxProducibleResult[] } | null
   >(null);
+  // Editable copy of the "count this expired batch?" decision, shown as a panel
+  // over the results so the user can change it and recompute — mirrors the
+  // shortage report. Re-seeded from the results' own `included` flags.
+  const [expiredDraft, setExpiredDraft] = useState<Set<string>>(new Set());
+
+  // Expired batches across all current results, deduped by batch id.
+  const expiredBatches = useMemo(() => {
+    const byId = new Map<string, ExpiredBatchRef>();
+    for (const r of results) for (const b of r.expiredBatches ?? []) byId.set(b.batchId, b);
+    return Array.from(byId.values());
+  }, [results]);
+
+  // Re-seed the draft whenever the results change (a fresh compute).
+  useEffect(() => {
+    setExpiredDraft(new Set(expiredBatches.filter((b) => b.included).map((b) => b.batchId)));
+  }, [expiredBatches]);
 
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [productModalReadOnly, setProductModalReadOnly] = useState(false);
@@ -258,6 +274,85 @@ const MaxProducibleView: React.FC = () => {
             <IconRefresh size={16} className={busy ? 'spinning' : undefined} />
             <span>{t.maxProducibleRefresh}</span>
           </button>
+        </div>
+      )}
+
+      {expiredBatches.length > 0 && (
+        <div className="card expired-report-panel">
+          <strong className="warn-text">{t.expiredStockTitle}</strong>
+          <div className="hint" style={{ margin: '4px 0 10px' }}>
+            {t.expiredReportPanelHint}
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>{t.name}</th>
+                  <th className="num">{t.stock}</th>
+                  <th>{t.expiry}</th>
+                  <th>{t.expiredStockInclude}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {expiredBatches.map((b) => {
+                  const on = expiredDraft.has(b.batchId);
+                  const retested =
+                    !!b.effectiveExpiry && b.effectiveExpiry !== b.originalExpiry;
+                  return (
+                    <tr key={b.batchId}>
+                      <td className="col-wrap">
+                        {b.rawMaterialName}
+                        {b.note && <div className="hint">{b.note}</div>}
+                      </td>
+                      <td className="num">
+                        {b.qty.toLocaleString(locale)} {b.unit}
+                      </td>
+                      <td>
+                        <span className="stock-batch-flag">
+                          {b.effectiveExpiry
+                            ? new Date(b.effectiveExpiry).toLocaleDateString(locale)
+                            : '—'}
+                        </span>
+                        {retested && (
+                          <div className="hint">
+                            {t.expiryOriginal}:{' '}
+                            {b.originalExpiry
+                              ? new Date(b.originalExpiry).toLocaleDateString(locale)
+                              : '—'}
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() =>
+                            setExpiredDraft((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(b.batchId)) next.delete(b.batchId);
+                              else next.add(b.batchId);
+                              return next;
+                            })
+                          }
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="row" style={{ marginTop: 10 }}>
+            <div className="spacer" />
+            <button
+              className="btn primary-filled"
+              disabled={busy || productIds.length === 0}
+              onClick={() => void runCompute(productIds, [...expiredDraft])}
+              title={t.expiredReportRegenerate}
+            >
+              {t.expiredReportRegenerate}
+            </button>
+          </div>
         </div>
       )}
 
