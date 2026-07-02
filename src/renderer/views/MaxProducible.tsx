@@ -6,10 +6,12 @@ import type {
   MaxProducibleResult,
   RawMaterial,
   PackagingComponent,
+  ExpiredBatchRef,
 } from '../../shared/types';
 import MultiSelect from '../components/MultiSelect';
 import LoadingOverlay from '../components/LoadingOverlay';
 import ProductEditorModal from '../components/ProductEditorModal';
+import ExpiredStockModal from '../components/ExpiredStockModal';
 import { IconRefresh, IconChevronDown } from '../components/Icons';
 
 type Bottleneck = MaxProducibleResult['bottlenecks'][number];
@@ -91,6 +93,12 @@ const MaxProducibleView: React.FC = () => {
   const [expandedIds, setExpandedIds] = useState<string[]>(() => loadState().expandedIds);
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  // Expired-stock gate for the production calculator: after the first
+  // (expired-excluded) pass, if any ingredient has expired batches the user
+  // decides per-run which to count; `base` holds that first pass for cancel.
+  const [pendingExpired, setPendingExpired] = useState<
+    { batches: ExpiredBatchRef[]; targetIds: string[]; base: MaxProducibleResult[] } | null
+  >(null);
 
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [productModalReadOnly, setProductModalReadOnly] = useState(false);
@@ -164,16 +172,39 @@ const MaxProducibleView: React.FC = () => {
     );
   };
 
+  const runCompute = async (targetIds: string[], includeExpiredBatchIds: string[]) => {
+    setBusy(true);
+    setLoaderMessage(t.loaderComputing);
+    try {
+      const next = await Promise.all(
+        targetIds.map((id) => window.electronAPI.maxProducible(id, includeExpiredBatchIds)),
+      );
+      setResults(next);
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+  };
+
   const compute = async (ids?: string[]) => {
     const targetIds = ids ?? productIds;
     if (targetIds.length === 0) return;
     setBusy(true);
     setLoaderMessage(t.loaderComputing);
     try {
-      const next = await Promise.all(
+      // First pass excludes all expired stock. If any expired batch is
+      // relevant, gate on the per-run decision before showing results.
+      const base = await Promise.all(
         targetIds.map((id) => window.electronAPI.maxProducible(id)),
       );
-      setResults(next);
+      const byId = new Map<string, ExpiredBatchRef>();
+      for (const r of base) for (const b of r.expiredBatches ?? []) byId.set(b.batchId, b);
+      const expired = Array.from(byId.values());
+      if (expired.length > 0) {
+        setPendingExpired({ batches: expired, targetIds, base });
+        return;
+      }
+      setResults(base);
     } finally {
       setBusy(false);
       setLoaderMessage(null);
@@ -303,6 +334,19 @@ const MaxProducibleView: React.FC = () => {
                       <span className="tag">
                         {b.kind === 'raw' ? t.rawMaterials : t.components}
                       </span>
+                      {b.nextExpiry && (
+                        <span className="maxprod-expiry">
+                          {t.expiry}: {new Date(b.nextExpiry).toLocaleDateString(locale)}
+                        </span>
+                      )}
+                      {b.expiredExcludedQty ? (
+                        <span className="maxprod-expiry stock-batch-flag">
+                          {t.maxProducibleExpiredExcluded.replace(
+                            '{n}',
+                            b.expiredExcludedQty.toLocaleString(locale),
+                          )}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="maxprod-stats">
                       <div className="maxprod-stat">
@@ -339,6 +383,7 @@ const MaxProducibleView: React.FC = () => {
                         <th>{t.name}</th>
                         <th></th>
                         <th className="num">{t.available}</th>
+                        <th>{t.expiry}</th>
                         <th className="num">{t.perUnitLabel}</th>
                         <th className="num">{t.enoughFor}</th>
                         <th></th>
@@ -361,6 +406,19 @@ const MaxProducibleView: React.FC = () => {
                               </span>
                             </td>
                             <td className="num">{fmtAmount(b, t.unitsShort)}</td>
+                            <td>
+                              {b.nextExpiry
+                                ? new Date(b.nextExpiry).toLocaleDateString(locale)
+                                : '—'}
+                              {b.expiredExcludedQty ? (
+                                <div className="hint stock-batch-flag">
+                                  {t.maxProducibleExpiredExcluded.replace(
+                                    '{n}',
+                                    b.expiredExcludedQty.toLocaleString(locale),
+                                  )}
+                                </div>
+                              ) : null}
+                            </td>
                             <td className="num">{fmtPerUnit(b, t.unitsShort)}</td>
                             <td className="num">
                               <strong>{b.maxUnits.toLocaleString(locale)}</strong>{' '}
@@ -393,6 +451,23 @@ const MaxProducibleView: React.FC = () => {
           onSave={saveProduct}
           readOnly={productModalReadOnly}
           onEnterEdit={() => setProductModalReadOnly(false)}
+        />
+      )}
+
+      {pendingExpired && (
+        <ExpiredStockModal
+          batches={pendingExpired.batches}
+          onCancel={() => {
+            // Cancel = keep the expired-excluded first pass.
+            setResults(pendingExpired.base);
+            setPendingExpired(null);
+          }}
+          onConfirm={(ids) => {
+            const { targetIds, base } = pendingExpired;
+            setPendingExpired(null);
+            if (ids.length === 0) setResults(base);
+            else void runCompute(targetIds, ids);
+          }}
         />
       )}
 

@@ -129,7 +129,7 @@ function normalizeKey(s: string): string {
 //
 // The components file has no type column. Map the leading words of the name to
 // a ComponentType. Order matters: the first matching rule wins.
-function inferComponentType(name: string): ComponentType {
+export function inferComponentType(name: string): ComponentType {
   const n = normalizeKey(name);
   if (n.startsWith('atomizer') || n.startsWith('dozownik')) return 'pump';
   if (n.startsWith('beczka')) return 'barrel';

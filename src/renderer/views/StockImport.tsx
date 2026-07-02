@@ -7,6 +7,8 @@ import type {
   RawMaterial,
   PackagingComponent,
   AppSettings,
+  StockConflict,
+  StockConflictResolution,
 } from '../../shared/types';
 import type { ViewKey } from './types';
 import DropZone from '../components/DropZone';
@@ -53,11 +55,13 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [conflicts, setConflicts] = useState<StockConflict[]>([]);
   const [rawRows, setRawRows] = useState<StockRow[]>([]);
   const [compRows, setCompRows] = useState<StockRow[]>([]);
   const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
   const [components, setComponents] = useState<PackagingComponent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [rawExpanded, setRawExpanded] = useState<boolean>(() => readExpanded(RAW_EXPANDED_KEY));
   const [compExpanded, setCompExpanded] = useState<boolean>(() => readExpanded(COMP_EXPANDED_KEY));
@@ -396,6 +400,41 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
       setError((err as Error).message);
       setLoaderMessage(null);
       setBusy(false);
+    }
+  };
+
+  const handleResolveConflicts = async (resolutions: StockConflictResolution[]) => {
+    setError(null);
+    try {
+      await window.electronAPI.resolveStockConflicts(resolutions);
+      setConflicts([]);
+      await loadCurrent();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  // Explicit, user-triggered sync of catalog stock from the current snapshots.
+  // Applies non-conflicting quantities silently and opens the conflict dialog
+  // for any manually-edited items that disagree.
+  const syncCatalog = async () => {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setLoaderMessage(t.stockSyncInProgress);
+    try {
+      const res = await window.electronAPI.syncStockCatalog();
+      await loadCurrent();
+      if (res.conflicts.length > 0) {
+        setConflicts(res.conflicts);
+      } else {
+        setInfo(t.stockSyncDone.replace('{n}', String(res.applied)));
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
     }
   };
 
@@ -768,8 +807,19 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
             ({rawRows.length + compRows.length})
           </span>
         )}
+        <button
+          type="button"
+          className="btn primary"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => void syncCatalog()}
+          disabled={busy || (!rawSnapshot && !compSnapshot)}
+          title={t.stockSyncHint}
+        >
+          <IconCheck size={14} /> {t.stockSync}
+        </button>
       </div>
       {taskBanner}
+      {info && <div className="hint" style={{ marginTop: 8 }}>{info}</div>}
       <p className="subtitle">
         Import xlsx z MP Firma. Aplikacja dopasuje pozycje do istniejących surowców i komponentów po
         symbolu lub nazwie. Pozycje wieloznaczne lub nierozpoznane można rozstrzygnąć ręcznie.
@@ -941,6 +991,14 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
       <div className="hint" style={{ marginTop: 8 }}>
         {t.rawMaterials}: {rawMaterials.length} · {t.components}: {components.length}
       </div>
+
+      {conflicts.length > 0 && (
+        <StockConflictModal
+          conflicts={conflicts}
+          onApply={(resolutions) => void handleResolveConflicts(resolutions)}
+          onCancel={() => setConflicts([])}
+        />
+      )}
 
       {editingRow && (
         <EditRowDialog
@@ -1153,6 +1211,130 @@ const EditRowDialog: React.FC<EditRowProps> = ({ row, onChange, onSave, onCancel
           </button>
           <button className="btn primary-filled" onClick={onSave}>
             {t.save}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------- Stock conflict reconciliation ----------
+// Shown after an import when manually-edited catalog stock disagrees with the
+// imported value. The user decides, per item or in bulk, whether to keep the
+// current (manual) value or take the imported one. Default is 'keep' so manual
+// corrections are never lost without an explicit choice.
+
+interface StockConflictModalProps {
+  conflicts: StockConflict[];
+  onApply: (resolutions: StockConflictResolution[]) => void;
+  onCancel: () => void;
+}
+
+const conflictKey = (c: StockConflict) => `${c.kind}:${c.itemId}`;
+
+const StockConflictModal: React.FC<StockConflictModalProps> = ({
+  conflicts,
+  onApply,
+  onCancel,
+}) => {
+  const t = useT();
+  useEscapeKey(onCancel);
+  const [actions, setActions] = useState<Record<string, 'keep' | 'take'>>(() =>
+    Object.fromEntries(conflicts.map((c) => [conflictKey(c), 'keep' as const])),
+  );
+
+  const setAll = (action: 'keep' | 'take') =>
+    setActions(Object.fromEntries(conflicts.map((c) => [conflictKey(c), action])));
+
+  const apply = () => {
+    onApply(
+      conflicts.map((c) => ({
+        itemId: c.itemId,
+        kind: c.kind,
+        action: actions[conflictKey(c)] ?? 'keep',
+        importedQty: c.importedQty,
+        importSourceFile: c.importSourceFile,
+      })),
+    );
+  };
+
+  const fmtQty = (qty: number | undefined, unit?: string) =>
+    qty === undefined ? '—' : `${qty.toLocaleString()}${unit ? ` ${unit}` : ''}`;
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
+        <ModalHeader
+          icon={<IconImport size={18} />}
+          tone="edit"
+          title={t.stockConflictTitle}
+          subtitle={t.stockConflictSubtitle.replace('{n}', String(conflicts.length))}
+          onClose={onCancel}
+        />
+        <div className="modal-body">
+          <div className="toolbar-actions" style={{ marginBottom: 10 }}>
+            <button className="btn btn-sm" onClick={() => setAll('keep')}>
+              {t.stockConflictKeepAll}
+            </button>
+            <button className="btn btn-sm" onClick={() => setAll('take')}>
+              {t.stockConflictTakeAll}
+            </button>
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>{t.name}</th>
+                  <th className="num">{t.stockConflictCurrent}</th>
+                  <th className="num">{t.stockConflictImported}</th>
+                  <th className="col-w-md">{t.stockConflictDecision}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {conflicts.map((c) => {
+                  const key = conflictKey(c);
+                  const action = actions[key] ?? 'keep';
+                  return (
+                    <tr key={key}>
+                      <td className="col-wrap">{c.name}</td>
+                      <td className="num">
+                        {fmtQty(c.currentQty, c.unit)}
+                        {c.currentUpdatedAt && (
+                          <div className="hint" style={{ fontSize: 11 }}>
+                            {new Date(c.currentUpdatedAt).toLocaleDateString()}
+                          </div>
+                        )}
+                      </td>
+                      <td className="num">{fmtQty(c.importedQty, c.unit)}</td>
+                      <td>
+                        <div className="btn-row">
+                          <button
+                            className={`btn btn-sm ${action === 'keep' ? 'primary-filled' : ''}`}
+                            onClick={() => setActions((p) => ({ ...p, [key]: 'keep' }))}
+                          >
+                            {t.stockConflictKeep}
+                          </button>
+                          <button
+                            className={`btn btn-sm ${action === 'take' ? 'primary-filled' : ''}`}
+                            onClick={() => setActions((p) => ({ ...p, [key]: 'take' }))}
+                          >
+                            {t.stockConflictTake}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn" onClick={onCancel}>
+            {t.cancel}
+          </button>
+          <button className="btn primary-filled" onClick={apply}>
+            {t.stockConflictApply}
           </button>
         </div>
       </div>

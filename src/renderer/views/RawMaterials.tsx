@@ -6,9 +6,17 @@ import type {
   RawMaterial,
   RawMaterialsImportMode,
   RawMaterialsImportSummary,
+  RawStockAnalysis,
+  RawStockDecision,
   Supplier,
   Unit,
 } from '../../shared/types';
+import {
+  totalStockQty,
+  hasExpiredBatch,
+  batchExpiryStatus,
+  isExpired,
+} from '../../shared/expiry';
 import ConfirmDialog from '../components/ConfirmDialog';
 import BlockedByDialog from '../components/BlockedByDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
@@ -16,6 +24,8 @@ import SupplierMultiPicker from '../components/SupplierMultiPicker';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
 import NumberInput from '../components/NumberInput';
+import StockCell from '../components/StockCell';
+import OverageCell from '../components/OverageCell';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
 import {
@@ -28,6 +38,7 @@ import {
   IconSettings,
   IconDuplicate,
 } from '../components/Icons';
+import HoverTooltip from '../components/HoverTooltip';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
 import { useEscapeKey } from '../utils/useEscapeKey';
@@ -41,11 +52,24 @@ import {
 
 const UNITS: Unit[] = ['kg', 'g', 'l', 'ml'];
 
+// Stable id for a new stock batch. crypto.randomUUID needs a secure context,
+// which the production file:// renderer isn't — fall back to a random string.
+const newBatchId = (): string =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `b-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
 const RawMaterials: React.FC = () => {
   const t = useT();
   const [items, setItems] = useState<RawMaterial[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [wasteFactor, setWasteFactor] = useState<number>(1);
+  // Type-level default overage % for raw materials; items without their own
+  // overagePct inherit this. Edited in the settings modal.
+  const [defaultOveragePct, setDefaultOveragePct] = useState<number>(0);
+  // Draft value for the "set for all" bulk action (settings modal).
+  const [overageForAll, setOverageForAll] = useState<number | undefined>(undefined);
+  const [confirmOverageForAll, setConfirmOverageForAll] = useState<number | null>(null);
+  const [confirmResetOverageAll, setConfirmResetOverageAll] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<RawMaterial> | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<RawMaterial | null>(null);
@@ -61,9 +85,21 @@ const RawMaterials: React.FC = () => {
   // the user confirms the mode.
   const [xlsxImportMode, setXlsxImportMode] = useState<RawMaterialsImportMode | null>(null);
   const [blockedBy, setBlockedBy] = useState<string[] | null>(null);
+  // Warehouse ("Magazyn") raw-stock import: analysis awaiting the user's
+  // take/reject decision on Σ(C)≠D mismatches. Consistent materials import
+  // without opening the modal.
+  const [rawStockAnalysis, setRawStockAnalysis] = useState<RawStockAnalysis | null>(null);
+  // Expiry filters. 'expiring' uses `expiringDays` as the window (user-picked).
+  const [expiryFilter, setExpiryFilter] = useState<'all' | 'expired' | 'expiring'>('all');
+  const [expiringDays, setExpiringDays] = useState<number>(30);
+  // True once the user has touched the stock/batch editor in the modal — only
+  // then does save write stock fields (and flag the item as manually set), so
+  // editing other fields never disturbs import-sourced stock.
+  const [stockDirty, setStockDirty] = useState(false);
 
   useEscapeKey(() => setEditing(null), !!editing);
   useEscapeKey(() => setXlsxSummary(null), !!xlsxSummary);
+  useEscapeKey(() => setRawStockAnalysis(null), !!rawStockAnalysis);
   useEscapeKey(() => setSettingsOpen(false), settingsOpen);
 
   const COLUMNS: ColumnDef[] = useMemo(
@@ -71,11 +107,13 @@ const RawMaterials: React.FC = () => {
       { id: 'name', label: t.name, required: true },
       { id: 'symbol', label: t.symbol, defaultVisible: true },
       { id: 'unit', label: t.unit, defaultVisible: true },
+      { id: 'stock', label: t.stock, defaultVisible: true },
       { id: 'suppliers', label: t.suppliers, defaultVisible: true },
       { id: 'moq', label: t.moq, defaultVisible: true },
       { id: 'leadTime', label: t.leadTime, defaultVisible: true },
       { id: 'shelfLife', label: t.shelfLife, defaultVisible: false },
       { id: 'price', label: t.price, defaultVisible: false },
+      { id: 'overage', label: t.overage, defaultVisible: true },
       { id: 'currency', label: t.currency, defaultVisible: false },
       { id: 'factory', label: t.factorySupplied, defaultVisible: true },
       { id: 'notes', label: t.notes, defaultVisible: false },
@@ -99,6 +137,8 @@ const RawMaterials: React.FC = () => {
         return <th key={id} className="col-w-md">{t.symbol}</th>;
       case 'unit':
         return <th key={id} className="col-w-sm">{t.unit}</th>;
+      case 'stock':
+        return <th key={id} className="num col-w-md">{t.stock}</th>;
       case 'suppliers':
         return <th key={id} className="col-w-xl">{t.suppliers}</th>;
       case 'moq':
@@ -109,6 +149,8 @@ const RawMaterials: React.FC = () => {
         return <th key={id} className="num col-w-sm">{t.shelfLife}</th>;
       case 'price':
         return <th key={id} className="num col-w-sm">{t.price}</th>;
+      case 'overage':
+        return <th key={id} className="num col-w-sm">{t.overage}</th>;
       case 'currency':
         return <th key={id} className="col-w-sm">{t.currency}</th>;
       case 'factory':
@@ -128,6 +170,19 @@ const RawMaterials: React.FC = () => {
         return <td key={id}>{rm.mpFirmaSymbol ?? ''}</td>;
       case 'unit':
         return <td key={id}>{rm.unit}</td>;
+      case 'stock':
+        return (
+          <StockCell
+            key={id}
+            qty={totalStockQty(rm)}
+            unit={rm.unit}
+            source={rm.stockSource}
+            updatedAt={rm.stockUpdatedAt}
+            sourceFile={rm.stockSourceFile}
+            batches={rm.stockBatches}
+            onCommit={(q) => onSetStock(rm.id, q)}
+          />
+        );
       case 'suppliers':
         return <td key={id} className="col-wrap">{renderSupplierChips(rm)}</td>;
       case 'moq':
@@ -138,6 +193,15 @@ const RawMaterials: React.FC = () => {
         return <td key={id} className="num">{rm.shelfLifeMonths ?? ''}</td>;
       case 'price':
         return <td key={id} className="num">{rm.lastPurchasePriceNet ?? ''}</td>;
+      case 'overage':
+        return (
+          <OverageCell
+            key={id}
+            pct={rm.overagePct}
+            defaultPct={defaultOveragePct}
+            onCommit={(pct) => onSetOverage(rm.id, pct)}
+          />
+        );
       case 'currency':
         return <td key={id}>{rm.currency ?? ''}</td>;
       case 'factory':
@@ -163,14 +227,54 @@ const RawMaterials: React.FC = () => {
     ]);
     setItems(rms);
     setSuppliers(ss);
-    setWasteFactor(s.wasteFactor);
+    setDefaultOveragePct(s.defaultOveragePctRaw);
   };
 
-  const onChangeWasteFactor = async (v: number | undefined) => {
-    const next = v ?? 1;
-    setWasteFactor(next);
-    const updated: AppSettings = await window.electronAPI.updateSettings({ wasteFactor: next });
-    setWasteFactor(updated.wasteFactor);
+  const onChangeDefaultOverage = async (v: number | undefined) => {
+    const next = v ?? 0;
+    setDefaultOveragePct(next);
+    const updated: AppSettings = await window.electronAPI.updateSettings({
+      defaultOveragePctRaw: next,
+    });
+    setDefaultOveragePct(updated.defaultOveragePctRaw);
+  };
+
+  // Per-item overage edit from the grid. `undefined` clears it → inherit default.
+  const onSetOverage = async (id: string, pct: number | undefined) => {
+    setError(null);
+    try {
+      await window.electronAPI.updateRawMaterial(id, { overagePct: pct });
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const onSetOverageForAll = async (pct: number) => {
+    setConfirmOverageForAll(null);
+    setError(null);
+    setInfo(null);
+    try {
+      const n = await window.electronAPI.setOveragePctForAll('raw', pct);
+      setInfo(t.overageSetForAllDone.replace('{n}', String(n)));
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  // Clear the explicit overage on every raw material → all inherit the default.
+  const onResetOverageForAll = async () => {
+    setConfirmResetOverageAll(false);
+    setError(null);
+    setInfo(null);
+    try {
+      const n = await window.electronAPI.setOveragePctForAll('raw', null);
+      setInfo(t.overageResetAllDone.replace('{n}', String(n)));
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
   };
 
   useEffect(() => {
@@ -187,28 +291,87 @@ const RawMaterials: React.FC = () => {
   const supplierName = (id?: string) => suppliers.find((s) => s.id === id)?.name ?? '—';
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return items;
+    const q = query.trim();
     return items.filter((rm) => {
-      // Include resolved supplier names in the search corpus.
-      const supplierNames = (rm.supplierIds ?? [])
-        .map((id) => suppliers.find((s) => s.id === id)?.name ?? '')
-        .join(' ');
-      return matchesQuery({ ...rm, supplierNames }, query);
+      if (q) {
+        // Include resolved supplier names in the search corpus.
+        const supplierNames = (rm.supplierIds ?? [])
+          .map((id) => suppliers.find((s) => s.id === id)?.name ?? '')
+          .join(' ');
+        if (!matchesQuery({ ...rm, supplierNames }, query)) return false;
+      }
+      if (expiryFilter === 'expired') {
+        if (!hasExpiredBatch(rm)) return false;
+      } else if (expiryFilter === 'expiring') {
+        // Any batch expiring within the chosen window (not yet expired).
+        const soon = (rm.stockBatches ?? []).some(
+          (b) => batchExpiryStatus(b, expiringDays) === 'expiring',
+        );
+        if (!soon) return false;
+      }
+      return true;
     });
-  }, [items, suppliers, query]);
+  }, [items, suppliers, query, expiryFilter, expiringDays]);
 
-  const onAdd = () =>
+  // Counts for the filter chips (independent of the active expiry filter).
+  const expiredCount = useMemo(() => items.filter((rm) => hasExpiredBatch(rm)).length, [items]);
+  const expiringCount = useMemo(
+    () =>
+      items.filter((rm) =>
+        (rm.stockBatches ?? []).some((b) => batchExpiryStatus(b, expiringDays) === 'expiring'),
+      ).length,
+    [items, expiringDays],
+  );
+
+  const onAdd = () => {
+    setStockDirty(false);
     setEditing({
       name: '',
       unit: 'kg',
       supplierIds: [],
       factorySupplied: false,
     });
+  };
+
+  const startEdit = (rm: RawMaterial) => {
+    setStockDirty(false);
+    setEditing(rm);
+  };
+
+  // ---- stock/batch editor (modal) ----
+  const addBatch = () => {
+    setStockDirty(true);
+    setEditing((e) =>
+      e
+        ? {
+            ...e,
+            stockBatches: [...(e.stockBatches ?? []), { id: newBatchId(), qty: 0 }],
+          }
+        : e,
+    );
+  };
+  const updateBatch = (idx: number, patch: Partial<NonNullable<RawMaterial['stockBatches']>[number]>) => {
+    setStockDirty(true);
+    setEditing((e) =>
+      e
+        ? {
+            ...e,
+            stockBatches: (e.stockBatches ?? []).map((b, i) => (i === idx ? { ...b, ...patch } : b)),
+          }
+        : e,
+    );
+  };
+  const removeBatch = (idx: number) => {
+    setStockDirty(true);
+    setEditing((e) =>
+      e ? { ...e, stockBatches: (e.stockBatches ?? []).filter((_, i) => i !== idx) } : e,
+    );
+  };
 
   const onSave = async () => {
     if (!editing || !editing.name?.trim()) return;
     setError(null);
-    const payload = {
+    const payload: Partial<RawMaterial> = {
       name: editing.name.trim(),
       mpFirmaSymbol: editing.mpFirmaSymbol?.trim() || undefined,
       unit: (editing.unit ?? 'kg') as Unit,
@@ -221,14 +384,46 @@ const RawMaterials: React.FC = () => {
       lastPurchasePriceNet: editing.lastPurchasePriceNet,
       currency: editing.currency?.trim() || undefined,
       notes: editing.notes?.trim() || undefined,
+      overagePct: editing.overagePct,
     };
+    // Only write stock when the user actually edited it here, so tweaking other
+    // fields never overwrites import-sourced stock. Editing it manually flags
+    // the item as 'manual' and stamps the date.
+    if (stockDirty) {
+      const batches = (editing.stockBatches ?? []).filter(
+        (b) => (b.qty ?? 0) !== 0 || b.expiryDate || b.retestExpiryDate,
+      );
+      payload.stockBatches = batches;
+      payload.stockQty = batches.reduce((s, b) => s + (b.qty ?? 0), 0);
+      payload.stockSource = 'manual';
+      payload.stockUpdatedAt = new Date().toISOString();
+    }
     try {
       if (editing.id) {
         await window.electronAPI.updateRawMaterial(editing.id, payload);
       } else {
-        await window.electronAPI.createRawMaterial(payload);
+        await window.electronAPI.createRawMaterial(
+          payload as Omit<RawMaterial, 'id' | 'createdAt' | 'updatedAt'>,
+        );
       }
       setEditing(null);
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const onSetStock = async (id: string, qty: number) => {
+    setError(null);
+    try {
+      // A manual edit overrides the batch breakdown: drop the batches and keep
+      // a single flat value so the displayed total and the calculators agree.
+      await window.electronAPI.updateRawMaterial(id, {
+        stockQty: qty,
+        stockSource: 'manual',
+        stockUpdatedAt: new Date().toISOString(),
+        stockBatches: [],
+      });
       await reload();
     } catch (err) {
       setError((err as Error).message);
@@ -312,6 +507,88 @@ const RawMaterials: React.FC = () => {
     } else {
       setXlsxImportMode('merge');
     }
+  };
+
+  const commitRawStock = async (
+    analysis: RawStockAnalysis,
+    decisions: RawStockDecision[],
+    createNames: Set<string>,
+  ) => {
+    const createItems = analysis.unmatched.filter((u) => createNames.has(u.name));
+    setBusy(true);
+    setLoaderMessage(t.loaderImporting);
+    try {
+      const res = await window.electronAPI.commitRawStock({
+        sourceFile: analysis.sourceFile,
+        analysis,
+        decisions,
+        createItems,
+      });
+      let msg = t.rawStockImportSummary
+        .replace('{imported}', String(res.imported))
+        .replace('{rejected}', String(res.rejected));
+      if (res.created > 0) {
+        msg += ' ' + t.magazynStockSummaryCreated.replace('{n}', String(res.created));
+      }
+      const ignored =
+        analysis.unmatched.length - createItems.length + analysis.ambiguousNames.length;
+      if (ignored > 0) {
+        msg += ' ' + t.magazynStockSummaryIgnored.replace('{n}', String(ignored));
+      }
+      setInfo(msg);
+      await reload();
+    } catch (err) {
+      setError(`${t.rawStockImportFailed}: ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+  };
+
+  const onClickImportMagazyn = async () => {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setLoaderMessage(t.loaderImporting);
+    let analysis: RawStockAnalysis | null = null;
+    try {
+      const res = await window.electronAPI.analyzeRawStock();
+      if (!res.ok) {
+        if (res.error) setError(`${t.rawStockImportFailed}: ${res.error}`);
+        return;
+      }
+      analysis = res.analysis ?? null;
+    } catch (err) {
+      setError(`${t.rawStockImportFailed}: ${(err as Error).message}`);
+      return;
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+    if (!analysis || (analysis.matches.length === 0 && analysis.unmatched.length === 0)) {
+      setInfo(t.magazynStockNoMatches);
+      return;
+    }
+    // A decision is needed for Σ(C)≠D mismatches or unmatched (create/ignore)
+    // rows; otherwise import all matched materials straight away.
+    if (analysis.matches.some((m) => m.sumMismatch) || analysis.unmatched.length > 0) {
+      setRawStockAnalysis(analysis);
+    } else {
+      await commitRawStock(analysis, [], new Set());
+    }
+  };
+
+  const onApplyRawStock = async (
+    actions: Map<string, 'take' | 'reject'>,
+    createNames: Set<string>,
+  ) => {
+    const analysis = rawStockAnalysis;
+    if (!analysis) return;
+    setRawStockAnalysis(null);
+    const decisions: RawStockDecision[] = analysis.matches
+      .filter((m) => m.sumMismatch)
+      .map((m) => ({ itemId: m.itemId, action: actions.get(m.itemId) ?? 'reject' }));
+    await commitRawStock(analysis, decisions, createNames);
   };
 
   const onDelete = async (rm: RawMaterial) => {
@@ -429,6 +706,14 @@ const RawMaterials: React.FC = () => {
             >
               <IconImport size={13} /> {t.rawMaterialsImportXlsx}
             </button>
+            <button
+              className="btn btn-import"
+              onClick={onClickImportMagazyn}
+              disabled={busy}
+              title={t.rawStockImportHint}
+            >
+              <IconImport size={13} /> {t.magazynStockImport}
+            </button>
             <ColumnPicker
               columns={orderedColumns}
               isVisible={isVisible}
@@ -450,6 +735,43 @@ const RawMaterials: React.FC = () => {
           </div>
           <div className="toolbar-search">
             <SearchInput value={query} onChange={setQuery} block />
+          </div>
+        </div>
+        <div className="expiry-filter-bar">
+          <button
+            type="button"
+            className={`chip ${expiryFilter === 'all' ? 'active' : ''}`}
+            onClick={() => setExpiryFilter('all')}
+          >
+            {t.expiryFilterAll}
+          </button>
+          <button
+            type="button"
+            className={`chip ${expiryFilter === 'expired' ? 'active' : ''} ${expiredCount > 0 ? 'chip-danger' : ''}`}
+            onClick={() => setExpiryFilter('expired')}
+          >
+            {t.expiryFilterExpired} ({expiredCount})
+          </button>
+          <button
+            type="button"
+            className={`chip ${expiryFilter === 'expiring' ? 'active' : ''}`}
+            onClick={() => setExpiryFilter('expiring')}
+          >
+            {t.expiryFilterExpiring} ({expiringCount})
+          </button>
+          <div className="expiry-filter-days">
+            <span className="hint">{t.expiryFilterWithinDays}</span>
+            <NumberInput
+              className="input"
+              style={{ width: 80 }}
+              value={expiringDays}
+              emptyValue={0}
+              onChange={(v) => {
+                setExpiringDays(v ?? 0);
+                if ((v ?? 0) > 0) setExpiryFilter('expiring');
+              }}
+            />
+            <span className="hint">{t.days}</span>
           </div>
         </div>
         {error && <div className="error-text" style={{ marginBottom: 8 }}>{error}</div>}
@@ -477,7 +799,7 @@ const RawMaterials: React.FC = () => {
                     <div className="btn-row">
                       <button
                         className="btn btn-sm soft-edit"
-                        onClick={() => setEditing(rm)}
+                        onClick={() => startEdit(rm)}
                         title={t.edit}
                       >
                         <IconEdit size={13} /> {t.edit}
@@ -608,11 +930,118 @@ const RawMaterials: React.FC = () => {
               />
             </div>
             <div className="form-row">
+              <label>{t.overage} (%)</label>
+              <NumberInput
+                className="input"
+                step="0.1"
+                value={editing.overagePct}
+                placeholder={String(defaultOveragePct)}
+                onChange={(v) => setEditing({ ...editing, overagePct: v })}
+              />
+            </div>
+            <div className="hint" style={{ marginTop: -4, marginBottom: 8 }}>
+              {t.overageInheritHint.replace('{n}', String(defaultOveragePct))}
+            </div>
+            <div className="form-row">
               <label>{t.notes}</label>
               <textarea
                 value={editing.notes ?? ''}
                 onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
               />
+            </div>
+            <div className="form-row" style={{ alignItems: 'flex-start' }}>
+              <label>{t.stockBatches}</label>
+              <div style={{ flex: 1 }}>
+                {(editing.stockBatches ?? []).length > 0 && (
+                  <table className="table batch-table">
+                    <thead>
+                      <tr>
+                        <th className="num">{t.stock}</th>
+                        <th>{t.expiry}</th>
+                        <th>{t.expiryRetest}</th>
+                        <th>{t.notes}</th>
+                        <th className="actions" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(editing.stockBatches ?? []).map((b, idx) => {
+                        const expired = isExpired(b);
+                        return (
+                          <tr key={b.id} className={expired ? 'stock-batch-expired' : undefined}>
+                            <td className="num">
+                              <NumberInput
+                                className="input"
+                                style={{ width: 90 }}
+                                value={b.qty}
+                                emptyValue={0}
+                                step="0.001"
+                                onChange={(v) => updateBatch(idx, { qty: v ?? 0 })}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="date"
+                                className="input"
+                                value={b.expiryDate ?? ''}
+                                onChange={(e) =>
+                                  updateBatch(idx, { expiryDate: e.target.value || undefined })
+                                }
+                              />
+                              {expired && <span className="stock-batch-flag">{t.expired}</span>}
+                            </td>
+                            <td>
+                              <input
+                                type="date"
+                                className="input"
+                                value={b.retestExpiryDate ?? ''}
+                                onChange={(e) =>
+                                  updateBatch(idx, { retestExpiryDate: e.target.value || undefined })
+                                }
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="input"
+                                value={b.note ?? ''}
+                                onChange={(e) =>
+                                  updateBatch(idx, { note: e.target.value || undefined })
+                                }
+                              />
+                            </td>
+                            <td className="actions">
+                              <button
+                                type="button"
+                                className="btn btn-sm soft-danger btn-icon-only"
+                                onClick={() => removeBatch(idx)}
+                                title={t.delete}
+                              >
+                                <IconClose size={12} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+                <div className="row" style={{ gap: 8, marginTop: 6, alignItems: 'center' }}>
+                  <button type="button" className="btn btn-sm soft-edit" onClick={addBatch}>
+                    <IconPlus size={13} /> {t.stockBatchAdd}
+                  </button>
+                  {(editing.stockBatches ?? []).length > 0 && (
+                    <span className="hint">
+                      {t.stock}:{' '}
+                      {(editing.stockBatches ?? [])
+                        .reduce((s, b) => s + (b.qty ?? 0), 0)
+                        .toLocaleString()}{' '}
+                      {editing.unit}
+                    </span>
+                  )}
+                </div>
+                <div className="hint" style={{ marginTop: 4 }}>
+                  {t.stockBatchesEditHint}
+                </div>
+              </div>
             </div>
             </div>
             <div className="modal-footer">
@@ -645,6 +1074,24 @@ const RawMaterials: React.FC = () => {
         />
       )}
 
+      {confirmOverageForAll !== null && (
+        <ConfirmDialog
+          message={t.overageSetForAllConfirm
+            .replace('{pct}', String(confirmOverageForAll))
+            .replace('{n}', String(items.length))}
+          onConfirm={() => onSetOverageForAll(confirmOverageForAll)}
+          onCancel={() => setConfirmOverageForAll(null)}
+        />
+      )}
+
+      {confirmResetOverageAll && (
+        <ConfirmDialog
+          message={t.overageResetAllConfirm.replace('{n}', String(items.length))}
+          onConfirm={onResetOverageForAll}
+          onCancel={() => setConfirmResetOverageAll(false)}
+        />
+      )}
+
       {xlsxImportMode !== null && (
         <RawMaterialsImportModeDialog
           mode={xlsxImportMode}
@@ -659,6 +1106,14 @@ const RawMaterials: React.FC = () => {
         <XlsxImportSummaryModal
           summary={xlsxSummary}
           onClose={() => setXlsxSummary(null)}
+        />
+      )}
+
+      {rawStockAnalysis && (
+        <RawStockDiffModal
+          analysis={rawStockAnalysis}
+          onCancel={() => setRawStockAnalysis(null)}
+          onApply={onApplyRawStock}
         />
       )}
 
@@ -677,14 +1132,55 @@ const RawMaterials: React.FC = () => {
             />
             <div className="modal-body">
               <div className="form-row">
-                <label>{t.settingsWasteFactor}</label>
+                <label>{t.overageDefaultRaw}</label>
                 <NumberInput
                   className="input"
-                  step="0.01"
-                  value={wasteFactor}
-                  emptyValue={1}
-                  onChange={onChangeWasteFactor}
+                  step="0.1"
+                  value={defaultOveragePct}
+                  emptyValue={0}
+                  onChange={onChangeDefaultOverage}
                 />
+              </div>
+              <div className="hint" style={{ marginTop: -4, marginBottom: 12 }}>
+                {t.overageInheritHint.replace('{n}', String(defaultOveragePct))}
+              </div>
+              <div className="form-row">
+                <label>{t.overageSetForAll}</label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <NumberInput
+                    className="input"
+                    step="0.1"
+                    value={overageForAll}
+                    placeholder={String(defaultOveragePct)}
+                    onChange={setOverageForAll}
+                  />
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={overageForAll === undefined}
+                    onClick={() =>
+                      overageForAll !== undefined && setConfirmOverageForAll(overageForAll)
+                    }
+                  >
+                    {t.overageSetForAll}
+                  </button>
+                </div>
+              </div>
+              <div className="hint" style={{ marginTop: -4, marginBottom: 12 }}>
+                {t.overageSetForAllHint}
+              </div>
+              <div className="form-row">
+                <label>{t.overageResetAll}</label>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setConfirmResetOverageAll(true)}
+                >
+                  {t.overageResetAll}
+                </button>
+              </div>
+              <div className="hint" style={{ marginTop: -4 }}>
+                {t.overageResetAllHint}
               </div>
             </div>
             <div className="modal-footer">
@@ -851,6 +1347,233 @@ const XlsxImportSummaryModal: React.FC<XlsxSummaryModalProps> = ({ summary, onCl
         <div className="modal-footer">
           <button className="btn primary-filled" onClick={onClose}>
             <IconClose size={13} /> {t.close}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------- Warehouse raw-stock import: Σ(C)≠D decisions ----------
+//
+// Lists only the materials whose file batch quantities (Σ column C) don't add
+// up to the file's own total (column D). The user resolves each — take the
+// import (write the batches) or reject (leave the catalog material untouched) —
+// individually or via the bulk buttons. Consistent materials import silently.
+
+interface RawStockDiffModalProps {
+  analysis: RawStockAnalysis;
+  onCancel: () => void;
+  onApply: (actions: Map<string, 'take' | 'reject'>, createNames: Set<string>) => void;
+}
+
+// Hover tooltip listing a material's file batches (qty + effective expiry).
+const BatchTooltip: React.FC<{ batches: RawStockAnalysis['unmatched'][number]['batches']; unit: string }> = ({
+  batches,
+  unit,
+}) => {
+  const t = useT();
+  return (
+    <HoverTooltip
+      align="left"
+      triggerClassName="stock-note-icon"
+      trigger={<IconImport size={12} />}
+    >
+      <div className="shortage-tooltip-header">{t.stockBatches}</div>
+      <ul className="stock-batch-list">
+        {batches.map((b, i) => (
+          <li key={i}>
+            <span className="stock-batch-qty">
+              {b.qty.toLocaleString()} {unit}
+            </span>
+            <span className="stock-batch-exp">
+              {b.retestExpiryDate || b.expiryDate
+                ? `${t.expiry}: ${new Date((b.retestExpiryDate ?? b.expiryDate) as string).toLocaleDateString()}`
+                : t.noExpiry}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </HoverTooltip>
+  );
+};
+
+const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCancel, onApply }) => {
+  const t = useT();
+  useEscapeKey(onCancel);
+  const mismatches = useMemo(
+    () => analysis.matches.filter((m) => m.sumMismatch),
+    [analysis],
+  );
+  const unmatched = analysis.unmatched;
+  // Default to taking the import — the file is the fresh source of truth.
+  const [actions, setActions] = useState<Map<string, 'take' | 'reject'>>(
+    () => new Map(mismatches.map((m) => [m.itemId, 'take' as const])),
+  );
+  // Unmatched materials default to ignore; the user opts them in to create.
+  const [createSet, setCreateSet] = useState<Set<string>>(new Set());
+
+  const setAll = (a: 'take' | 'reject') =>
+    setActions(new Map(mismatches.map((m) => [m.itemId, a])));
+  const setOne = (id: string, a: 'take' | 'reject') =>
+    setActions((prev) => new Map(prev).set(id, a));
+  const setCreateAll = (create: boolean) =>
+    setCreateSet(create ? new Set(unmatched.map((u) => u.name)) : new Set());
+  const toggleCreate = (name: string) =>
+    setCreateSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  const fmt = (n?: number) => (n === undefined ? '—' : n.toLocaleString());
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
+        <ModalHeader
+          icon={<IconImport size={18} />}
+          tone="add"
+          title={t.rawStockDiffTitle}
+          onClose={onCancel}
+        />
+        <div className="modal-body">
+          {mismatches.length > 0 && (
+            <>
+              <div className="hint" style={{ marginBottom: 12 }}>
+                {t.rawStockDiffIntro}
+              </div>
+              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+                <button type="button" className="btn btn-sm" onClick={() => setAll('reject')}>
+                  {t.rawStockRejectAll}
+                </button>
+                <button type="button" className="btn btn-sm" onClick={() => setAll('take')}>
+                  {t.rawStockTakeAll}
+                </button>
+              </div>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>{t.name}</th>
+                      <th className="num">{t.rawStockBatchSum}</th>
+                      <th className="num">{t.rawStockReportedTotal}</th>
+                      <th>{t.magazynStockColDecision}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mismatches.map((m) => {
+                      const action = actions.get(m.itemId) ?? 'take';
+                      return (
+                        <tr key={m.itemId}>
+                          <td className="col-wrap">
+                            {m.name}
+                            <BatchTooltip batches={m.batches} unit={m.unit} />
+                          </td>
+                          <td className="num">
+                            {fmt(m.batchSum)} {m.unit}
+                          </td>
+                          <td className="num">
+                            {fmt(m.reportedTotal)} {m.unit}
+                          </td>
+                          <td>
+                            <div className="btn-row">
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${action === 'reject' ? 'primary-filled' : ''}`}
+                                onClick={() => setOne(m.itemId, 'reject')}
+                              >
+                                {t.rawStockReject}
+                              </button>
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${action === 'take' ? 'primary-filled' : ''}`}
+                                onClick={() => setOne(m.itemId, 'take')}
+                              >
+                                {t.rawStockTake}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {unmatched.length > 0 && (
+            <>
+              <div
+                className="hint"
+                style={{ marginBottom: 12, marginTop: mismatches.length > 0 ? 20 : 0 }}
+              >
+                {t.magazynStockUnmatchedIntro.replace('{n}', String(unmatched.length))}
+              </div>
+              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+                <button type="button" className="btn btn-sm" onClick={() => setCreateAll(false)}>
+                  {t.magazynStockIgnoreAll}
+                </button>
+                <button type="button" className="btn btn-sm" onClick={() => setCreateAll(true)}>
+                  {t.magazynStockCreateAll}
+                </button>
+              </div>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>{t.name}</th>
+                      <th className="num">{t.rawStockBatchSum}</th>
+                      <th>{t.magazynStockColDecision}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unmatched.map((u) => {
+                      const create = createSet.has(u.name);
+                      return (
+                        <tr key={u.name}>
+                          <td className="col-wrap">
+                            {u.name}
+                            <BatchTooltip batches={u.batches} unit={u.unit} />
+                          </td>
+                          <td className="num">
+                            {fmt(u.batchSum)} {u.unit}
+                          </td>
+                          <td>
+                            <div className="btn-row">
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${!create ? 'primary-filled' : ''}`}
+                                onClick={() => create && toggleCreate(u.name)}
+                              >
+                                {t.magazynStockIgnore}
+                              </button>
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${create ? 'primary-filled' : ''}`}
+                                onClick={() => !create && toggleCreate(u.name)}
+                              >
+                                {t.magazynStockCreate}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn" onClick={onCancel}>
+            {t.cancel}
+          </button>
+          <button className="btn primary-filled" onClick={() => onApply(actions, createSet)}>
+            {t.magazynStockApply}
           </button>
         </div>
       </div>

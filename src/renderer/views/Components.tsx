@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
 import type {
+  AppSettings,
   ComponentDependency,
   PackagingComponent,
   PackingCapacityUnit,
@@ -9,6 +10,8 @@ import type {
   ComponentType,
   ComponentsImportSummary,
   RawMaterialsImportMode,
+  MagazynStockAnalysis,
+  MagazynStockDecision,
 } from '../../shared/types';
 import { isSecondaryComponent, SECONDARY_COMPONENT_TYPES } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -18,10 +21,12 @@ import SupplierMultiPicker from '../components/SupplierMultiPicker';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
 import NumberInput from '../components/NumberInput';
+import StockCell from '../components/StockCell';
+import OverageCell from '../components/OverageCell';
 import ColumnPicker from '../components/ColumnPicker';
 import HoverTooltip from '../components/HoverTooltip';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
-import { IconEdit, IconTrash, IconPlus, IconStar, IconClose, IconEye, IconDuplicate, IconImport } from '../components/Icons';
+import { IconEdit, IconTrash, IconPlus, IconStar, IconClose, IconEye, IconDuplicate, IconImport, IconInfo, IconSettings } from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
 import { useEscapeKey } from '../utils/useEscapeKey';
@@ -73,11 +78,24 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
   const [blockedBy, setBlockedBy] = useState<string[] | null>(null);
+  // Type-level default overage % for components (shared across primary &
+  // secondary views); items without their own overagePct inherit it.
+  const [defaultOveragePct, setDefaultOveragePct] = useState<number>(0);
+  const [overageForAll, setOverageForAll] = useState<number | undefined>(undefined);
+  const [confirmOverageForAll, setConfirmOverageForAll] = useState<number | null>(null);
+  const [confirmResetOverageAll, setConfirmResetOverageAll] = useState(false);
+  // Total components across all kinds — used for the "set for all" confirm count.
+  const [totalComponents, setTotalComponents] = useState<number>(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [xlsxSummary, setXlsxSummary] = useState<ComponentsImportSummary | null>(null);
   // XLSX import: when not null, the mode-selection modal is open with this
   // mode pre-selected. The actual file pick happens in the main process after
   // the user confirms the mode.
   const [xlsxImportMode, setXlsxImportMode] = useState<RawMaterialsImportMode | null>(null);
+  // Warehouse ("Magazyn") stock import: the analysis of differing items awaiting
+  // the user's keep/take decision. Non-differing matches are committed silently
+  // (notes only) without opening this modal.
+  const [magazynAnalysis, setMagazynAnalysis] = useState<MagazynStockAnalysis | null>(null);
 
   const closeEditor = () => {
     setEditing(null);
@@ -87,6 +105,8 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
 
   useEscapeKey(closeEditor, !!editing);
   useEscapeKey(() => setXlsxSummary(null), !!xlsxSummary);
+  useEscapeKey(() => setMagazynAnalysis(null), !!magazynAnalysis);
+  useEscapeKey(() => setSettingsOpen(false), settingsOpen);
 
   const COLUMNS: ColumnDef[] = useMemo(
     () => [
@@ -98,10 +118,12 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       ...(kind === 'primary'
         ? [{ id: 'type', label: 'Typ', defaultVisible: true } as ColumnDef]
         : []),
+      { id: 'stock', label: t.stock, defaultVisible: true },
       { id: 'suppliers', label: t.suppliers, defaultVisible: true },
       { id: 'moq', label: t.moq, defaultVisible: true },
       { id: 'leadTime', label: t.leadTime, defaultVisible: false },
       { id: 'price', label: t.price, defaultVisible: true },
+      { id: 'overage', label: t.overage, defaultVisible: true },
       ...(kind === 'secondary'
         ? [
             { id: 'capacity', label: t.packingCapacity, defaultVisible: true } as ColumnDef,
@@ -128,6 +150,8 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         return <th key={id} className="col-w-lg">{t.name}</th>;
       case 'symbol':
         return <th key={id} className="col-w-md">{t.symbol}</th>;
+      case 'stock':
+        return <th key={id} className="num col-w-md">{t.stock}</th>;
       case 'type':
         return <th key={id} className="col-w-sm">Typ</th>;
       case 'suppliers':
@@ -138,6 +162,8 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         return <th key={id} className="num col-w-sm">{t.leadTime}</th>;
       case 'price':
         return <th key={id} className="num col-w-sm">{t.price}</th>;
+      case 'overage':
+        return <th key={id} className="num col-w-sm">{t.overage}</th>;
       case 'capacity':
         return <th key={id} className="num col-w-sm">{t.packingCapacity}</th>;
       case 'consumes':
@@ -174,6 +200,19 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         );
       case 'symbol':
         return <td key={id}>{c.mpFirmaSymbol ?? ''}</td>;
+      case 'stock':
+        return (
+          <StockCell
+            key={id}
+            qty={c.stockQty}
+            unit={t.unitUnits}
+            source={c.stockSource}
+            updatedAt={c.stockUpdatedAt}
+            sourceFile={c.stockSourceFile}
+            note={c.stockNote}
+            onCommit={(q) => onSetStock(c.id, q)}
+          />
+        );
       case 'type':
         return <td key={id}>{c.type}</td>;
       case 'suppliers':
@@ -184,6 +223,15 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         return <td key={id} className="num">{c.leadTimeDays ?? ''}</td>;
       case 'price':
         return <td key={id} className="num">{c.lastPurchasePriceNet ?? ''}</td>;
+      case 'overage':
+        return (
+          <OverageCell
+            key={id}
+            pct={c.overagePct}
+            defaultPct={defaultOveragePct}
+            onCommit={(pct) => onSetOverage(c.id, pct)}
+          />
+        );
       case 'capacity':
         return (
           <td key={id} className="num">
@@ -241,9 +289,10 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   };
 
   const reload = async () => {
-    const [list, ss] = await Promise.all([
+    const [list, ss, s] = await Promise.all([
       window.electronAPI.listComponents(),
       window.electronAPI.listSuppliers(),
+      window.electronAPI.getSettings(),
     ]);
     // The catalog is split by kind so each view shows only its own
     // components — keeps primary (tuba/etykieta/…) and secondary (karton
@@ -251,7 +300,68 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     const matchesKind = (c: PackagingComponent) =>
       kind === 'secondary' ? isSecondaryComponent(c.type) : !isSecondaryComponent(c.type);
     setItems(list.filter(matchesKind));
+    setTotalComponents(list.length);
     setSuppliers(ss);
+    setDefaultOveragePct(s.defaultOveragePctComponent);
+  };
+
+  const onChangeDefaultOverage = async (v: number | undefined) => {
+    const next = v ?? 0;
+    setDefaultOveragePct(next);
+    const updated: AppSettings = await window.electronAPI.updateSettings({
+      defaultOveragePctComponent: next,
+    });
+    setDefaultOveragePct(updated.defaultOveragePctComponent);
+  };
+
+  // Per-item overage edit from the grid. `undefined` clears it → inherit default.
+  const onSetOverage = async (id: string, pct: number | undefined) => {
+    setError(null);
+    try {
+      await window.electronAPI.updateComponent(id, { overagePct: pct });
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  // Applies to ALL components (both primary & secondary), matching the shared
+  // component default.
+  const onSetOverageForAll = async (pct: number) => {
+    setConfirmOverageForAll(null);
+    setError(null);
+    setInfo(null);
+    try {
+      const n = await window.electronAPI.setOveragePctForAll('component', pct);
+      setInfo(t.overageSetForAllDone.replace('{n}', String(n)));
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  // Clear the explicit overage on every component → all inherit the default.
+  const onResetOverageForAll = async () => {
+    setConfirmResetOverageAll(false);
+    setError(null);
+    setInfo(null);
+    try {
+      const n = await window.electronAPI.setOveragePctForAll('component', null);
+      setInfo(t.overageResetAllDone.replace('{n}', String(n)));
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const onSetStock = async (id: string, qty: number) => {
+    setError(null);
+    try {
+      await window.electronAPI.setManualStock('component', id, qty);
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
   };
 
   useEffect(() => {
@@ -302,6 +412,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     lastPurchasePriceNet: e.lastPurchasePriceNet,
     currency: e.currency?.trim() || undefined,
     notes: e.notes?.trim() || undefined,
+    overagePct: e.overagePct,
     // Only meaningful for secondary kind. Wipe on primary so a user toggling
     // a row from secondary → primary doesn't leave dangling values.
     capacity: kind === 'secondary' ? e.capacity : undefined,
@@ -406,6 +517,95 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     }
   };
 
+  // Commit a set of Magazyn decisions and report the outcome. `actionFor`
+  // resolves each differing item's keep/take choice; `createNames` is the set of
+  // unmatched file rows the user chose to add as new components.
+  const commitMagazyn = async (
+    analysis: MagazynStockAnalysis,
+    actionFor: (itemId: string) => 'keep' | 'take',
+    createNames: Set<string>,
+  ) => {
+    const decisions: MagazynStockDecision[] = analysis.matches.map((m) => ({
+      itemId: m.itemId,
+      action: m.differs ? actionFor(m.itemId) : 'keep',
+      importedQty: m.importedQty,
+      note: m.note,
+    }));
+    const createItems = analysis.unmatched.filter((u) => createNames.has(u.name));
+    setBusy(true);
+    setLoaderMessage(t.loaderImporting);
+    try {
+      const res = await window.electronAPI.commitMagazynStock({
+        sourceFile: analysis.sourceFile,
+        decisions,
+        createItems,
+      });
+      let msg = t.magazynStockSummary
+        .replace('{stock}', String(res.stockUpdated))
+        .replace('{notes}', String(res.notesUpdated))
+        .replace('{kept}', String(res.kept));
+      if (res.created > 0) {
+        msg += ' ' + t.magazynStockSummaryCreated.replace('{n}', String(res.created));
+      }
+      const ignored =
+        analysis.unmatched.length - createItems.length + analysis.ambiguousNames.length;
+      if (ignored > 0) {
+        msg += ' ' + t.magazynStockSummaryIgnored.replace('{n}', String(ignored));
+      }
+      setInfo(msg);
+      await reload();
+    } catch (err) {
+      setError(`${t.magazynStockImportFailed}: ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+  };
+
+  const onClickImportMagazyn = async () => {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setLoaderMessage(t.loaderImporting);
+    let analysis: MagazynStockAnalysis | null = null;
+    try {
+      const res = await window.electronAPI.analyzeMagazynStock();
+      // User canceled the OS file picker → ok:false with no error.
+      if (!res.ok) {
+        if (res.error) setError(`${t.magazynStockImportFailed}: ${res.error}`);
+        return;
+      }
+      analysis = res.analysis ?? null;
+    } catch (err) {
+      setError(`${t.magazynStockImportFailed}: ${(err as Error).message}`);
+      return;
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+    if (!analysis || (analysis.matches.length === 0 && analysis.unmatched.length === 0)) {
+      setInfo(t.magazynStockNoMatches);
+      return;
+    }
+    // A decision is needed when some matched item differs OR there are
+    // unmatched rows to create/ignore. Otherwise apply notes straight away.
+    if (analysis.matches.some((m) => m.differs) || analysis.unmatched.length > 0) {
+      setMagazynAnalysis(analysis);
+    } else {
+      await commitMagazyn(analysis, () => 'keep', new Set());
+    }
+  };
+
+  const onApplyMagazyn = async (
+    actions: Map<string, 'keep' | 'take'>,
+    createNames: Set<string>,
+  ) => {
+    const analysis = magazynAnalysis;
+    if (!analysis) return;
+    setMagazynAnalysis(null);
+    await commitMagazyn(analysis, (id) => actions.get(id) ?? 'keep', createNames);
+  };
+
   const onDelete = async (c: PackagingComponent) => {
     setConfirmDelete(null);
     const result = await window.electronAPI.deleteComponent(c.id);
@@ -491,6 +691,16 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         <HeaderNav />
         <h1>{heading}</h1>
         <span className="page-header-count">{items.length}</span>
+        <button
+          type="button"
+          className="btn btn-sm"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => setSettingsOpen(true)}
+          title={t.settings}
+          aria-label={t.settings}
+        >
+          <IconSettings size={14} />
+        </button>
       </div>
 
       <div className="card">
@@ -509,6 +719,14 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
               title={t.componentsImportXlsxHint}
             >
               <IconImport size={13} /> {t.componentsImportXlsx}
+            </button>
+            <button
+              className="btn btn-import"
+              onClick={onClickImportMagazyn}
+              disabled={busy}
+              title={t.magazynStockImportHint}
+            >
+              <IconImport size={13} /> {t.magazynStockImport}
             </button>
             <ColumnPicker
               columns={orderedColumns}
@@ -755,6 +973,20 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
               />
             </div>
             <div className="form-row">
+              <label>{t.overage} (%)</label>
+              <NumberInput
+                className="input"
+                step="0.1"
+                value={editing.overagePct}
+                placeholder={String(defaultOveragePct)}
+                onChange={(v) => setEditing({ ...editing, overagePct: v })}
+                disabled={editingReadOnly}
+              />
+            </div>
+            <div className="hint" style={{ marginTop: -4, marginBottom: 8 }}>
+              {t.overageInheritHint.replace('{n}', String(defaultOveragePct))}
+            </div>
+            <div className="form-row">
               <label>{t.notes}</label>
               <textarea
                 value={editing.notes ?? ''}
@@ -834,8 +1066,105 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         />
       )}
 
+      {magazynAnalysis && (
+        <MagazynStockDiffModal
+          analysis={magazynAnalysis}
+          onCancel={() => setMagazynAnalysis(null)}
+          onApply={onApplyMagazyn}
+        />
+      )}
+
       {blockedBy && (
         <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />
+      )}
+
+      {confirmOverageForAll !== null && (
+        <ConfirmDialog
+          message={t.overageSetForAllConfirm
+            .replace('{pct}', String(confirmOverageForAll))
+            .replace('{n}', String(totalComponents))}
+          onConfirm={() => onSetOverageForAll(confirmOverageForAll)}
+          onCancel={() => setConfirmOverageForAll(null)}
+        />
+      )}
+
+      {confirmResetOverageAll && (
+        <ConfirmDialog
+          message={t.overageResetAllConfirm.replace('{n}', String(totalComponents))}
+          onConfirm={onResetOverageForAll}
+          onCancel={() => setConfirmResetOverageAll(false)}
+        />
+      )}
+
+      {settingsOpen && (
+        <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <ModalHeader
+              icon={<IconSettings size={18} />}
+              tone="edit"
+              title={t.settings}
+              onClose={() => setSettingsOpen(false)}
+            />
+            <div className="modal-body">
+              <div className="form-row">
+                <label>{t.overageDefaultComponent}</label>
+                <NumberInput
+                  className="input"
+                  step="0.1"
+                  value={defaultOveragePct}
+                  emptyValue={0}
+                  onChange={onChangeDefaultOverage}
+                />
+              </div>
+              <div className="hint" style={{ marginTop: -4, marginBottom: 12 }}>
+                {t.overageInheritHint.replace('{n}', String(defaultOveragePct))}
+              </div>
+              <div className="form-row">
+                <label>{t.overageSetForAll}</label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <NumberInput
+                    className="input"
+                    step="0.1"
+                    value={overageForAll}
+                    placeholder={String(defaultOveragePct)}
+                    onChange={setOverageForAll}
+                  />
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={overageForAll === undefined}
+                    onClick={() =>
+                      overageForAll !== undefined && setConfirmOverageForAll(overageForAll)
+                    }
+                  >
+                    {t.overageSetForAll}
+                  </button>
+                </div>
+              </div>
+              <div className="hint" style={{ marginTop: -4, marginBottom: 12 }}>
+                {t.overageSetForAllHint}
+              </div>
+              <div className="form-row">
+                <label>{t.overageResetAll}</label>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setConfirmResetOverageAll(true)}
+                >
+                  {t.overageResetAll}
+                </button>
+              </div>
+              <div className="hint" style={{ marginTop: -4 }}>
+                {t.overageResetAllHint}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn primary-filled" onClick={() => setSettingsOpen(false)}>
+                {t.close}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {loaderMessage && <LoadingOverlay message={loaderMessage} />}
@@ -1164,6 +1493,217 @@ const ComponentsXlsxImportSummaryModal: React.FC<ComponentsXlsxSummaryModalProps
         <div className="modal-footer">
           <button className="btn primary-filled" onClick={onClose}>
             <IconClose size={13} /> {t.close}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------- Warehouse ("Magazyn") stock import decisions ----------
+//
+// Two decision groups, either of which may be empty:
+//   * matched items whose Excel stock differs from the catalog → keep / take;
+//   * unmatched file rows (not in the catalog) → create as a new component /
+//     ignore.
+// Both support per-row and bulk actions. Notes (column E) are applied on the
+// back-end for every matched item regardless of the keep/take choice.
+
+interface MagazynStockDiffModalProps {
+  analysis: MagazynStockAnalysis;
+  onCancel: () => void;
+  onApply: (actions: Map<string, 'keep' | 'take'>, createNames: Set<string>) => void;
+}
+
+const MagazynStockDiffModal: React.FC<MagazynStockDiffModalProps> = ({
+  analysis,
+  onCancel,
+  onApply,
+}) => {
+  const t = useT();
+  useEscapeKey(onCancel);
+  const diffs = useMemo(() => analysis.matches.filter((m) => m.differs), [analysis]);
+  const unmatched = analysis.unmatched;
+  // Default to taking the Excel value — that's the intent of running an import.
+  const [actions, setActions] = useState<Map<string, 'keep' | 'take'>>(
+    () => new Map(diffs.map((m) => [m.itemId, 'take' as const])),
+  );
+  // Unmatched rows default to ignore; the user opts them in to create.
+  const [createSet, setCreateSet] = useState<Set<string>>(new Set());
+
+  const setAll = (action: 'keep' | 'take') =>
+    setActions(new Map(diffs.map((m) => [m.itemId, action])));
+  const setOne = (id: string, action: 'keep' | 'take') =>
+    setActions((prev) => new Map(prev).set(id, action));
+  const setCreateAll = (create: boolean) =>
+    setCreateSet(create ? new Set(unmatched.map((u) => u.name)) : new Set());
+  const toggleCreate = (name: string) =>
+    setCreateSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  const fmt = (n?: number) => (n === undefined ? '—' : n.toLocaleString());
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
+        <ModalHeader
+          icon={<IconImport size={18} />}
+          tone="add"
+          title={t.magazynStockDiffTitle}
+          onClose={onCancel}
+        />
+        <div className="modal-body">
+          {diffs.length > 0 && (
+            <>
+              <div className="hint" style={{ marginBottom: 12 }}>
+                {t.magazynStockDiffIntro}
+              </div>
+              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+                <button type="button" className="btn btn-sm" onClick={() => setAll('keep')}>
+                  {t.magazynStockKeepAll}
+                </button>
+                <button type="button" className="btn btn-sm" onClick={() => setAll('take')}>
+                  {t.magazynStockTakeAll}
+                </button>
+              </div>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>{t.magazynStockColItem}</th>
+                      <th className="num">{t.magazynStockColCurrent}</th>
+                      <th className="num">{t.magazynStockColExcel}</th>
+                      <th>{t.magazynStockColDecision}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diffs.map((m) => {
+                      const action = actions.get(m.itemId) ?? 'take';
+                      return (
+                        <tr key={m.itemId}>
+                          <td className="col-wrap">
+                            {m.name}
+                            {m.note && (
+                              <HoverTooltip
+                                align="left"
+                                triggerClassName="stock-note-icon"
+                                trigger={<IconInfo size={12} />}
+                              >
+                                <div className="shortage-tooltip-header">{t.stockNote}</div>
+                                <div className="stock-note-text">{m.note}</div>
+                              </HoverTooltip>
+                            )}
+                          </td>
+                          <td className="num">{fmt(m.currentQty)}</td>
+                          <td className="num">{fmt(m.importedQty)}</td>
+                          <td>
+                            <div className="btn-row">
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${action === 'keep' ? 'primary-filled' : ''}`}
+                                onClick={() => setOne(m.itemId, 'keep')}
+                              >
+                                {t.magazynStockKeep}
+                              </button>
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${action === 'take' ? 'primary-filled' : ''}`}
+                                onClick={() => setOne(m.itemId, 'take')}
+                              >
+                                {t.magazynStockTake}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {unmatched.length > 0 && (
+            <>
+              <div
+                className="hint"
+                style={{ marginBottom: 12, marginTop: diffs.length > 0 ? 20 : 0 }}
+              >
+                {t.magazynStockUnmatchedIntro.replace('{n}', String(unmatched.length))}
+              </div>
+              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+                <button type="button" className="btn btn-sm" onClick={() => setCreateAll(false)}>
+                  {t.magazynStockIgnoreAll}
+                </button>
+                <button type="button" className="btn btn-sm" onClick={() => setCreateAll(true)}>
+                  {t.magazynStockCreateAll}
+                </button>
+              </div>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>{t.magazynStockColItem}</th>
+                      <th className="num">{t.magazynStockColExcel}</th>
+                      <th>{t.magazynStockColDecision}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unmatched.map((u) => {
+                      const create = createSet.has(u.name);
+                      return (
+                        <tr key={u.name}>
+                          <td className="col-wrap">
+                            {u.name}
+                            {u.note && (
+                              <HoverTooltip
+                                align="left"
+                                triggerClassName="stock-note-icon"
+                                trigger={<IconInfo size={12} />}
+                              >
+                                <div className="shortage-tooltip-header">{t.stockNote}</div>
+                                <div className="stock-note-text">{u.note}</div>
+                              </HoverTooltip>
+                            )}
+                          </td>
+                          <td className="num">{fmt(u.qty)}</td>
+                          <td>
+                            <div className="btn-row">
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${!create ? 'primary-filled' : ''}`}
+                                onClick={() => create && toggleCreate(u.name)}
+                              >
+                                {t.magazynStockIgnore}
+                              </button>
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${create ? 'primary-filled' : ''}`}
+                                onClick={() => !create && toggleCreate(u.name)}
+                              >
+                                {t.magazynStockCreate}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn" onClick={onCancel}>
+            {t.cancel}
+          </button>
+          <button className="btn primary-filled" onClick={() => onApply(actions, createSet)}>
+            {t.magazynStockApply}
           </button>
         </div>
       </div>

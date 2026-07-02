@@ -7,46 +7,43 @@ import type {
   Supplier,
   RawMaterial,
   PackagingComponent,
-  StockRow,
+  ExpiredBatchRef,
 } from '../../shared/types';
 import { ceilToMoq, toGrams } from '../utils/units';
 import { nowIso } from '../utils/id';
+import { effectiveOverageFactor } from '../../shared/overage';
+import { availableStockQty, collectExpiredRefs } from '../../shared/expiry';
 import {
   walkSchemePerProduct,
   walkSchemePerBulkKg,
   piecesPerProduct,
 } from './packingConsumption';
 
-function buildStockIndex(
-  snapshot: { rows: StockRow[] } | undefined,
-  by: 'raw' | 'component',
-): Map<string, number> {
-  const map = new Map<string, number>();
-  if (!snapshot) return map;
-  for (const row of snapshot.rows) {
-    const id = by === 'raw' ? row.matchedRawMaterialId : row.matchedComponentId;
-    if (!id) continue;
-    map.set(id, (map.get(id) ?? 0) + (row.qty ?? 0));
-  }
-  return map;
-}
-
-export async function computeShortages(planId: string, db: Database): Promise<ShortageReport> {
+export async function computeShortages(
+  planId: string,
+  db: Database,
+  // Expired batches the user chose to count as available for this run (per-run
+  // decision — see the expired-stock prompt). Absent → all expired excluded.
+  includeExpiredBatchIds: string[] = [],
+): Promise<ShortageReport> {
   const plan = await db.getPlan(planId);
   if (!plan) throw new Error(`Plan ${planId} not found`);
 
   const settings = db.getSettings();
-  const W = settings.wasteFactor;
+  const asOf = new Date();
+  const includeSet = new Set(includeExpiredBatchIds);
+  // Overage ("naddatek") is now per-item: the bare requirement is accumulated
+  // here factor-free, then each raw material / component's effective overage is
+  // applied once when its shortage line is built (see below).
   const products = new Map((await db.listProducts()).map((p) => [p.id, p]));
   const rawMaterials = new Map((await db.listRawMaterials()).map((r) => [r.id, r]));
   const components = new Map((await db.listComponents()).map((c) => [c.id, c]));
   const suppliers = new Map((await db.listSuppliers()).map((s) => [s.id, s]));
 
-  const rawSnapshot = await db.getCurrentSnapshot('raw');
-  const compSnapshot = await db.getCurrentSnapshot('component');
-  const rawStockKgIndex = buildStockIndex(rawSnapshot, 'raw');
-  const compStockUnitsIndex = buildStockIndex(compSnapshot, 'component');
-
+  // Stock is now sourced from the catalog itself (raw_materials.stockQty /
+  // components.stockQty), kept up to date by stock imports + manual edits via
+  // services/stockReconciler.ts — so manual corrections feed straight into
+  // shortage planning.
   const rawNeedG = new Map<string, number>();
   const compNeedUnits = new Map<string, number>();
   const warnings: string[] = [];
@@ -59,7 +56,7 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
         continue;
       }
       const massPerUnitG = product.capacityMl * product.densityGPerMl;
-      const totalMassG = massPerUnitG * item.qtyUnits * W;
+      const totalMassG = massPerUnitG * item.qtyUnits;
       for (const ing of product.ingredients) {
         rawNeedG.set(
           ing.rawMaterialId,
@@ -94,7 +91,7 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
         warnings.push(`Bulk mass references missing product ${bm.productId}`);
         continue;
       }
-      const totalMassG = bm.massKg * 1000 * W;
+      const totalMassG = bm.massKg * 1000;
       for (const ing of product.ingredients) {
         rawNeedG.set(
           ing.rawMaterialId,
@@ -111,7 +108,7 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
         if (!Number.isFinite(piecesPerKg) || piecesPerKg <= 0) continue;
         compNeedUnits.set(
           entry.componentId,
-          (compNeedUnits.get(entry.componentId) ?? 0) + Math.ceil(piecesPerKg * bm.massKg * W),
+          (compNeedUnits.get(entry.componentId) ?? 0) + Math.ceil(piecesPerKg * bm.massKg),
         );
       }
     }
@@ -128,9 +125,16 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
     }
     if (rm.factorySupplied) continue;
 
+    // Apply this raw material's effective overage ("naddatek") to the bare
+    // requirement accumulated above.
+    const neededWithOverageG =
+      neededG * effectiveOverageFactor(rm.overagePct, settings.defaultOveragePctRaw);
+
     let availableG: number;
     try {
-      const stockQty = rawStockKgIndex.get(id) ?? 0;
+      // Expiry-aware: expired batches are excluded unless the user opted to
+      // count them for this run. Batch-less materials use their flat stockQty.
+      const stockQty = availableStockQty(rm, asOf, includeSet);
       availableG = toGrams(stockQty, rm.unit);
     } catch (err) {
       warnings.push(
@@ -139,7 +143,7 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
       availableG = 0;
     }
 
-    const shortageG = Math.max(0, neededG - availableG);
+    const shortageG = Math.max(0, neededWithOverageG - availableG);
     const suggestedOrder = ceilToMoq(shortageG / 1000, rm.moq); // expressed in same unit as MOQ (kg)
 
     rawLines.push({
@@ -147,7 +151,7 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
       itemName: rm.name,
       itemKind: 'raw',
       unit: 'kg',
-      required: neededG / 1000,
+      required: neededWithOverageG / 1000,
       available: availableG / 1000,
       shortage: shortageG / 1000,
       moq: rm.moq,
@@ -163,15 +167,20 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
       warnings.push(`Recipe references missing component ${id}`);
       continue;
     }
-    const available = compStockUnitsIndex.get(id) ?? 0;
-    const shortage = Math.max(0, neededUnits - available);
+    // Apply this component's effective overage ("naddatek"), then round up —
+    // components are whole pieces.
+    const neededWithOverage = Math.ceil(
+      neededUnits * effectiveOverageFactor(comp.overagePct, settings.defaultOveragePctComponent),
+    );
+    const available = comp.stockQty ?? 0;
+    const shortage = Math.max(0, neededWithOverage - available);
     const suggestedOrder = ceilToMoq(shortage, comp.moq);
     componentLines.push({
       itemId: id,
       itemName: comp.name,
       itemKind: 'component',
       unit: 'pcs',
-      required: neededUnits,
+      required: neededWithOverage,
       available,
       shortage,
       moq: comp.moq,
@@ -185,6 +194,15 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
   rawLines.sort((a, b) => b.shortage - a.shortage || a.itemName.localeCompare(b.itemName));
   componentLines.sort((a, b) => b.shortage - a.shortage || a.itemName.localeCompare(b.itemName));
 
+  // Surface expired batches among the plan's (non factory-supplied) materials so
+  // the caller can prompt the user to include/exclude them for this run.
+  const expiredBatches: ExpiredBatchRef[] = [];
+  for (const id of rawNeedG.keys()) {
+    const rm = rawMaterials.get(id);
+    if (!rm || rm.factorySupplied) continue;
+    expiredBatches.push(...collectExpiredRefs(rm, asOf, includeSet));
+  }
+
   return {
     planId,
     computedAt: nowIso(),
@@ -192,7 +210,40 @@ export async function computeShortages(planId: string, db: Database): Promise<Sh
     componentLines,
     groups,
     warnings,
+    expiredBatches,
   };
+}
+
+// Lightweight pre-pass for the expired-stock prompt: which expired raw-material
+// batches are relevant to this plan (its products' non factory-supplied
+// ingredients), without running the full shortage computation or saving a
+// report. The caller shows these, collects the user's include/exclude decision,
+// then calls computeShortages with the chosen batch ids.
+export async function previewExpiredForPlan(
+  planId: string,
+  db: Database,
+): Promise<ExpiredBatchRef[]> {
+  const plan = await db.getPlan(planId);
+  if (!plan) throw new Error(`Plan ${planId} not found`);
+  const products = new Map((await db.listProducts()).map((p) => [p.id, p]));
+  const rawMaterials = new Map((await db.listRawMaterials()).map((r) => [r.id, r]));
+  const asOf = new Date();
+  const seen = new Set<string>();
+  const refs: ExpiredBatchRef[] = [];
+  const addForProduct = (productId: string) => {
+    const product = products.get(productId);
+    if (!product) return;
+    for (const ing of product.ingredients) {
+      if (seen.has(ing.rawMaterialId)) continue;
+      seen.add(ing.rawMaterialId);
+      const rm = rawMaterials.get(ing.rawMaterialId);
+      if (!rm || rm.factorySupplied) continue;
+      refs.push(...collectExpiredRefs(rm, asOf));
+    }
+  };
+  for (const item of plan.items) addForProduct(item.productId);
+  for (const bm of plan.bulkMass) addForProduct(bm.productId);
+  return refs;
 }
 
 function groupBySupplier(

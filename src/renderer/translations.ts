@@ -19,6 +19,27 @@ export interface T {
   outerPackagingPropagateInProgress: string;
   suppliers: string;
   stockImport: string;
+  stock: string;
+  stockSync: string;
+  stockSyncHint: string;
+  stockSyncInProgress: string;
+  stockSyncDone: string;
+  stockSourceLabel: string;
+  stockSourceManual: string;
+  stockSourceImport: string;
+  stockUpdatedAt: string;
+  stockNote: string;
+  stockEditManual: string;
+  stockConflictTitle: string;
+  stockConflictSubtitle: string;
+  stockConflictKeepAll: string;
+  stockConflictTakeAll: string;
+  stockConflictCurrent: string;
+  stockConflictImported: string;
+  stockConflictDecision: string;
+  stockConflictKeep: string;
+  stockConflictTake: string;
+  stockConflictApply: string;
   productionPlan: string;
   shortageReport: string;
   emailGenerator: string;
@@ -129,6 +150,67 @@ export interface T {
   componentsImportModeOverwrite: string;
   componentsImportModeOverwriteDesc: string;
   componentsImportConfirm: string;
+  // Warehouse ("Magazyn") stock import
+  magazynStockImport: string;
+  magazynStockImportHint: string;
+  magazynStockImportFailed: string;
+  magazynStockNoMatches: string;
+  magazynStockDiffTitle: string;
+  magazynStockDiffIntro: string;
+  magazynStockColItem: string;
+  magazynStockColCurrent: string;
+  magazynStockColExcel: string;
+  magazynStockColDecision: string;
+  magazynStockKeep: string;
+  magazynStockTake: string;
+  magazynStockKeepAll: string;
+  magazynStockTakeAll: string;
+  magazynStockApply: string;
+  magazynStockSummary: string;
+  magazynStockSummaryIgnored: string;
+  magazynStockSummaryCreated: string;
+  magazynStockUnmatchedIntro: string;
+  magazynStockCreate: string;
+  magazynStockIgnore: string;
+  magazynStockCreateAll: string;
+  magazynStockIgnoreAll: string;
+  // Warehouse raw-stock import (batches / expiry)
+  rawStockImportHint: string;
+  rawStockImportFailed: string;
+  rawStockImportSummary: string;
+  rawStockDiffTitle: string;
+  rawStockDiffIntro: string;
+  rawStockBatchSum: string;
+  rawStockReportedTotal: string;
+  rawStockTake: string;
+  rawStockReject: string;
+  rawStockTakeAll: string;
+  rawStockRejectAll: string;
+  // Expiry / batches (catalog + calculators)
+  stockBatches: string;
+  stockBatchesEditHint: string;
+  stockBatchAdd: string;
+  expiryRetest: string;
+  maxProducibleExpiredExcluded: string;
+  expiredReportPanelHint: string;
+  expiredReportRegenerate: string;
+  expiry: string;
+  expiryOriginal: string;
+  expired: string;
+  expiresInDays: string;
+  noExpiry: string;
+  expiryFilterAll: string;
+  expiryFilterExpired: string;
+  expiryFilterExpiring: string;
+  expiryFilterWithinDays: string;
+  expiredStockTitle: string;
+  expiredStockIntro: string;
+  expiredStockSkipAll: string;
+  expiredStockIncludeAll: string;
+  expiredStockDecision: string;
+  expiredStockSkip: string;
+  expiredStockInclude: string;
+  expiredStockContinue: string;
   // Products
   capacityMl: string;
   density: string;
@@ -307,6 +389,23 @@ export interface T {
   settingsDarkMode: string;
   settingsLightMode: string;
   settingsWasteFactor: string;
+  // Per-item overage ("naddatek")
+  overage: string;
+  overageInherited: string;
+  overageInheritedTooltip: string;
+  overageEdit: string;
+  overageInheritHint: string;
+  overageDefaultRaw: string;
+  overageDefaultComponent: string;
+  overageSetForAll: string;
+  overageSetForAllHint: string;
+  overageSetForAllConfirm: string;
+  overageSetForAllDone: string;
+  overageResetToDefault: string;
+  overageResetAll: string;
+  overageResetAllHint: string;
+  overageResetAllConfirm: string;
+  overageResetAllDone: string;
   settingsDefaultCurrency: string;
   settingsDefaultEmailLanguage: string;
   settingsLLM: string;
@@ -604,6 +703,29 @@ const pl: T = {
   outerPackagingPropagateInProgress: 'Propagowanie do produktów…',
   suppliers: 'Dostawcy',
   stockImport: 'Import stanów',
+  stock: 'Stan',
+  stockSync: 'Synchronizuj stany',
+  stockSyncHint:
+    'Zapisz stany z ostatniego importu do katalogu surowców i komponentów.',
+  stockSyncInProgress: 'Synchronizacja stanów…',
+  stockSyncDone: 'Zaktualizowano stany w katalogu: {n}.',
+  stockSourceLabel: 'Źródło',
+  stockSourceManual: 'ręcznie',
+  stockSourceImport: 'import',
+  stockUpdatedAt: 'Aktualizacja stanu',
+  stockNote: 'Uwagi magazynowe',
+  stockEditManual: 'Edytuj stan (ręcznie)',
+  stockConflictTitle: 'Konflikty stanów magazynowych',
+  stockConflictSubtitle:
+    'Te pozycje były zmienione ręcznie, a import podaje inny stan ({n}). Zdecyduj, który zachować.',
+  stockConflictKeepAll: 'Zostaw wszystkie obecne',
+  stockConflictTakeAll: 'Weź wszystkie z importu',
+  stockConflictCurrent: 'Obecny (ręczny)',
+  stockConflictImported: 'Z importu',
+  stockConflictDecision: 'Decyzja',
+  stockConflictKeep: 'Zostaw obecny',
+  stockConflictTake: 'Weź z importu',
+  stockConflictApply: 'Zastosuj decyzje',
   productionPlan: 'Plan produkcji',
   shortageReport: 'Raport zapotrzebowania',
   emailGenerator: 'Generator maili',
@@ -720,6 +842,76 @@ const pl: T = {
   componentsImportModeOverwriteDesc:
     'Plik staje się źródłem prawdy: usuwa z bazy komponenty, których nie ma w pliku, oraz nadpisuje pola z pliku dla pozostałych (MOQ, czas oczekiwania, dostawca, notatki). Dostawcy są zachowywani w obu trybach.',
   componentsImportConfirm: 'Importuj',
+  // Warehouse ("Magazyn") stock import
+  magazynStockImport: 'Importuj stany z magazynu',
+  magazynStockImportHint:
+    'Wczytuje stany z pliku magazynu (zakładka „Stan komponentów”). Dopasowuje tylko istniejące pozycje katalogu po nazwie — kolumna C (stan) i kolumna E (uwagi). Nowe pozycje z pliku są pomijane.',
+  magazynStockImportFailed: 'Nie udało się zaimportować stanów z magazynu',
+  magazynStockNoMatches: 'Nie dopasowano żadnej pozycji z pliku do katalogu.',
+  magazynStockDiffTitle: 'Import stanów z magazynu',
+  magazynStockDiffIntro:
+    'Poniższe pozycje mają w pliku inny stan niż w katalogu. Wybierz dla każdej, czy zostawić obecny stan, czy nadpisać wartością z Excela.',
+  magazynStockColItem: 'Pozycja',
+  magazynStockColCurrent: 'Stan w katalogu',
+  magazynStockColExcel: 'Stan z Excela',
+  magazynStockColDecision: 'Decyzja',
+  magazynStockKeep: 'Zostaw obecny',
+  magazynStockTake: 'Nadpisz z Excela',
+  magazynStockKeepAll: 'Zostaw wszystkie',
+  magazynStockTakeAll: 'Nadpisz wszystkie z Excela',
+  magazynStockApply: 'Zastosuj',
+  magazynStockSummary:
+    'Zaktualizowano stany: {stock}, uwagi: {notes}, pozostawiono bez zmian: {kept}.',
+  magazynStockSummaryIgnored: 'Pominięto {n} pozycji.',
+  magazynStockSummaryCreated: 'Utworzono nowych: {n}.',
+  magazynStockUnmatchedIntro:
+    'W pliku jest {n} pozycji, których nie ma w katalogu. Zdecyduj, czy utworzyć je jako nowe pozycje, czy pominąć — pojedynczo lub zbiorczo.',
+  magazynStockCreate: 'Utwórz',
+  magazynStockIgnore: 'Pomiń',
+  magazynStockCreateAll: 'Utwórz wszystkie',
+  magazynStockIgnoreAll: 'Pomiń wszystkie',
+  // Warehouse raw-stock import (batches / expiry)
+  rawStockImportHint:
+    'Wczytuje stany surowców z pliku magazynu (zakładka „Stan surowców”). Dopasowuje tylko istniejące surowce po nazwie. Stan może być rozbity na partie z różnymi datami ważności (kolumna F, a po reteście kolumna H). Nowe pozycje z pliku są pomijane.',
+  rawStockImportFailed: 'Nie udało się zaimportować stanów surowców',
+  rawStockImportSummary: 'Zaimportowano surowców: {imported}, odrzucono: {rejected}.',
+  rawStockDiffTitle: 'Import stanów surowców — niezgodne sumy',
+  rawStockDiffIntro:
+    'Dla poniższych surowców partie z pliku (kolumna C) nie sumują się do wartości sumarycznej z pliku (kolumna D). Zdecyduj, czy zaimportować dane z pliku, czy odrzucić (zostawić obecny stan w katalogu).',
+  rawStockBatchSum: 'Suma partii (C)',
+  rawStockReportedTotal: 'Suma z pliku (D)',
+  rawStockTake: 'Importuj z pliku',
+  rawStockReject: 'Odrzuć',
+  rawStockTakeAll: 'Importuj wszystkie',
+  rawStockRejectAll: 'Odrzuć wszystkie',
+  // Expiry / batches (catalog + calculators)
+  stockBatches: 'Partie / daty ważności',
+  stockBatchesEditHint:
+    'Dodaj partie ze stanem i datą ważności. Data po reteście (fiz.-chem.) nadpisuje pierwotną. Zapisanie zmian oznacza stan jako ustawiony ręcznie.',
+  stockBatchAdd: 'Dodaj partię',
+  expiryRetest: 'Ważność po reteście',
+  maxProducibleExpiredExcluded: 'pominięto {n} (przeterminowane)',
+  expiredReportPanelHint:
+    'Poniższe partie są przeterminowane. Zaznacz te, które chcesz uznać za dostępne, i przegeneruj raport.',
+  expiredReportRegenerate: 'Przegeneruj raport',
+  expiry: 'Ważność',
+  expiryOriginal: 'pierwotna',
+  expired: 'przeterminowane',
+  expiresInDays: 'za {n} dni',
+  noExpiry: 'bez daty ważności',
+  expiryFilterAll: 'Wszystkie',
+  expiryFilterExpired: 'Przeterminowane',
+  expiryFilterExpiring: 'Kończy się wkrótce',
+  expiryFilterWithinDays: 'Ważność kończy się w ciągu',
+  expiredStockTitle: 'Przeterminowany zapas',
+  expiredStockIntro:
+    'Poniższe partie są przeterminowane (minęła data ważności). Zdecyduj, czy uznać je za ważne (dostępne) w tej kalkulacji. Domyślnie są pomijane.',
+  expiredStockSkipAll: 'Pomiń wszystkie',
+  expiredStockIncludeAll: 'Uwzględnij wszystkie',
+  expiredStockDecision: 'Decyzja',
+  expiredStockSkip: 'Pomiń',
+  expiredStockInclude: 'Uwzględnij',
+  expiredStockContinue: 'Kontynuuj kalkulację',
   capacityMl: 'Pojemność (ml)',
   density: 'Gęstość (g/ml)',
   laborCost: 'Koszt konfekcji (zł/szt.)',
@@ -896,6 +1088,26 @@ const pl: T = {
   settingsDarkMode: 'Ciemny motyw',
   settingsLightMode: 'Jasny motyw',
   settingsWasteFactor: 'Naddatek na straty (×)',
+  overage: 'Naddatek',
+  overageInherited: 'auto',
+  overageInheritedTooltip: 'Dziedziczy wartość domyślną',
+  overageEdit: 'Edytuj naddatek',
+  overageInheritHint: 'Puste = dziedziczy domyślny ({n}%)',
+  overageDefaultRaw: 'Domyślny naddatek — surowce (%)',
+  overageDefaultComponent: 'Domyślny naddatek — komponenty (%)',
+  overageSetForAll: 'Ustaw dla wszystkich',
+  overageSetForAllHint:
+    'Wpisuje podaną wartość jako indywidualny naddatek do każdej pozycji (kasuje dziedziczenie).',
+  overageSetForAllConfirm:
+    'Ustawić naddatek {pct}% dla wszystkich {n} pozycji? Nadpisze to indywidualne wartości.',
+  overageSetForAllDone: 'Ustawiono naddatek dla {n} pozycji.',
+  overageResetToDefault: 'Przywróć dziedziczenie (domyślny)',
+  overageResetAll: 'Przywróć dziedziczenie dla wszystkich',
+  overageResetAllHint:
+    'Kasuje indywidualny naddatek na każdej pozycji — wszystkie wrócą do wartości domyślnej.',
+  overageResetAllConfirm:
+    'Przywrócić dziedziczenie domyślnego naddatku dla wszystkich {n} pozycji? Skasuje to indywidualne wartości.',
+  overageResetAllDone: 'Przywrócono dziedziczenie dla {n} pozycji.',
   settingsDefaultCurrency: 'Domyślna waluta',
   settingsDefaultEmailLanguage: 'Domyślny język maili RFQ',
   settingsLLM: 'AI / LLM',
@@ -1186,6 +1398,28 @@ const en: T = {
   outerPackagingPropagateInProgress: 'Propagating to products…',
   suppliers: 'Suppliers',
   stockImport: 'Stock import',
+  stock: 'Stock',
+  stockSync: 'Sync stock',
+  stockSyncHint: 'Write the latest import quantities into the raw materials and components catalog.',
+  stockSyncInProgress: 'Syncing stock…',
+  stockSyncDone: 'Catalog stock updated: {n}.',
+  stockSourceLabel: 'Source',
+  stockSourceManual: 'manual',
+  stockSourceImport: 'import',
+  stockUpdatedAt: 'Stock updated',
+  stockNote: 'Warehouse note',
+  stockEditManual: 'Edit stock (manual)',
+  stockConflictTitle: 'Stock conflicts',
+  stockConflictSubtitle:
+    'These items were edited manually and the import reports a different stock ({n}). Choose which to keep.',
+  stockConflictKeepAll: 'Keep all current',
+  stockConflictTakeAll: 'Take all from import',
+  stockConflictCurrent: 'Current (manual)',
+  stockConflictImported: 'From import',
+  stockConflictDecision: 'Decision',
+  stockConflictKeep: 'Keep current',
+  stockConflictTake: 'Take from import',
+  stockConflictApply: 'Apply decisions',
   productionPlan: 'Production plan',
   shortageReport: 'Shortage report',
   emailGenerator: 'Email generator',
@@ -1302,6 +1536,75 @@ const en: T = {
   componentsImportModeOverwriteDesc:
     'The file becomes the source of truth: deletes components missing from the file and overwrites file-driven fields (MOQ, lead time, supplier, notes) for the rest. Suppliers are preserved in both modes.',
   componentsImportConfirm: 'Import',
+  // Warehouse ("Magazyn") stock import
+  magazynStockImport: 'Import stock from warehouse',
+  magazynStockImportHint:
+    'Loads stock from the warehouse file ("Stan komponentów" tab). Matches existing catalog items by name only — column C (stock) and column E (notes). New items from the file are ignored.',
+  magazynStockImportFailed: 'Failed to import warehouse stock',
+  magazynStockNoMatches: 'No item from the file matched the catalog.',
+  magazynStockDiffTitle: 'Import warehouse stock',
+  magazynStockDiffIntro:
+    'The items below have a different stock in the file than in the catalog. For each, choose whether to keep the current stock or overwrite it with the Excel value.',
+  magazynStockColItem: 'Item',
+  magazynStockColCurrent: 'Catalog stock',
+  magazynStockColExcel: 'Excel stock',
+  magazynStockColDecision: 'Decision',
+  magazynStockKeep: 'Keep current',
+  magazynStockTake: 'Overwrite from Excel',
+  magazynStockKeepAll: 'Keep all',
+  magazynStockTakeAll: 'Overwrite all from Excel',
+  magazynStockApply: 'Apply',
+  magazynStockSummary: 'Stock updated: {stock}, notes: {notes}, left unchanged: {kept}.',
+  magazynStockSummaryIgnored: 'Skipped {n} rows.',
+  magazynStockSummaryCreated: 'Created new: {n}.',
+  magazynStockUnmatchedIntro:
+    'The file has {n} rows not in the catalog. Decide whether to create them as new entries or skip them — individually or in bulk.',
+  magazynStockCreate: 'Create',
+  magazynStockIgnore: 'Skip',
+  magazynStockCreateAll: 'Create all',
+  magazynStockIgnoreAll: 'Skip all',
+  // Warehouse raw-stock import (batches / expiry)
+  rawStockImportHint:
+    'Loads raw-material stock from the warehouse file ("Stan surowców" tab). Matches existing materials by name only. Stock can be split into batches with different expiry dates (column F, or column H after a retest). New items from the file are ignored.',
+  rawStockImportFailed: 'Failed to import raw-material stock',
+  rawStockImportSummary: 'Imported materials: {imported}, rejected: {rejected}.',
+  rawStockDiffTitle: 'Import raw-material stock — sum mismatch',
+  rawStockDiffIntro:
+    "For the materials below, the file's batch quantities (column C) don't add up to the file's own total (column D). Decide whether to import the file's data or reject it (keep the current catalog stock).",
+  rawStockBatchSum: 'Batch sum (C)',
+  rawStockReportedTotal: 'File total (D)',
+  rawStockTake: 'Import from file',
+  rawStockReject: 'Reject',
+  rawStockTakeAll: 'Import all',
+  rawStockRejectAll: 'Reject all',
+  // Expiry / batches (catalog + calculators)
+  stockBatches: 'Batches / expiry',
+  stockBatchesEditHint:
+    'Add batches with a quantity and expiry date. The retest (physico-chemical) date overrides the original. Saving marks the stock as manually set.',
+  stockBatchAdd: 'Add batch',
+  expiryRetest: 'Expiry after retest',
+  maxProducibleExpiredExcluded: 'excluded {n} (expired)',
+  expiredReportPanelHint:
+    'The batches below are expired. Tick the ones to count as available, then regenerate the report.',
+  expiredReportRegenerate: 'Regenerate report',
+  expiry: 'Expiry',
+  expiryOriginal: 'original',
+  expired: 'expired',
+  expiresInDays: 'in {n} days',
+  noExpiry: 'no expiry',
+  expiryFilterAll: 'All',
+  expiryFilterExpired: 'Expired',
+  expiryFilterExpiring: 'Expiring soon',
+  expiryFilterWithinDays: 'Expiring within',
+  expiredStockTitle: 'Expired stock',
+  expiredStockIntro:
+    'The batches below are expired (past their expiry date). Decide whether to count them as valid (available) for this calculation. They are excluded by default.',
+  expiredStockSkipAll: 'Skip all',
+  expiredStockIncludeAll: 'Include all',
+  expiredStockDecision: 'Decision',
+  expiredStockSkip: 'Skip',
+  expiredStockInclude: 'Include',
+  expiredStockContinue: 'Continue calculation',
   capacityMl: 'Capacity (ml)',
   density: 'Density (g/ml)',
   laborCost: 'Confection cost (PLN/unit)',
@@ -1478,6 +1781,26 @@ const en: T = {
   settingsDarkMode: 'Dark mode',
   settingsLightMode: 'Light mode',
   settingsWasteFactor: 'Waste factor (×)',
+  overage: 'Overage',
+  overageInherited: 'auto',
+  overageInheritedTooltip: 'Inherits the default value',
+  overageEdit: 'Edit overage',
+  overageInheritHint: 'Empty = inherits the default ({n}%)',
+  overageDefaultRaw: 'Default overage — raw materials (%)',
+  overageDefaultComponent: 'Default overage — components (%)',
+  overageSetForAll: 'Set for all',
+  overageSetForAllHint:
+    'Writes the given value as an explicit per-item overage on every row (clears inheritance).',
+  overageSetForAllConfirm:
+    'Set overage {pct}% for all {n} items? This overwrites individual values.',
+  overageSetForAllDone: 'Overage set for {n} items.',
+  overageResetToDefault: 'Reset to default (inherit)',
+  overageResetAll: 'Reset all to default',
+  overageResetAllHint:
+    'Clears the explicit overage on every item — all fall back to the default value.',
+  overageResetAllConfirm:
+    'Reset all {n} items to inherit the default overage? This clears individual values.',
+  overageResetAllDone: 'Reset {n} items to the default.',
   settingsDefaultCurrency: 'Default currency',
   settingsDefaultEmailLanguage: 'Default RFQ email language',
   settingsLLM: 'AI / LLM',

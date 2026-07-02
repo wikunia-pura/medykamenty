@@ -1,4 +1,5 @@
 import { FUZZY_MATCH_THRESHOLD } from '../../shared/constants';
+import { sameVariantNames } from './variantMatch';
 
 interface Candidate {
   id: string;
@@ -58,49 +59,6 @@ function similarity(a: string, b: string): number {
   return 1 - dist / maxLen;
 }
 
-// Split a name into comparable tokens. Folds diacritics (incl. Polish ł, which
-// NFD does not decompose) and lowercases, so "Ł"→"l" and "biała"→"biala".
-function variantTokens(s: string): string[] {
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/ł/g, 'l')
-    .replace(/(\d)(\p{L})/gu, '$1 $2')
-    .replace(/(\p{L})(\d)/gu, '$1 $2')
-    .replace(/[^\p{L}\d]+/gu, ' ')
-    .trim()
-    .split(' ')
-    .filter(Boolean);
-}
-
-// Is every token of `from` explained by some token of `to`?
-//   * a number ("100", "10") must appear verbatim — 100 is never a typo of 200,
-//     nor 1 of 10;
-//   * a short code (≤2 chars, e.g. line letter "p"/"l") must appear verbatim;
-//   * a longer word may match a near-twin (typo / inflection / diacritics) or be
-//     absorbed by a join/split spelling ("tego"+"care" ⇄ "tegocare").
-// Any leftover token means the two names denote *different* variants.
-function tokensCovered(from: string[], to: string[]): boolean {
-  const joined = to.join('');
-  return from.every((t) => {
-    if (/^\d+$/.test(t) || t.length <= 2) return to.includes(t);
-    if (to.some((u) => u.length > 2 && similarity(t, u) >= 0.7)) return true;
-    // join/split tolerance: "tegocare" vs "tego care"
-    return joined.includes(t) || t.includes(joined);
-  });
-}
-
-// Two names are the *same variant* only when neither carries a distinguishing
-// token the other lacks. Fully generic — no colour/keyword list: any extra word
-// ("biały" vs "brylantowy"), differing number, or differing line-code is enough
-// to keep them apart, so a high Levenshtein score can't merge distinct items
-// (e.g. "Butelka 100 ml" ✗ "Butelka 200 ml", "Cutis P" ✗ "Cutis Ł").
-function sameVariant(a: string, b: string): boolean {
-  const ta = variantTokens(a);
-  const tb = variantTokens(b);
-  return tokensCovered(ta, tb) && tokensCovered(tb, ta);
-}
 
 export function matchOne(
   source: { name: string; mpFirmaSymbol?: string },
@@ -150,7 +108,7 @@ export function matchOne(
   // best candidate is a *different variant* (its numbers / line-codes / colours
   // differ), it's a different item — refuse the auto-match and leave the row
   // unmatched so the user links it once (an alias then makes it permanent).
-  if (!sameVariant(source.name, top.name)) {
+  if (!sameVariantNames(source.name, top.name)) {
     return { confidence: top.confidence, ambiguous: false };
   }
 

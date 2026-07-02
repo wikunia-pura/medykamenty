@@ -15,6 +15,8 @@ export const IPC = {
   RAW_DELETE: 'rawMaterials:delete',
   RAW_DUPLICATE: 'rawMaterials:duplicate',
   RAW_XLSX_IMPORT: 'rawMaterials:xlsx-import',
+  RAW_MAGAZYN_STOCK_ANALYZE: 'rawMaterials:magazyn-stock-analyze',
+  RAW_MAGAZYN_STOCK_COMMIT: 'rawMaterials:magazyn-stock-commit',
 
   // Components
   COMP_LIST: 'components:list',
@@ -24,6 +26,8 @@ export const IPC = {
   COMP_DELETE: 'components:delete',
   COMP_DUPLICATE: 'components:duplicate',
   COMP_XLSX_IMPORT: 'components:xlsx-import',
+  COMP_MAGAZYN_STOCK_ANALYZE: 'components:magazyn-stock-analyze',
+  COMP_MAGAZYN_STOCK_COMMIT: 'components:magazyn-stock-commit',
 
   // Products
   PRODUCTS_LIST: 'products:list',
@@ -42,6 +46,9 @@ export const IPC = {
   STOCK_LIST_SNAPSHOTS: 'stock:list-snapshots',
   STOCK_GET_CURRENT: 'stock:get-current',
   STOCK_RESOLVE_MATCH: 'stock:resolve-match',
+  STOCK_RESOLVE_CONFLICTS: 'stock:resolve-conflicts',
+  STOCK_SYNC_CATALOG: 'stock:sync-catalog',
+  STOCK_SET_MANUAL: 'stock:set-manual',
   STOCK_UPDATE_ROW: 'stock:update-row',
   STOCK_DELETE_ROW: 'stock:delete-row',
   STOCK_DELETE_SNAPSHOT: 'stock:delete-snapshot',
@@ -72,6 +79,7 @@ export const IPC = {
   PLAN_DELETE: 'plan:delete',
   PLAN_DUPLICATE: 'plan:duplicate',
   PLAN_COMPUTE_SHORTAGES: 'plan:compute-shortages',
+  PLAN_PREVIEW_EXPIRED: 'plan:preview-expired',
   PLAN_COMPUTE_COST: 'plan:compute-cost',
 
   // Shortage report history
@@ -119,6 +127,9 @@ export const IPC = {
   // Settings
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
+
+  // Overage ("naddatek") bulk action
+  OVERAGE_SET_FOR_ALL: 'overage:set-for-all',
 
   // Backup
   BACKUP_EXPORT: 'backup:export',

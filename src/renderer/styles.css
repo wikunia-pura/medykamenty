@@ -1692,6 +1692,165 @@ body.dark-mode .page-header-count {
   background: #cdebda;
   color: #1f5b3a;
 }
+.stock-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.stock-cell .stock-qty {
+  white-space: nowrap;
+}
+.stock-cell .stock-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+.stock-cell .stock-edit-btn {
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.stock-note-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent, #3b82f6);
+  cursor: help;
+}
+.stock-note-text {
+  white-space: pre-wrap;
+  padding: 6px 2px 2px;
+  font-size: 12px;
+  line-height: 1.45;
+  max-width: 320px;
+}
+.stock-note-icon-warn {
+  color: var(--danger, #dc2626);
+}
+
+/* Raw-material stock split into expiry batches: "1.37/2.9  4.27 kg" */
+.stock-split {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted, #6b7280);
+  font-size: 12px;
+}
+.stock-split-sep {
+  margin: 0 2px;
+  opacity: 0.5;
+}
+.stock-split-expired {
+  color: var(--danger, #dc2626);
+  font-weight: 600;
+}
+.stock-qty-total {
+  font-weight: 600;
+}
+.stock-batch-list {
+  margin: 0;
+  padding: 4px 2px 2px;
+  list-style: none;
+  max-width: 340px;
+}
+.stock-batch-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  font-size: 12px;
+}
+.stock-batch-list li:last-child {
+  border-bottom: none;
+}
+.stock-batch-qty {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.stock-batch-exp {
+  color: var(--muted, #6b7280);
+}
+.stock-batch-retest {
+  opacity: 0.7;
+}
+.stock-batch-note {
+  flex-basis: 100%;
+  color: var(--muted, #6b7280);
+  font-style: italic;
+}
+.stock-batch-flag {
+  margin-left: 6px;
+  color: var(--danger, #dc2626);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.stock-batch-soon {
+  margin-left: 6px;
+  color: var(--warn, #d97706);
+  font-size: 10px;
+}
+.stock-batch-expired .stock-batch-qty,
+.batch-table .stock-batch-expired td {
+  color: var(--danger, #dc2626);
+}
+
+/* Expiry filter bar on the raw-materials catalog */
+.expiry-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.expiry-filter-bar .chip {
+  cursor: pointer;
+  border: 1px solid var(--border, #e5e7eb);
+  background: transparent;
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12px;
+  color: var(--text, #111827);
+}
+.expiry-filter-bar .chip.active {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: #fff;
+}
+.expiry-filter-bar .chip-danger:not(.active) {
+  border-color: var(--danger, #dc2626);
+  color: var(--danger, #dc2626);
+}
+.expiry-filter-days {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.batch-table {
+  font-size: 12px;
+}
+.batch-table .input {
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.maxprod-expiry {
+  font-size: 11px;
+  color: var(--muted, #6b7280);
+  margin-left: 8px;
+}
+.expired-report-panel {
+  border-color: var(--warning, #d97706);
+}
+tr:hover .stock-cell .stock-edit-btn {
+  opacity: 1;
+}
+.stock-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.stock-edit .stock-edit-input {
+  width: 90px;
+}
 .tag.tag-clickable {
   cursor: pointer;
   text-decoration-line: underline;

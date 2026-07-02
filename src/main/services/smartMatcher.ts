@@ -8,6 +8,12 @@
 //   * Levenshtein-similarity on the aggressively normalized strings
 //   * Token-set Jaccard (tokens reordered, missing tokens punished)
 // Both range [0,1]; taking the max lets either signal carry a match.
+//
+// A variant guard then caps the score for candidates whose distinguishing
+// tokens differ (CBD 1% vs CBD 10%, Butelka 100 vs 200 ml) so they can never
+// be mistaken for the same item — see ./variantMatch.
+
+import { sameVariant, variantTokens } from './variantMatch';
 
 export interface SuggestionCandidate {
   id: string;
@@ -137,13 +143,30 @@ function prefixBonus(a: string, b: string): number {
   return Math.min(0.15, (i / Math.max(a.length, b.length)) * 0.2);
 }
 
+// Score ceiling for a candidate that is a *different variant* of the source
+// (its numbers / line-codes / qualifier words differ). Without it, "CBD 1%"
+// scores a full 1.0 against "CBD 10%" ("cbd 1" is a prefix of "cbd 10", so the
+// prefix bonus + near-identical Levenshtein saturate the score) and "Butelka
+// 100 ml" looks identical to "Butelka 200 ml". Kept below every consumer
+// threshold (0.55 suggestions, 0.85 duplicate warnings) so a wrong variant is
+// never auto-picked or flagged as the same item — it just drops out of the list.
+const VARIANT_MISMATCH_CAP = 0.4;
+
 function scoreOne(sourceNorm: string, sourceTokens: string[], candidateName: string): number {
   const candNorm = normalize(candidateName);
   const candTokens = tokenize(candNorm);
   const lev = levenshteinSimilarity(sourceNorm, candNorm);
   const jac = tokenJaccard(sourceTokens, candTokens);
   const base = Math.max(lev, jac);
-  return Math.min(1, base + prefixBonus(sourceNorm, candNorm));
+  const score = Math.min(1, base + prefixBonus(sourceNorm, candNorm));
+  // Compare the *normalized* forms: parenthetical annotations ("(BASF)",
+  // "(99%)") are already stripped by `normalize`, so they don't count as a
+  // distinguishing token — only bare differences ("CBD 1%" vs "CBD 10%",
+  // "Butelka 100 ml" vs "200 ml") cap the score.
+  if (!sameVariant(variantTokens(sourceNorm), variantTokens(candNorm))) {
+    return Math.min(score, VARIANT_MISMATCH_CAP);
+  }
+  return score;
 }
 
 /**

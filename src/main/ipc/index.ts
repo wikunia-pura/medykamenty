@@ -16,10 +16,24 @@ import type {
   StockRow,
   StockSnapshot,
   ImportSummary,
+  StockConflict,
+  StockConflictResolution,
+  StockSyncResult,
+  MagazynStockDecision,
+  MagazynStockCommitResult,
+  MagazynStockUnmatched,
+  PackagingComponent,
+  RawStockDecision,
+  RawStockCommitResult,
+  RawStockAnalysis,
+  RawStockUnmatched,
+  StockBatch,
 } from '../../shared/types';
 import { parseStockXlsx } from '../services/xlsxStockImporter';
 import { importRawMaterialsXlsx } from '../services/xlsxRawMaterialsImporter';
-import { importComponentsXlsx } from '../services/xlsxComponentsImporter';
+import { importComponentsXlsx, inferComponentType } from '../services/xlsxComponentsImporter';
+import { analyzeMagazynStock } from '../services/magazynStockImporter';
+import { analyzeRawStock } from '../services/magazynRawStockImporter';
 import {
   analyzeRecipesXlsx,
   commitRecipesXlsx,
@@ -27,7 +41,8 @@ import {
 } from '../services/recipesXlsxService';
 import { matchOne } from '../services/matcher';
 import { suggestMatches, normalize as normalizeAlias } from '../services/smartMatcher';
-import { computeShortages } from '../services/shortageCalculator';
+import { computeShortages, previewExpiredForPlan } from '../services/shortageCalculator';
+import { reconcileStock } from '../services/stockReconciler';
 import { computeCost } from '../services/costCalculator';
 import { generateEmailsForReport, regenerateBatchEmail } from '../services/rfqGenerator';
 import { maxProducible } from '../services/reverseCalculator';
@@ -119,6 +134,9 @@ async function matchAndPersistSnapshot(
   }
 
   await db.addStockSnapshot(snapshot);
+  // NOTE: catalog stock is NOT updated here. Applying imported quantities to the
+  // catalog is an explicit, user-triggered step ("Synchronizuj stany" in the
+  // stock import view) — see the STOCK_SYNC_CATALOG handler.
   return { matched, ambiguous, unmatched };
 }
 
@@ -203,6 +221,100 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     }
   });
 
+  // Warehouse stock import ("Magazyn.xlsx" → "Stan surowców"). Two-phase:
+  // analyze parses + matches by name and groups each material's rows into
+  // expiry batches (no writes); the renderer resolves any Σ(C)≠D mismatches;
+  // commit writes the batches. Only matched materials are touched.
+  ipcMain.handle(IPC.RAW_MAGAZYN_STOCK_ANALYZE, async () => {
+    const win = getMainWindow();
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Wybierz plik magazynu (xlsx) — zakładka „Stan surowców”',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { ok: false };
+    try {
+      const analysis = await analyzeRawStock(result.filePaths[0], db);
+      db.updateSettings({ lastImportDir: path.dirname(result.filePaths[0]) });
+      return { ok: true, analysis };
+    } catch (err) {
+      log.error('[magazyn-raw] analyze failed:', err);
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Apply the raw-stock decisions. Consistent materials (Σ(C)==D) import
+  // silently; mismatched ones import only when the user chose 'take'. Importing
+  // writes the expiry batches, sets stockQty to their sum, and stamps the item
+  // as an import (source file + today's date).
+  ipcMain.handle(
+    IPC.RAW_MAGAZYN_STOCK_COMMIT,
+    async (
+      _e,
+      args: {
+        sourceFile: string;
+        analysis: RawStockAnalysis;
+        decisions: RawStockDecision[];
+        // Unmatched materials the user chose to create as new catalog entries.
+        createItems?: RawStockUnmatched[];
+      },
+    ): Promise<RawStockCommitResult> => {
+      const decisionMap = new Map(args.decisions.map((d) => [d.itemId, d.action]));
+      const out: RawStockCommitResult = { imported: 0, rejected: 0, created: 0 };
+      const now = nowIso();
+      const toBatches = (rows: RawStockUnmatched['batches']): StockBatch[] =>
+        rows.map((b) => ({
+          id: newId(),
+          qty: b.qty,
+          productionDate: b.productionDate,
+          expiryDate: b.expiryDate,
+          microTestDate: b.microTestDate,
+          retestExpiryDate: b.retestExpiryDate,
+          note: b.note,
+        }));
+
+      for (const m of args.analysis.matches) {
+        // Mismatched materials need an explicit decision (default: reject);
+        // consistent ones always import.
+        const action = m.sumMismatch ? (decisionMap.get(m.itemId) ?? 'reject') : 'take';
+        if (action === 'reject') {
+          out.rejected++;
+          continue;
+        }
+        const batches = toBatches(m.batches);
+        const total = batches.reduce((s, b) => s + b.qty, 0);
+        await db.updateRawMaterial(m.itemId, {
+          stockBatches: batches,
+          stockQty: total,
+          stockSource: 'import',
+          stockSourceFile: args.sourceFile,
+          stockUpdatedAt: now,
+        });
+        out.imported++;
+      }
+
+      // Create the unmatched materials the user opted to add (unit defaults to
+      // kg; no supplier/price — those are filled in later by the user).
+      for (const u of args.createItems ?? []) {
+        const batches = toBatches(u.batches);
+        const total = batches.reduce((s, b) => s + b.qty, 0);
+        await db.createRawMaterial({
+          name: u.name,
+          unit: u.unit,
+          supplierIds: [],
+          factorySupplied: false,
+          stockBatches: batches,
+          stockQty: total,
+          stockSource: 'import',
+          stockSourceFile: args.sourceFile,
+          stockUpdatedAt: now,
+        });
+        out.created++;
+      }
+      return out;
+    },
+  );
+
   // ---- Components ----
   ipcMain.handle(IPC.COMP_LIST, () => db.listComponents());
   ipcMain.handle(IPC.COMP_GET, (_e, id: string) => db.getComponent(id));
@@ -228,6 +340,96 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
+
+  // Warehouse stock import ("Magazyn.xlsx" → "Stan komponentów"). Two-phase:
+  // analyze shows the file picker + matches rows to existing components (no
+  // writes); the renderer resolves per-item quantity differences; commit
+  // applies them. Only matched components are touched — extra rows are ignored.
+  ipcMain.handle(IPC.COMP_MAGAZYN_STOCK_ANALYZE, async () => {
+    const win = getMainWindow();
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Wybierz plik magazynu (xlsx) — zakładka „Stan komponentów”',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { ok: false };
+    try {
+      const analysis = await analyzeMagazynStock(result.filePaths[0], db);
+      db.updateSettings({ lastImportDir: path.dirname(result.filePaths[0]) });
+      return { ok: true, analysis };
+    } catch (err) {
+      log.error('[magazyn-stock] analyze failed:', err);
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Apply the user's decisions. `note` is written for every matched item that
+  // carries one (regardless of the keep/take choice); `action: 'take'`
+  // additionally overwrites the stock from column C and stamps it as an import
+  // (source file + today's date), so the catalog shows when it came from.
+  ipcMain.handle(
+    IPC.COMP_MAGAZYN_STOCK_COMMIT,
+    async (
+      _e,
+      args: {
+        sourceFile: string;
+        decisions: MagazynStockDecision[];
+        // Unmatched file rows the user chose to create as new components.
+        createItems?: MagazynStockUnmatched[];
+      },
+    ): Promise<MagazynStockCommitResult> => {
+      const out: MagazynStockCommitResult = {
+        stockUpdated: 0,
+        notesUpdated: 0,
+        kept: 0,
+        created: 0,
+      };
+      const now = nowIso();
+      for (const d of args.decisions) {
+        const existing = await db.getComponent(d.itemId);
+        if (!existing) continue;
+        const patch: Partial<PackagingComponent> = {};
+
+        // Notes always follow the file when it provides one; an empty cell
+        // leaves any existing note untouched (never wipes a manual note).
+        const note = d.note?.trim();
+        if (note && note !== (existing.stockNote ?? '')) {
+          patch.stockNote = note;
+          out.notesUpdated++;
+        }
+
+        if (d.action === 'take') {
+          patch.stockQty = d.importedQty;
+          patch.stockSource = 'import';
+          patch.stockSourceFile = args.sourceFile;
+          patch.stockUpdatedAt = now;
+          out.stockUpdated++;
+        } else {
+          out.kept++;
+        }
+
+        if (Object.keys(patch).length > 0) await db.updateComponent(d.itemId, patch);
+      }
+
+      // Create the unmatched rows the user opted to add. The type is inferred
+      // from the name (as in the components-file import); stock/note come from
+      // the row. No supplier/price — the user fills those in later.
+      for (const u of args.createItems ?? []) {
+        await db.createComponent({
+          name: u.name,
+          type: inferComponentType(u.name),
+          supplierIds: [],
+          stockQty: u.qty,
+          stockSource: 'import',
+          stockSourceFile: args.sourceFile,
+          stockUpdatedAt: now,
+          stockNote: u.note?.trim() || undefined,
+        });
+        out.created++;
+      }
+      return out;
+    },
+  );
 
   // ---- Products ----
   ipcMain.handle(IPC.PRODUCTS_LIST, () => db.listProducts());
@@ -563,7 +765,65 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     IPC.STOCK_RESOLVE_MATCH,
     async (_e, snapshotId: string, rowKey: string, targetKind: 'raw' | 'component', targetId: string) => {
       await db.updateSnapshotRowMatch(snapshotId, rowKey, targetKind, targetId);
+      // Catalog stock is not touched here — the user syncs it explicitly via
+      // STOCK_SYNC_CATALOG after resolving matches.
       return { ok: true };
+    },
+  );
+  // Explicit, user-triggered sync: applies the current snapshots' matched
+  // quantities to the catalog stock. Non-conflicting items are overwritten
+  // silently; manually-edited items that disagree come back as conflicts for the
+  // user to resolve. Runs both kinds (raw + component) in one call.
+  ipcMain.handle(IPC.STOCK_SYNC_CATALOG, async (): Promise<StockSyncResult> => {
+    let applied = 0;
+    const conflicts: StockConflict[] = [];
+    const rawSnap = await db.getCurrentSnapshot('raw');
+    if (rawSnap) {
+      const r = await reconcileStock(db, rawSnap, 'raw');
+      applied += r.applied;
+      conflicts.push(...r.conflicts);
+    }
+    const compSnap = await db.getCurrentSnapshot('component');
+    if (compSnap) {
+      const r = await reconcileStock(db, compSnap, 'component');
+      applied += r.applied;
+      conflicts.push(...r.conflicts);
+    }
+    return { applied, conflicts };
+  });
+  // Apply user decisions from the import conflict dialog. 'take' overwrites the
+  // manual value with the import value (source flips back to 'import'); 'keep'
+  // leaves the manual value untouched.
+  ipcMain.handle(
+    IPC.STOCK_RESOLVE_CONFLICTS,
+    async (_e, resolutions: StockConflictResolution[]) => {
+      for (const r of resolutions) {
+        if (r.action !== 'take') continue;
+        if (r.kind === 'raw') {
+          await db.setRawMaterialStock(r.itemId, {
+            qty: r.importedQty,
+            source: 'import',
+            sourceFile: r.importSourceFile,
+          });
+        } else {
+          await db.setComponentStock(r.itemId, {
+            qty: r.importedQty,
+            source: 'import',
+            sourceFile: r.importSourceFile,
+          });
+        }
+      }
+      return { ok: true };
+    },
+  );
+  // Manual stock edit from the catalog views — flags the item as 'manual' so
+  // later imports raise a conflict instead of silently overwriting it.
+  ipcMain.handle(
+    IPC.STOCK_SET_MANUAL,
+    async (_e, kind: StockKind, itemId: string, qty: number) => {
+      return kind === 'raw'
+        ? db.setRawMaterialStock(itemId, { qty, source: 'manual' })
+        : db.setComponentStock(itemId, { qty, source: 'manual' });
     },
   );
   ipcMain.handle(
@@ -633,12 +893,17 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.PLAN_DUPLICATE, (_e, id: string) => db.duplicatePlan(id));
   ipcMain.handle(
     IPC.PLAN_COMPUTE_SHORTAGES,
-    async (_e, planId: string, orderId?: string) => {
-      const report = await computeShortages(planId, db);
+    async (_e, planId: string, orderId?: string, includeExpiredBatchIds?: string[]) => {
+      const report = await computeShortages(planId, db, includeExpiredBatchIds ?? []);
       await db.updatePlan(planId, { status: 'computed', computedAt: report.computedAt });
       await db.addShortageReport(planId, report, orderId);
       return report;
     },
+  );
+  // Pre-pass for the expired-stock prompt: expired batches relevant to the plan,
+  // without computing or saving a report.
+  ipcMain.handle(IPC.PLAN_PREVIEW_EXPIRED, (_e, planId: string) =>
+    previewExpiredForPlan(planId, db),
   );
 
   // ---- Shortage report history ----
@@ -758,8 +1023,10 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   );
 
   // ---- Reverse ----
-  ipcMain.handle(IPC.REVERSE_MAX_PRODUCIBLE, (_e, productId: string) =>
-    maxProducible(productId, db),
+  ipcMain.handle(
+    IPC.REVERSE_MAX_PRODUCIBLE,
+    (_e, productId: string, includeExpiredBatchIds?: string[]) =>
+      maxProducible(productId, db, includeExpiredBatchIds ?? []),
   );
 
   // ---- Settings ----
@@ -777,6 +1044,12 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     }
     return withBsxFlags(db.updateSettings(patch));
   });
+
+  // ---- Overage ("naddatek") bulk action ----
+  ipcMain.handle(
+    IPC.OVERAGE_SET_FOR_ALL,
+    (_e, kind: 'raw' | 'component', pct: number | null) => db.setOveragePctForAll(kind, pct),
+  );
 
   // ---- Backup ----
   ipcMain.handle(IPC.BACKUP_EXPORT, async () => {

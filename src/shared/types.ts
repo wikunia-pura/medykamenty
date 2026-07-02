@@ -38,8 +38,41 @@ export interface RawMaterial {
   lastPurchasePriceNet?: number;
   currency?: string;
   notes?: string;
+  // Per-item overage ("naddatek") as a percentage on top of the bare
+  // requirement (e.g. 5 == +5%). When undefined the item inherits the
+  // type-level default (AppSettings.defaultOveragePctRaw). Never touched by
+  // imports — see services/overage helpers in src/shared/overage.ts.
+  overagePct?: number;
+  // Current warehouse stock, expressed in this item's `unit` (g/kg/ml/l).
+  // Maintained by stock imports and manual edits — see `stockSource`.
+  // When `stockBatches` is present this equals the sum of all batch quantities
+  // (expired included) — the calculators use only the non-expired subset.
+  stockQty?: number;
+  stockUpdatedAt?: ISODate; // when stock was last set (import or manual)
+  stockSource?: StockSource;
+  stockSourceFile?: string; // display label: "MP firma" / "manual.xlsx" / "BSX idstock=..."
+  // Stock split into batches/lots by expiry date, from the "Magazyn" stock
+  // import ("Stan surowców"). A material's stock can span several rows in the
+  // file, each with its own expiry — those become batches here. Absent for
+  // materials whose stock was set manually or by a batch-less import.
+  stockBatches?: StockBatch[];
   createdAt: ISODate;
   updatedAt: ISODate;
+}
+
+// One lot of a raw material's stock with its own expiry. `expiryDate` is the
+// original "Data ważności" (column F); `retestExpiryDate` is the extended
+// expiry after a physico-chemical retest (column H) and, when present, is the
+// *effective* expiry used in calculations — the original is kept only for
+// display. See src/shared/expiry.ts for the derived helpers.
+export interface StockBatch {
+  id: UUID;
+  qty: number; // in the material's unit
+  productionDate?: ISODate; // column E "Data produkcji"
+  expiryDate?: ISODate; // column F "Data ważności" (original)
+  microTestDate?: ISODate; // column G "Badania mikrobiologiczne"
+  retestExpiryDate?: ISODate; // column H "Data ważności po reteście" — effective when set
+  note?: string; // column I "Uwagi" (per-batch)
 }
 
 // Primary packaging belongs to the "Komponenty" section in the recipe Excel:
@@ -87,12 +120,26 @@ export interface PackagingComponent {
   lastPurchasePriceNet?: number;
   currency?: string;
   notes?: string;
+  // Per-item overage ("naddatek") as a percentage on top of the bare
+  // requirement (e.g. 5 == +5%). When undefined the component inherits the
+  // type-level default (AppSettings.defaultOveragePctComponent). Never touched
+  // by imports — see src/shared/overage.ts.
+  overagePct?: number;
   // For secondary (shipping) packaging: the total capacity of 1 unit of this
   // component, expressed in `capacityUnit`. Examples: carton holds 50 slots
   // ('units'), tape roll has 50 m ('m'), barrel holds 200 l ('l'), bag holds
   // 25 kg ('kg'). Ignored for primary components.
   capacity?: number;
   capacityUnit?: PackingCapacityUnit;
+  // Current warehouse stock, expressed in units (pcs). Maintained by stock
+  // imports and manual edits — see `stockSource`.
+  stockQty?: number;
+  stockUpdatedAt?: ISODate; // when stock was last set (import or manual)
+  stockSource?: StockSource;
+  stockSourceFile?: string; // display label: import source or "manual"
+  // Free-text warehouse note attached to the stock (column "Uwagi" from the
+  // "Magazyn" stock import). Shown as an info tooltip next to the stock value.
+  stockNote?: string;
   // Cascade dependencies: "1 unit of this component consumes N units of
   // <componentId>'s capacity-unit". Examples: 1 carton uses 10 m of tape →
   // {componentId: tapeId, consumption: 10}; 1 barrel uses 1 bag →
@@ -325,12 +372,162 @@ export interface StockRow {
 
 export type StockKind = 'raw' | 'component';
 
+// How a catalog item's `stockQty` was last set. 'import' = written by a stock
+// import (overwritten silently by later imports); 'manual' = edited by the user
+// (protected — later imports that disagree raise a StockConflict instead of
+// overwriting).
+export type StockSource = 'import' | 'manual';
+
 export interface StockSnapshot {
   id: UUID;
   importedAt: ISODate;
   sourceFile: string;
   kind: StockKind;
   rows: StockRow[];
+}
+
+// Raised during reconciliation when an import disagrees with a manually-edited
+// catalog stock value. The user resolves each conflict (keep current / take
+// import) — see StockConflictResolution.
+export interface StockConflict {
+  itemId: UUID;
+  kind: StockKind;
+  name: string;
+  currentQty?: number; // manual value currently in the catalog
+  currentUpdatedAt?: ISODate;
+  importedQty: number; // value aggregated from matched import rows
+  importSourceFile?: string;
+  unit?: string; // raw materials only — unit label for display
+}
+
+export interface StockConflictResolution {
+  itemId: UUID;
+  kind: StockKind;
+  action: 'keep' | 'take';
+  importedQty: number;
+  importSourceFile?: string; // carried from the conflict so 'take' keeps provenance
+}
+
+// ---- "Magazyn" stock import (Components / Bulk packaging catalog) ----
+//
+// A targeted import of the warehouse spreadsheet's "Stan komponentów" sheet. It
+// only touches components that already exist in the catalog (matched by name);
+// anything extra in the file is ignored. Column C is the warehouse count,
+// column E a free-text note. Two-phase: analyze (parse + match, no writes) →
+// user resolves per-item quantity differences → commit.
+export interface MagazynStockMatch {
+  itemId: UUID;
+  name: string; // catalog name
+  excelName: string; // name as written in the spreadsheet (may differ slightly)
+  currentQty?: number; // current catalog stock
+  importedQty: number; // column C
+  note?: string; // column E ("Uwagi")
+  differs: boolean; // importedQty !== currentQty
+}
+
+// A file row with no catalog match — the user decides whether to create it as
+// a new component or ignore it (individually or in bulk).
+export interface MagazynStockUnmatched {
+  name: string;
+  qty: number; // column C
+  note?: string; // column E
+}
+
+export interface MagazynStockAnalysis {
+  sourceFile: string; // display label, e.g. "Magazyn.xlsx – Stan komponentów"
+  matches: MagazynStockMatch[]; // catalog components found in the file
+  unmatched: MagazynStockUnmatched[]; // file rows with no catalog match — decidable
+  ambiguousNames: string[]; // file names that matched >1 catalog entry — auto-skipped
+}
+
+// One user decision. `note` is applied regardless of `action`; `action` only
+// governs whether column C overwrites the catalog stock (and stamps the date).
+export interface MagazynStockDecision {
+  itemId: UUID;
+  action: 'keep' | 'take';
+  importedQty: number;
+  note?: string;
+}
+
+export interface MagazynStockCommitResult {
+  stockUpdated: number; // items whose stock was overwritten from Excel
+  notesUpdated: number; // items whose note was set/changed from Excel
+  kept: number; // differing items the user chose to leave as-is
+  created: number; // unmatched rows the user chose to create as new components
+}
+
+// ---- "Magazyn" raw-material stock import ("Stan surowców") ----
+//
+// Like the component stock import, but a material's stock is split into
+// batches by expiry (one file row per batch). Column C is the batch quantity,
+// column D the material total; when the batch quantities don't sum to the
+// total, the row is a "sum mismatch" the user resolves (take from import /
+// reject). Only existing catalog materials (matched by name) are touched.
+export interface RawStockBatchRow {
+  qty: number; // column C
+  productionDate?: ISODate; // column E
+  expiryDate?: ISODate; // column F
+  microTestDate?: ISODate; // column G
+  retestExpiryDate?: ISODate; // column H
+  note?: string; // column I
+}
+
+export interface RawStockMatch {
+  itemId: UUID;
+  name: string; // catalog name
+  excelName: string; // name as written in the file
+  unit: Unit;
+  currentQty?: number; // current catalog stock
+  batches: RawStockBatchRow[]; // parsed batches (column C rows)
+  batchSum: number; // Σ column C across the batches
+  reportedTotal?: number; // column D (the file's own total)
+  sumMismatch: boolean; // |batchSum − reportedTotal| > ε
+}
+
+// A file material (one or more rows grouped by name) with no catalog match —
+// the user decides whether to create it as a new raw material or ignore it.
+export interface RawStockUnmatched {
+  name: string;
+  unit: Unit; // assumed unit for a created material (defaults to kg)
+  batches: RawStockBatchRow[];
+  batchSum: number;
+  reportedTotal?: number;
+}
+
+export interface RawStockAnalysis {
+  sourceFile: string;
+  matches: RawStockMatch[];
+  unmatched: RawStockUnmatched[]; // file materials with no catalog match — decidable
+  ambiguousNames: string[]; // file names matching >1 catalog entry — auto-skipped
+}
+
+// One decision: `action: 'take'` imports the batches (stock ← batchSum);
+// 'reject' leaves the catalog material untouched. Only mismatched materials
+// need an explicit decision; matched-and-consistent ones import silently.
+export interface RawStockDecision {
+  itemId: UUID;
+  action: 'take' | 'reject';
+}
+
+export interface RawStockCommitResult {
+  imported: number; // materials whose batches/stock were written
+  rejected: number; // mismatched materials the user rejected
+  created: number; // unmatched materials the user chose to create
+}
+
+// A single expired stock batch surfaced by a calculation so the user can
+// decide, for that run, whether to count it as available. `included` reflects
+// the decision passed into the compute call (default false = excluded).
+export interface ExpiredBatchRef {
+  rawMaterialId: UUID;
+  rawMaterialName: string;
+  batchId: UUID;
+  qty: number; // in the material's unit
+  unit: Unit;
+  originalExpiry?: ISODate; // column F
+  effectiveExpiry?: ISODate; // retest (H) ?? original (F)
+  note?: string;
+  included: boolean;
 }
 
 export interface ProductionPlanItem {
@@ -371,7 +568,14 @@ export interface BsxIntegrationSettings {
 export interface AppSettings {
   language: Lang;
   darkMode: boolean;
+  // Legacy single global overage multiplier (1.05). Kept only so older stores
+  // can be migrated to the per-type defaults below; no longer read by
+  // calculations. See database.getSettings().
   wasteFactor: number;
+  // Type-level default overage percentages ("naddatek"), applied to items that
+  // have no explicit overagePct of their own. 5 == +5%.
+  defaultOveragePctRaw: number;
+  defaultOveragePctComponent: number;
   defaultCurrency: string;
   lastImportDir?: string;
   defaultEmailLanguage: Lang;
@@ -403,6 +607,14 @@ export interface ImportSummary {
   matched: number;
   ambiguous: number;
   unmatched: number;
+}
+
+// Result of syncing catalog stock from the current snapshots (the manual
+// "Synchronizuj stany" action in the stock import view). `applied` counts items
+// overwritten silently; `conflicts` are manually-edited items needing a decision.
+export interface StockSyncResult {
+  applied: number;
+  conflicts: StockConflict[];
 }
 
 export type RawMaterialsImportMode = 'merge' | 'overwrite';
@@ -536,6 +748,9 @@ export interface ShortageReport {
   componentLines: ShortageLine[];
   groups: ShortageGroup[];
   warnings: string[];
+  // Expired raw-material batches among the plan's materials, with whether each
+  // was counted as available for this computation (per-run user decision).
+  expiredBatches?: ExpiredBatchRef[];
 }
 
 export interface ShortageReportEntry {
@@ -620,7 +835,15 @@ export interface MaxProducibleResult {
     available: number;
     needPerUnit: number;
     maxUnits: number;
+    // Raw materials with expiry batches: the soonest effective expiry among the
+    // batches counted as available, and the quantity excluded because expired
+    // (in the material's unit). Absent for batch-less items and components.
+    nextExpiry?: ISODate;
+    expiredExcludedQty?: number;
   }[];
+  // Expired raw-material batches among this product's ingredients, with whether
+  // each was counted as available for this computation.
+  expiredBatches?: ExpiredBatchRef[];
 }
 
 // ============================ Orders / Workflows ============================

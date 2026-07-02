@@ -12,8 +12,10 @@ import type {
   ShortageReport,
   ShortageReportEntry,
   Supplier,
+  ExpiredBatchRef,
 } from '../../shared/types';
 import type { ViewKey } from './types';
+import ExpiredStockModal from '../components/ExpiredStockModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import NoPlansEmptyState from '../components/NoPlansEmptyState';
@@ -109,6 +111,24 @@ const ShortageReportView: React.FC<Props> = ({
   const [editingPlan, setEditingPlan] = useState<Partial<ProductionPlan> | null>(null);
   const [planModalReadOnly, setPlanModalReadOnly] = useState(false);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
+  // Expired-stock gate: when the plan's materials have expired batches, the
+  // user decides per-run which to count. `pendingExpired` drives the modal;
+  // `expiredIncludeIds` remembers the decision so recomputes (e.g. after a
+  // supplier reassign) stay consistent without re-prompting.
+  const [pendingExpired, setPendingExpired] = useState<
+    { batches: ExpiredBatchRef[]; planId: string; planName: string } | null
+  >(null);
+  const [expiredIncludeIds, setExpiredIncludeIds] = useState<string[]>([]);
+  // Editable copy of the "count this expired batch?" decision shown on the
+  // generated report, so the user can change their mind and regenerate. Synced
+  // from the report's own `included` flags whenever a fresh report loads.
+  const [expiredDraft, setExpiredDraft] = useState<Set<string>>(new Set());
+
+  // Re-seed the expired-batch draft from whichever report is in focus.
+  useEffect(() => {
+    const eb = focus?.report?.expiredBatches ?? [];
+    setExpiredDraft(new Set(eb.filter((b) => b.included).map((b) => b.batchId)));
+  }, [focus?.report?.computedAt, focus?.entryId]);
 
   const openPlanModal = (planId: string) => {
     const plan = plans.find((p) => p.id === planId);
@@ -215,22 +235,23 @@ const ShortageReportView: React.FC<Props> = ({
     }
   };
 
-  const compute = async () => {
-    if (!selectedPlanId) return;
-    const plan = plans.find((p) => p.id === selectedPlanId);
+  // Runs the actual shortage computation + focuses the fresh report.
+  const runCompute = async (planId: string, includeExpiredBatchIds: string[]) => {
+    const plan = plans.find((p) => p.id === planId);
     setBusy(true);
     setLoaderMessage(t.loaderComputing);
     setError(null);
     try {
       const r = await window.electronAPI.computeShortages(
-        selectedPlanId,
+        planId,
         orderTaskContextOrderId,
+        includeExpiredBatchIds,
       );
       const list = await loadHistory();
-      const newest = list.find((e) => e.planId === selectedPlanId);
+      const newest = list.find((e) => e.planId === planId);
       setFocusAndCache({
         report: r,
-        planId: selectedPlanId,
+        planId,
         planName: plan?.name ?? '',
         reportName: newest?.reportName ?? '',
         entryId: newest?.id ?? null,
@@ -242,6 +263,25 @@ const ShortageReportView: React.FC<Props> = ({
       setBusy(false);
       setLoaderMessage(null);
     }
+  };
+
+  const compute = async () => {
+    if (!selectedPlanId) return;
+    const plan = plans.find((p) => p.id === selectedPlanId);
+    setError(null);
+    // Gate on expired stock first: if the plan's materials have expired
+    // batches, let the user decide (per run) which to count before computing.
+    try {
+      const expired = await window.electronAPI.previewExpiredForPlan(selectedPlanId);
+      if (expired.length > 0) {
+        setPendingExpired({ batches: expired, planId: selectedPlanId, planName: plan?.name ?? '' });
+        return;
+      }
+    } catch {
+      // If the preview fails, fall through and compute with expired excluded.
+    }
+    setExpiredIncludeIds([]);
+    await runCompute(selectedPlanId, []);
   };
 
   const reassignSupplier = async (line: ShortageLine, newSupplierId: string) => {
@@ -275,6 +315,7 @@ const ShortageReportView: React.FC<Props> = ({
       const r = await window.electronAPI.computeShortages(
         focus.planId,
         orderTaskContextOrderId,
+        expiredIncludeIds,
       );
       const list = await loadHistory();
       const newest = list.find((e) => e.planId === focus.planId);
@@ -320,6 +361,7 @@ const ShortageReportView: React.FC<Props> = ({
       const r = await window.electronAPI.computeShortages(
         focus.planId,
         orderTaskContextOrderId,
+        expiredIncludeIds,
       );
       const list = await loadHistory();
       const newest = list.find((e) => e.planId === focus.planId);
@@ -748,6 +790,89 @@ const ShortageReportView: React.FC<Props> = ({
                 <li key={i}>{w}</li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {report.expiredBatches && report.expiredBatches.length > 0 && (
+          <div className="card expired-report-panel">
+            <strong className="warn-text">{t.expiredStockTitle}</strong>
+            <div className="hint" style={{ margin: '4px 0 10px' }}>
+              {t.expiredReportPanelHint}
+            </div>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{t.name}</th>
+                    <th className="num">{t.stock}</th>
+                    <th>{t.expiry}</th>
+                    <th>{t.expiredStockInclude}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.expiredBatches.map((b) => {
+                    const on = expiredDraft.has(b.batchId);
+                    const retested = !!b.effectiveExpiry && b.effectiveExpiry !== b.originalExpiry;
+                    return (
+                      <tr key={b.batchId}>
+                        <td className="col-wrap">
+                          {b.rawMaterialName}
+                          {b.note && <div className="hint">{b.note}</div>}
+                        </td>
+                        <td className="num">
+                          {b.qty.toLocaleString()} {b.unit}
+                        </td>
+                        <td>
+                          <span className="stock-batch-flag">
+                            {b.effectiveExpiry
+                              ? new Date(b.effectiveExpiry).toLocaleDateString()
+                              : '—'}
+                          </span>
+                          {retested && (
+                            <div className="hint">
+                              {t.expiryOriginal}:{' '}
+                              {b.originalExpiry
+                                ? new Date(b.originalExpiry).toLocaleDateString()
+                                : '—'}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            disabled={planMissing}
+                            onChange={() =>
+                              setExpiredDraft((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(b.batchId)) next.delete(b.batchId);
+                                else next.add(b.batchId);
+                                return next;
+                              })
+                            }
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="row" style={{ marginTop: 10 }}>
+              <div className="spacer" />
+              <button
+                className="btn primary-filled"
+                disabled={busy || planMissing}
+                onClick={() => {
+                  const ids = [...expiredDraft];
+                  setExpiredIncludeIds(ids);
+                  void runCompute(focus.planId, ids);
+                }}
+                title={t.expiredReportRegenerate}
+              >
+                {t.expiredReportRegenerate}
+              </button>
+            </div>
           </div>
         )}
 
@@ -1288,6 +1413,19 @@ const ShortageReportView: React.FC<Props> = ({
           orders={orders.filter((o) => o.status !== 'completed' && o.status !== 'cancelled')}
           onCancel={() => setPickerEntryId(null)}
           onPick={(orderId) => void setReportOrder(pickerEntryId, orderId)}
+        />
+      )}
+
+      {pendingExpired && (
+        <ExpiredStockModal
+          batches={pendingExpired.batches}
+          onCancel={() => setPendingExpired(null)}
+          onConfirm={(ids) => {
+            const planId = pendingExpired.planId;
+            setPendingExpired(null);
+            setExpiredIncludeIds(ids);
+            void runCompute(planId, ids);
+          }}
         />
       )}
 

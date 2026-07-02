@@ -5,12 +5,24 @@ import type {
   Product,
   StockSnapshot,
   StockRow,
+  StockConflict,
+  StockConflictResolution,
+  StockSyncResult,
   ProductionPlan,
   AppSettings,
   ImportSummary,
   RawMaterialsImportMode,
   RawMaterialsImportSummary,
   ComponentsImportSummary,
+  MagazynStockAnalysis,
+  MagazynStockDecision,
+  MagazynStockCommitResult,
+  MagazynStockUnmatched,
+  RawStockAnalysis,
+  RawStockDecision,
+  RawStockCommitResult,
+  RawStockUnmatched,
+  ExpiredBatchRef,
   RecipeImportAnalysis,
   RecipeImportMode,
   RecipeImportResolutions,
@@ -53,6 +65,13 @@ export interface ElectronAPI {
     summary?: RawMaterialsImportSummary;
     error?: string;
   }>;
+  analyzeRawStock(): Promise<{ ok: boolean; analysis?: RawStockAnalysis; error?: string }>;
+  commitRawStock(args: {
+    sourceFile: string;
+    analysis: RawStockAnalysis;
+    decisions: RawStockDecision[];
+    createItems?: RawStockUnmatched[];
+  }): Promise<RawStockCommitResult>;
 
   // Components
   listComponents(): Promise<PackagingComponent[]>;
@@ -68,6 +87,16 @@ export interface ElectronAPI {
     summary?: ComponentsImportSummary;
     error?: string;
   }>;
+  analyzeMagazynStock(): Promise<{
+    ok: boolean;
+    analysis?: MagazynStockAnalysis;
+    error?: string;
+  }>;
+  commitMagazynStock(args: {
+    sourceFile: string;
+    decisions: MagazynStockDecision[];
+    createItems?: MagazynStockUnmatched[];
+  }): Promise<MagazynStockCommitResult>;
 
   // Products
   listProducts(): Promise<Product[]>;
@@ -102,6 +131,15 @@ export interface ElectronAPI {
     targetKind: 'raw' | 'component',
     targetId: string,
   ): Promise<{ ok: boolean }>;
+  resolveStockConflicts(
+    resolutions: StockConflictResolution[],
+  ): Promise<{ ok: boolean }>;
+  syncStockCatalog(): Promise<StockSyncResult>;
+  setManualStock(
+    kind: 'raw' | 'component',
+    itemId: string,
+    qty: number,
+  ): Promise<RawMaterial | PackagingComponent>;
   updateStockRow(
     snapshotId: string,
     rowKey: string,
@@ -148,7 +186,12 @@ export interface ElectronAPI {
   updatePlan(id: string, patch: Partial<ProductionPlan>): Promise<ProductionPlan>;
   deletePlan(id: string): Promise<{ ok: boolean }>;
   duplicatePlan(id: string): Promise<ProductionPlan>;
-  computeShortages(planId: string, orderId?: string): Promise<ShortageReport>;
+  computeShortages(
+    planId: string,
+    orderId?: string,
+    includeExpiredBatchIds?: string[],
+  ): Promise<ShortageReport>;
+  previewExpiredForPlan(planId: string): Promise<ExpiredBatchRef[]>;
   computeCost(planId: string): Promise<CostReport>;
 
   // Shortage report history
@@ -238,11 +281,19 @@ export interface ElectronAPI {
   duplicateWorkflowTemplate(id: string): Promise<WorkflowTemplate>;
 
   // Reverse
-  maxProducible(productId: string): Promise<MaxProducibleResult>;
+  maxProducible(
+    productId: string,
+    includeExpiredBatchIds?: string[],
+  ): Promise<MaxProducibleResult>;
 
   // Settings
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+  /**
+   * Write an explicit overage % onto every raw material / component, or pass
+   * `null` to clear it so every item inherits the default. Returns count touched.
+   */
+  setOveragePctForAll(kind: 'raw' | 'component', pct: number | null): Promise<number>;
 
   // Backup
   exportBackup(): Promise<{ ok: boolean; path?: string }>;

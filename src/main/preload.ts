@@ -18,6 +18,8 @@ const CH = {
   RAW_DELETE: 'rawMaterials:delete',
   RAW_DUPLICATE: 'rawMaterials:duplicate',
   RAW_XLSX_IMPORT: 'rawMaterials:xlsx-import',
+  RAW_MAGAZYN_STOCK_ANALYZE: 'rawMaterials:magazyn-stock-analyze',
+  RAW_MAGAZYN_STOCK_COMMIT: 'rawMaterials:magazyn-stock-commit',
 
   COMP_LIST: 'components:list',
   COMP_GET: 'components:get',
@@ -26,6 +28,8 @@ const CH = {
   COMP_DELETE: 'components:delete',
   COMP_DUPLICATE: 'components:duplicate',
   COMP_XLSX_IMPORT: 'components:xlsx-import',
+  COMP_MAGAZYN_STOCK_ANALYZE: 'components:magazyn-stock-analyze',
+  COMP_MAGAZYN_STOCK_COMMIT: 'components:magazyn-stock-commit',
 
   PRODUCTS_LIST: 'products:list',
   PRODUCTS_GET: 'products:get',
@@ -42,6 +46,9 @@ const CH = {
   STOCK_LIST_SNAPSHOTS: 'stock:list-snapshots',
   STOCK_GET_CURRENT: 'stock:get-current',
   STOCK_RESOLVE_MATCH: 'stock:resolve-match',
+  STOCK_RESOLVE_CONFLICTS: 'stock:resolve-conflicts',
+  STOCK_SYNC_CATALOG: 'stock:sync-catalog',
+  STOCK_SET_MANUAL: 'stock:set-manual',
   STOCK_UPDATE_ROW: 'stock:update-row',
   STOCK_DELETE_ROW: 'stock:delete-row',
   STOCK_DELETE_SNAPSHOT: 'stock:delete-snapshot',
@@ -69,6 +76,7 @@ const CH = {
   PLAN_DELETE: 'plan:delete',
   PLAN_DUPLICATE: 'plan:duplicate',
   PLAN_COMPUTE_SHORTAGES: 'plan:compute-shortages',
+  PLAN_PREVIEW_EXPIRED: 'plan:preview-expired',
   PLAN_COMPUTE_COST: 'plan:compute-cost',
 
   SHORTAGE_REPORT_LIST: 'shortageReport:list',
@@ -110,6 +118,8 @@ const CH = {
 
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
+
+  OVERAGE_SET_FOR_ALL: 'overage:set-for-all',
 
   BACKUP_EXPORT: 'backup:export',
   BACKUP_IMPORT: 'backup:import',
@@ -154,6 +164,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   duplicateRawMaterial: (id: string) => ipcRenderer.invoke(CH.RAW_DUPLICATE, id),
   importRawMaterialsXlsx: (mode: 'merge' | 'overwrite') =>
     ipcRenderer.invoke(CH.RAW_XLSX_IMPORT, mode),
+  analyzeRawStock: () => ipcRenderer.invoke(CH.RAW_MAGAZYN_STOCK_ANALYZE),
+  commitRawStock: (args: {
+    sourceFile: string;
+    analysis: any;
+    decisions: any[];
+    createItems?: any[];
+  }) => ipcRenderer.invoke(CH.RAW_MAGAZYN_STOCK_COMMIT, args),
 
   // Components
   listComponents: () => ipcRenderer.invoke(CH.COMP_LIST),
@@ -164,6 +181,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   duplicateComponent: (id: string) => ipcRenderer.invoke(CH.COMP_DUPLICATE, id),
   importComponentsXlsx: (mode: 'merge' | 'overwrite') =>
     ipcRenderer.invoke(CH.COMP_XLSX_IMPORT, mode),
+  analyzeMagazynStock: () => ipcRenderer.invoke(CH.COMP_MAGAZYN_STOCK_ANALYZE),
+  commitMagazynStock: (args: { sourceFile: string; decisions: any[]; createItems?: any[] }) =>
+    ipcRenderer.invoke(CH.COMP_MAGAZYN_STOCK_COMMIT, args),
 
   // Products
   listProducts: () => ipcRenderer.invoke(CH.PRODUCTS_LIST),
@@ -198,6 +218,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     targetKind: 'raw' | 'component',
     targetId: string,
   ) => ipcRenderer.invoke(CH.STOCK_RESOLVE_MATCH, snapshotId, rowKey, targetKind, targetId),
+  resolveStockConflicts: (resolutions: any[]) =>
+    ipcRenderer.invoke(CH.STOCK_RESOLVE_CONFLICTS, resolutions),
+  syncStockCatalog: () => ipcRenderer.invoke(CH.STOCK_SYNC_CATALOG),
+  setManualStock: (kind: 'raw' | 'component', itemId: string, qty: number) =>
+    ipcRenderer.invoke(CH.STOCK_SET_MANUAL, kind, itemId, qty),
   updateStockRow: (snapshotId: string, rowKey: string, patch: any) =>
     ipcRenderer.invoke(CH.STOCK_UPDATE_ROW, snapshotId, rowKey, patch),
   deleteStockRow: (snapshotId: string, rowKey: string) =>
@@ -238,8 +263,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updatePlan: (id: string, patch: any) => ipcRenderer.invoke(CH.PLAN_UPDATE, id, patch),
   deletePlan: (id: string) => ipcRenderer.invoke(CH.PLAN_DELETE, id),
   duplicatePlan: (id: string) => ipcRenderer.invoke(CH.PLAN_DUPLICATE, id),
-  computeShortages: (planId: string, orderId?: string) =>
-    ipcRenderer.invoke(CH.PLAN_COMPUTE_SHORTAGES, planId, orderId),
+  computeShortages: (planId: string, orderId?: string, includeExpiredBatchIds?: string[]) =>
+    ipcRenderer.invoke(CH.PLAN_COMPUTE_SHORTAGES, planId, orderId, includeExpiredBatchIds),
+  previewExpiredForPlan: (planId: string) => ipcRenderer.invoke(CH.PLAN_PREVIEW_EXPIRED, planId),
   computeCost: (planId: string) => ipcRenderer.invoke(CH.PLAN_COMPUTE_COST, planId),
 
   // Shortage report history
@@ -326,11 +352,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(CH.WORKFLOW_TEMPLATE_DUPLICATE, id),
 
   // Reverse
-  maxProducible: (productId: string) => ipcRenderer.invoke(CH.REVERSE_MAX_PRODUCIBLE, productId),
+  maxProducible: (productId: string, includeExpiredBatchIds?: string[]) =>
+    ipcRenderer.invoke(CH.REVERSE_MAX_PRODUCIBLE, productId, includeExpiredBatchIds),
 
   // Settings
   getSettings: () => ipcRenderer.invoke(CH.SETTINGS_GET),
   updateSettings: (patch: any) => ipcRenderer.invoke(CH.SETTINGS_UPDATE, patch),
+  setOveragePctForAll: (kind: 'raw' | 'component', pct: number | null) =>
+    ipcRenderer.invoke(CH.OVERAGE_SET_FOR_ALL, kind, pct),
 
   // Backup
   exportBackup: () => ipcRenderer.invoke(CH.BACKUP_EXPORT),

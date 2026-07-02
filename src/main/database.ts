@@ -9,6 +9,7 @@ import type {
   ProductionPlan,
   AppSettings,
   StockKind,
+  StockSource,
   ShortageReport,
   ShortageReportEntry,
   EmailBatch,
@@ -34,6 +35,7 @@ import { normalize as normalizeAlias } from './services/smartMatcher';
 import log from './utils/logger';
 import {
   DEFAULT_WASTE_FACTOR,
+  DEFAULT_OVERAGE_PCT,
   DEFAULT_CURRENCY,
   DEFAULT_LANGUAGE,
   STOCK_SNAPSHOT_RETENTION,
@@ -47,6 +49,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   language: DEFAULT_LANGUAGE,
   darkMode: true,
   wasteFactor: DEFAULT_WASTE_FACTOR,
+  defaultOveragePctRaw: DEFAULT_OVERAGE_PCT,
+  defaultOveragePctComponent: DEFAULT_OVERAGE_PCT,
   defaultCurrency: DEFAULT_CURRENCY,
   defaultEmailLanguage: DEFAULT_LANGUAGE,
   llm: {
@@ -459,6 +463,75 @@ export default class Database {
       lastPurchasePriceNet: price,
       currency: currency ?? existing.currency,
     });
+  }
+
+  // ============================ Catalog stock ============================
+  // Current warehouse stock lives on the catalog entry (raw_materials /
+  // components), maintained by stock imports (source 'import') and manual
+  // edits (source 'manual'). See services/stockReconciler.ts for how imports
+  // apply non-conflicting values and surface conflicts on manually-edited items.
+
+  async setRawMaterialStock(
+    id: string,
+    opts: { qty: number; source: StockSource; sourceFile?: string },
+  ): Promise<RawMaterial> {
+    return this.updateRawMaterial(id, {
+      stockQty: opts.qty,
+      stockSource: opts.source,
+      stockSourceFile: opts.sourceFile,
+      stockUpdatedAt: nowIso(),
+    });
+  }
+
+  async setComponentStock(
+    id: string,
+    opts: { qty: number; source: StockSource; sourceFile?: string },
+  ): Promise<PackagingComponent> {
+    return this.updateComponent(id, {
+      stockQty: opts.qty,
+      stockSource: opts.source,
+      stockSourceFile: opts.sourceFile,
+      stockUpdatedAt: nowIso(),
+    });
+  }
+
+  // Bulk-writes already-prepared catalog entries in a single query — used by
+  // the import reconciler to apply stock to many non-conflicting items at once.
+  // Callers pass full, updated entities (stock fields + updatedAt already set).
+  async applyStockBulk(
+    kind: StockKind,
+    items: (RawMaterial | PackagingComponent)[],
+  ): Promise<void> {
+    if (items.length === 0) return;
+    const table = kind === 'raw' ? 'raw_materials' : 'components';
+    const rows = items.map(it => {
+      const { rest } = splitId(it);
+      return { id: it.id, data: rest, updated_at: it.updatedAt };
+    });
+    const { error } = await getSupabase().from(table).upsert(rows);
+    if (error) throw new Error(`applyStockBulk: ${error.message}`);
+  }
+
+  // "Set for all" — write an explicit per-item overage percentage onto every
+  // raw material or component at once. Passing `null` clears the explicit value
+  // instead, so every item falls back to inheriting the type-level default.
+  // Edits updatedAt so the change is auditable. Returns the number of items
+  // touched.
+  async setOveragePctForAll(kind: StockKind, pct: number | null): Promise<number> {
+    const table = kind === 'raw' ? 'raw_materials' : 'components';
+    const list =
+      kind === 'raw' ? await this.listRawMaterials() : await this.listComponents();
+    if (list.length === 0) return 0;
+    const now = nowIso();
+    // undefined drops out of the stored JSON → the item inherits the default.
+    const value = pct === null ? undefined : pct;
+    const rows = list.map((it) => {
+      const { rest } = splitId({ ...it, overagePct: value, updatedAt: now });
+      return { id: it.id, data: rest, updated_at: now };
+    });
+    const { error } = await getSupabase().from(table).upsert(rows);
+    if (error) throw new Error(`setOveragePctForAll: ${error.message}`);
+    return rows.length;
   }
 
   // =============================== Aliases ===============================
@@ -1462,7 +1535,17 @@ export default class Database {
   // Stay local to the machine — UI prefs, not shared data.
 
   getSettings(): AppSettings {
-    return { ...DEFAULT_SETTINGS, ...this.settingsStore.get('settings', DEFAULT_SETTINGS) };
+    const stored = this.settingsStore.get('settings', DEFAULT_SETTINGS) as Partial<AppSettings>;
+    const merged: AppSettings = { ...DEFAULT_SETTINGS, ...stored };
+    // Migrate the legacy single global wasteFactor (e.g. 1.05) into the new
+    // per-type default percentages, but only for stores that predate them.
+    if (stored.defaultOveragePctRaw === undefined && stored.wasteFactor !== undefined) {
+      merged.defaultOveragePctRaw = Math.round((stored.wasteFactor - 1) * 100);
+    }
+    if (stored.defaultOveragePctComponent === undefined && stored.wasteFactor !== undefined) {
+      merged.defaultOveragePctComponent = Math.round((stored.wasteFactor - 1) * 100);
+    }
+    return merged;
   }
 
   updateSettings(patch: Partial<AppSettings>): AppSettings {
