@@ -12,6 +12,7 @@ import ExportImportButtons from '../components/ExportImportButtons';
 import SearchableSelect from '../components/SearchableSelect';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
+import { useColumnResize } from '../utils/useColumnResize';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import {
   exportSuppliersCsv,
@@ -60,9 +61,13 @@ const Suppliers: React.FC = () => {
     toggle,
     reorder,
     reset: resetColumns,
+    widths,
+    setWidth,
+    resetWidth,
     orderedColumns,
     orderedVisibleIds,
   } = useColumnPrefs('suppliers', COLUMNS);
+  const { decorateHeader } = useColumnResize(setWidth);
 
   const headerFor = (id: string): React.ReactNode => {
     switch (id) {
@@ -275,6 +280,8 @@ const Suppliers: React.FC = () => {
               toggle={toggle}
               reorder={reorder}
               reset={resetColumns}
+              widths={widths}
+              resetWidth={resetWidth}
             />
             <button
               className="btn danger"
@@ -298,7 +305,7 @@ const Suppliers: React.FC = () => {
           <table className="table">
             <thead>
               <tr>
-                {orderedVisibleIds.map((id) => headerFor(id))}
+                {orderedVisibleIds.map((id) => decorateHeader(headerFor(id), id, widths[id]))}
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>

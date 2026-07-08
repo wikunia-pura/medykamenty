@@ -86,6 +86,8 @@ export interface T {
   reset: string;
   columns: string;
   columnsConfigure: string;
+  columnResetWidth: string;
+  columnResetWidthShort: string;
   preview: string;
   previewMode: string;
   editMode: string;
@@ -174,6 +176,7 @@ export interface T {
   magazynStockIgnore: string;
   magazynStockCreateAll: string;
   magazynStockIgnoreAll: string;
+  applyToAllLabel: string;
   // Warehouse raw-stock import (batches / expiry)
   rawStockImportHint: string;
   rawStockImportFailed: string;
@@ -692,21 +695,19 @@ const pl: T = {
   outerPackaging: 'Opakowania zbiorcze',
   outerPackagingPropagate: 'Propaguj do {products} produktów ({tiers} tier.)',
   outerPackagingPropagateTitle:
-    'Zapisuje komponent i nadpisuje pojemność na wszystkich tier\'ach produktów używających tego komponentu.',
+    "Zapisuje komponent i nadpisuje pojemność na wszystkich tier'ach produktów używających tego komponentu.",
   outerPackagingPropagateHint:
     'Nadpisuje obecne pojemności na produktach. Edycje per produkt zostaną zastąpione.',
   outerPackagingPropagateConfirm:
     'Zastąpić pojemność na {tiers} tier(ach) w {products} produktach wartością {capacity} {unit} (komponent „{name}")? Indywidualne edycje na produktach zostaną nadpisane.',
-  outerPackagingPropagateSuccess:
-    'Zaktualizowano {tiers} tier(ów) w {products} produktach.',
+  outerPackagingPropagateSuccess: 'Zaktualizowano {tiers} tier(ów) w {products} produktach.',
   outerPackagingPropagateNeedCapacity: 'Ustaw pojemność > 0 zanim propagujesz.',
   outerPackagingPropagateInProgress: 'Propagowanie do produktów…',
   suppliers: 'Dostawcy',
   stockImport: 'Import stanów',
   stock: 'Stan',
   stockSync: 'Synchronizuj stany',
-  stockSyncHint:
-    'Zapisz stany z ostatniego importu do katalogu surowców i komponentów.',
+  stockSyncHint: 'Zapisz stany z ostatniego importu do katalogu surowców i komponentów.',
   stockSyncInProgress: 'Synchronizacja stanów…',
   stockSyncDone: 'Zaktualizowano stany w katalogu: {n}.',
   stockSourceLabel: 'Źródło',
@@ -736,8 +737,7 @@ const pl: T = {
   edit: 'Edytuj',
   delete: 'Usuń',
   deleteAll: 'Usuń wszystkie',
-  deleteAllConfirm:
-    'Tej operacji nie można cofnąć. Usunąć wszystkie pozycje ({n}) z tego widoku?',
+  deleteAllConfirm: 'Tej operacji nie można cofnąć. Usunąć wszystkie pozycje ({n}) z tego widoku?',
   deleteAllSuccess: 'Usunięto wszystkie pozycje ({n}).',
   deleteAllPartial:
     'Usunięto {n} z {total}. {blocked} nie można usunąć — są powiązane z innymi pozycjami.',
@@ -772,6 +772,8 @@ const pl: T = {
   reset: 'Resetuj',
   columns: 'Kolumny',
   columnsConfigure: 'Skonfiguruj widoczne kolumny',
+  columnResetWidth: 'Przywróć domyślną szerokość kolumny',
+  columnResetWidthShort: 'szer.',
   preview: 'Podgląd',
   previewMode: 'Tryb podglądu',
   editMode: 'Tryb edycji',
@@ -870,6 +872,7 @@ const pl: T = {
   magazynStockIgnore: 'Pomiń',
   magazynStockCreateAll: 'Utwórz wszystkie',
   magazynStockIgnoreAll: 'Pomiń wszystkie',
+  applyToAllLabel: 'Dla wszystkich:',
   // Warehouse raw-stock import (batches / expiry)
   rawStockImportHint:
     'Wczytuje stany surowców z pliku magazynu (zakładka „Stan surowców”). Dopasowuje tylko istniejące surowce po nazwie. Stan może być rozbity na partie z różnymi datami ważności (kolumna F, a po reteście kolumna H). Nowe pozycje z pliku są pomijane.',
@@ -923,7 +926,8 @@ const pl: T = {
   packingSchemeHint: 'Pojemność na komponencie, zużycie per produkt na tier.',
   packingCapacity: 'Pojemność',
   packingCapacityUnit: 'Jednostka',
-  packingCapacityMissing: 'Komponent „{name}" nie ma ustawionej pojemności — kalkulacje będą puste.',
+  packingCapacityMissing:
+    'Komponent „{name}" nie ma ustawionej pojemności — kalkulacje będą puste.',
   packingConsumption: 'Zużycie',
   packingConsumptionOverride: 'Nadpisz ręcznie',
   packingPerProduct: 'Per produkt',
@@ -939,7 +943,8 @@ const pl: T = {
   componentDependenciesAmount: 'Ilość',
   unitUnits: 'szt.',
   moqUnits: 'MOQ produktu (szt.)',
-  planItemBelowMoqWarning: 'Ilość poniżej MOQ produktu ({moq} szt.) — fabryka może nie przyjąć zamówienia.',
+  planItemBelowMoqWarning:
+    'Ilość poniżej MOQ produktu ({moq} szt.) — fabryka może nie przyjąć zamówienia.',
   sachetMassKg: 'Masa na saszetki (kg)',
   sachetsCount: 'Liczba saszetek (z masy)',
   recipeSumWarning: 'Suma % poniżej 100 — woda dolewana do 100% jest pomijana w kalkulacji.',
@@ -1008,7 +1013,8 @@ const pl: T = {
   stockEditRow: 'Edytuj wiersz',
   stockDeleteRow: 'Usuń wiersz',
   stockDeleteSnapshot: 'Usuń import',
-  stockDeleteSnapshotConfirm: 'Usunąć cały zaimportowany stan ({kind})? Tej operacji nie można cofnąć.',
+  stockDeleteSnapshotConfirm:
+    'Usunąć cały zaimportowany stan ({kind})? Tej operacji nie można cofnąć.',
   stockSnapshotImported: 'Zaimportowano',
   stockSourceFile: 'Plik źródłowy',
   stockUnmatchedOnly: 'Tylko niedopasowane',
@@ -1030,17 +1036,22 @@ const pl: T = {
   bsxMissingConfig: 'Najpierw uzupełnij dane BSX w Ustawieniach.',
   bsxImporting: 'Pobieranie z BSX…',
   bsxShowWarehouses: 'Pokaż dostępne magazyny',
-  bsxWarehousesHint: 'Przypisz właściwe ID poniżej. Dla większości użytkowników magazyn surowców to ID 6, komponentów to ID 7.',
+  bsxWarehousesHint:
+    'Przypisz właściwe ID poniżej. Dla większości użytkowników magazyn surowców to ID 6, komponentów to ID 7.',
   bsxLastFetched: 'Ostatnio pobrano',
   bsxFetchStock: 'Pobierz stany',
-  bsxFetchStockSubtitle: 'Połącz się z BSX i pobierz aktualne stany magazynowe surowców oraz komponentów',
-  bsxNotConfigured: 'Skonfiguruj integrację z BSX w Ustawieniach, aby pobierać stany automatycznie.',
+  bsxFetchStockSubtitle:
+    'Połącz się z BSX i pobierz aktualne stany magazynowe surowców oraz komponentów',
+  bsxNotConfigured:
+    'Skonfiguruj integrację z BSX w Ustawieniach, aby pobierać stany automatycznie.',
   manualXlsxImport: 'Import ręczny z pliku xlsx',
-  manualXlsxImportHint: 'Alternatywne źródło — jeżeli BSX jest niedostępne lub chcesz wczytać snapshot z pliku.',
+  manualXlsxImportHint:
+    'Alternatywne źródło — jeżeli BSX jest niedostępne lub chcesz wczytać snapshot z pliku.',
   show: 'Pokaż',
   hide: 'Ukryj',
   bsxPricesLoading: 'Doładowywanie cen z PZ…',
-  bsxPricesLoadingHint: 'Stany są już widoczne. Ceny netto/VAT/brutto pojawią się za ~30-60 sekund. Możesz w tym czasie rozstrzygać dopasowania.',
+  bsxPricesLoadingHint:
+    'Stany są już widoczne. Ceny netto/VAT/brutto pojawią się za ~30-60 sekund. Możesz w tym czasie rozstrzygać dopasowania.',
   bsxPricesFailed: 'Błąd pobierania cen',
   planName: 'Nazwa planu',
   reportName: 'Nazwa raportu',
@@ -1053,8 +1064,10 @@ const pl: T = {
   planStatusDraft: 'Szkic',
   planStatusComputed: 'Policzony',
   planStatusArchived: 'Zarchiwizowany',
-  planStatusDraftTooltip: 'Plan utworzony, ale jeszcze nie policzono zapotrzebowania surowców i komponentów.',
-  planStatusComputedTooltip: 'Zapotrzebowanie zostało policzone — można wygenerować raport braków, koszt i maile RFQ.',
+  planStatusDraftTooltip:
+    'Plan utworzony, ale jeszcze nie policzono zapotrzebowania surowców i komponentów.',
+  planStatusComputedTooltip:
+    'Zapotrzebowanie zostało policzone — można wygenerować raport braków, koszt i maile RFQ.',
   planStatusArchivedTooltip: 'Plan zarchiwizowany — pozostawiony do historii.',
   duplicatePlan: 'Duplikuj plan',
   planCreatedAt: 'Utworzono',
@@ -1077,7 +1090,8 @@ const pl: T = {
   unitCost: 'Koszt jednostkowy',
   totalPlanCost: 'Łączny koszt planu',
   missingPrices: 'Brak cen dla',
-  costCalculatorHeroHint: 'Wybierz jeden lub kilka planów, aby policzyć koszt jednostkowy każdego produktu i sumę całego planu.',
+  costCalculatorHeroHint:
+    'Wybierz jeden lub kilka planów, aby policzyć koszt jednostkowy każdego produktu i sumę całego planu.',
   costCalculatorSelectPlans: 'Wybierz plany',
   missingPricesTooltipHeader: 'Pozycje bez ceny zakupu',
   missingPricesTooltipExplain:
@@ -1130,9 +1144,11 @@ const pl: T = {
   unassignedSupplier: 'Bez przypisanego dostawcy',
   unitsShort: 'szt.',
   maxProducibleHero: 'Możesz wyprodukować',
-  maxProducibleHeroHint: 'Wybierz jeden lub kilka produktów, aby zobaczyć ile sztuk można złożyć z aktualnych stanów.',
+  maxProducibleHeroHint:
+    'Wybierz jeden lub kilka produktów, aby zobaczyć ile sztuk można złożyć z aktualnych stanów.',
   maxProducibleEmptyRecipe: 'Produkt nie ma receptury — uzupełnij surowce i komponenty.',
-  maxProducibleNoLimit: 'Wszystkie pozycje są dostarczane przez fabrykę — brak ograniczeń materiałowych.',
+  maxProducibleNoLimit:
+    'Wszystkie pozycje są dostarczane przez fabrykę — brak ograniczeń materiałowych.',
   maxProducibleLimitedBy: 'Limituje',
   maxProducibleWhyHeader: 'Dlaczego nie więcej',
   maxProducibleZeroStock: 'Brak stanu — żadnej sztuki nie da się złożyć z aktualnymi danymi.',
@@ -1163,7 +1179,8 @@ const pl: T = {
   dashboardWelcomeAfternoon: 'Miłego dnia',
   dashboardWelcomeEvening: 'Dobry wieczór',
   dashboardWelcomeNight: 'Pracujesz po nocy?',
-  dashboardWelcomeTagline: 'Zaplanuj produkcję, sprawdź braki, wyślij maile RFQ — wszystko w jednym miejscu.',
+  dashboardWelcomeTagline:
+    'Zaplanuj produkcję, sprawdź braki, wyślij maile RFQ — wszystko w jednym miejscu.',
   dashboardWelcomeMottoIntro: 'Pracuj z uśmiechem i powtarzaj nasze motto:',
   dashboardWelcomeMotto: 'Od jednego strzała jeszcze nikt się nie uzależnił',
   dashboardActiveOrders: 'Aktywne zamówienia',
@@ -1177,18 +1194,21 @@ const pl: T = {
   loadDemoButton: 'Wczytaj dane demo',
   loadDemoConfirm:
     'To zastąpi WSZYSTKIE obecne dane (dostawcy, surowce, komponenty, produkty, plany, stany). Ustawienia zostają. Kontynuować?',
-  loadDemoSuccess: 'Wczytano dane demo. Przejdź do „Plan produkcji" i kliknij „Oblicz zapotrzebowanie".',
+  loadDemoSuccess:
+    'Wczytano dane demo. Przejdź do „Plan produkcji" i kliknij „Oblicz zapotrzebowanie".',
   wipeDataTitle: 'Wyczyść dane',
   wipeDataBody:
     'Usuwa WSZYSTKIE dane biznesowe (dostawcy, surowce, komponenty, produkty, plany, stany magazynowe). Ustawienia aplikacji zostają. Użyj, gdy chcesz wyjść z trybu demo i zacząć z czystym kontem.',
   wipeDataButton: 'Wyczyść wszystkie dane',
   wipeDataConfirm:
     'Tej operacji nie można cofnąć. Usunąć wszystkich dostawców, surowce, komponenty, produkty, plany i stany magazynowe? Ustawienia zostaną zachowane.',
-  wipeDataSuccess: 'Dane wyczyszczone. Możesz teraz dodać własnych dostawców, surowce i produkty albo zaimportować backup.',
+  wipeDataSuccess:
+    'Dane wyczyszczone. Możesz teraz dodać własnych dostawców, surowce i produkty albo zaimportować backup.',
   adoptAsRaw: 'Dodaj jako surowiec',
   adoptAsComponent: 'Dodaj jako komponent',
   adoptAllUnmatched: 'Dodaj wszystkie nierozpoznane ({n})',
-  adoptAllConfirm: 'Utworzyć {n} nowych pozycji w katalogu na podstawie nierozpoznanych wierszy? Domyślne wartości: jednostka „kg" dla surowców, typ „other" dla komponentów; bez dostawcy. Możesz później dopiąć szczegóły w widokach Surowce/Komponenty.',
+  adoptAllConfirm:
+    'Utworzyć {n} nowych pozycji w katalogu na podstawie nierozpoznanych wierszy? Domyślne wartości: jednostka „kg" dla surowców, typ „other" dla komponentów; bez dostawcy. Możesz później dopiąć szczegóły w widokach Surowce/Komponenty.',
   resolveRowTitle: 'Nierozpoznana pozycja',
   resolveRowSubtitleRaw: 'Surowiec z importu — wybierz, jak go dopasować do katalogu.',
   resolveRowSubtitleComponent: 'Komponent z importu — wybierz, jak go dopasować do katalogu.',
@@ -1197,11 +1217,14 @@ const pl: T = {
   resolveRowNoSuggestions: 'Nie znalazłem żadnych zbliżonych pozycji w bazie.',
   resolveRowSuggestionConfidence: 'podobieństwo',
   resolveRowActionUseOnce: 'Użyj tylko w tym imporcie',
-  resolveRowActionUseOnceHint: 'Powiąż ten wiersz z wybraną pozycją katalogu, ale bez zapisu na stałe.',
+  resolveRowActionUseOnceHint:
+    'Powiąż ten wiersz z wybraną pozycją katalogu, ale bez zapisu na stałe.',
   resolveRowActionSaveAlias: 'Zapisz alias na stałe',
-  resolveRowActionSaveAliasHint: 'Zapamiętaj „{import}" jako alias „{catalog}". Kolejne importy z tą nazwą będą dopasowane automatycznie.',
+  resolveRowActionSaveAliasHint:
+    'Zapamiętaj „{import}" jako alias „{catalog}". Kolejne importy z tą nazwą będą dopasowane automatycznie.',
   resolveRowActionRename: 'Zmień nazwę w bazie',
-  resolveRowActionRenameHint: 'Przepisz nazwę katalogową „{catalog}" na „{import}" (z importu). Dotychczasowa nazwa zostanie zapisana jako alias, więc stare powiązania działają dalej.',
+  resolveRowActionRenameHint:
+    'Przepisz nazwę katalogową „{catalog}" na „{import}" (z importu). Dotychczasowa nazwa zostanie zapisana jako alias, więc stare powiązania działają dalej.',
   resolveRowActionAddNew: 'Dodaj jako nową pozycję',
   resolveRowActionAddNewHint: 'Utwórz nowy wpis w katalogu z nazwą z importu.',
   resolveRowChooseSuggestion: 'Wybierz pozycję z bazy, do której pasuje ten wiersz.',
@@ -1210,7 +1233,8 @@ const pl: T = {
   resolveRowSkip: 'Pomiń',
   resolveRowDone: 'Gotowe',
   resolveRowAliasAdded: 'Zapisano alias.',
-  resolveRowRenameConfirm: 'Zmienić nazwę katalogową „{catalog}" na „{import}"? Stara nazwa zostanie zachowana jako alias.',
+  resolveRowRenameConfirm:
+    'Zmienić nazwę katalogową „{catalog}" na „{import}"? Stara nazwa zostanie zachowana jako alias.',
   bulkResolveTitle: 'Nierozpoznane pozycje ({n})',
   bulkSetAll: 'Ustaw wszystkim:',
   bulkColMapTo: 'Dopasuj do (z bazy)',
@@ -1221,7 +1245,8 @@ const pl: T = {
   bulkSkipped: 'Pominięte',
   bulkApplyAll: 'Zastosuj wszystkie ({n})',
   dropZoneTitle: 'Przeciągnij i upuść pliki xlsx',
-  dropZoneSubtitle: 'lub kliknij, aby wybrać. Akceptujemy eksporty MP Firma — surowce i komponenty.',
+  dropZoneSubtitle:
+    'lub kliknij, aby wybrać. Akceptujemy eksporty MP Firma — surowce i komponenty.',
   dropZoneDragOver: 'Upuść pliki tutaj',
   actionsHeader: 'Akcje',
   removeFile: 'Usuń plik',
@@ -1392,15 +1417,15 @@ const en: T = {
     'Overwrites current capacity on those products. Per-product overrides will be replaced.',
   outerPackagingPropagateConfirm:
     'Replace capacity on {tiers} tier(s) across {products} products with {capacity} {unit} (component "{name}")? Per-product overrides will be lost.',
-  outerPackagingPropagateSuccess:
-    'Updated {tiers} tier(s) in {products} products.',
+  outerPackagingPropagateSuccess: 'Updated {tiers} tier(s) in {products} products.',
   outerPackagingPropagateNeedCapacity: 'Set capacity > 0 before propagating.',
   outerPackagingPropagateInProgress: 'Propagating to products…',
   suppliers: 'Suppliers',
   stockImport: 'Stock import',
   stock: 'Stock',
   stockSync: 'Sync stock',
-  stockSyncHint: 'Write the latest import quantities into the raw materials and components catalog.',
+  stockSyncHint:
+    'Write the latest import quantities into the raw materials and components catalog.',
   stockSyncInProgress: 'Syncing stock…',
   stockSyncDone: 'Catalog stock updated: {n}.',
   stockSourceLabel: 'Source',
@@ -1430,8 +1455,7 @@ const en: T = {
   edit: 'Edit',
   delete: 'Delete',
   deleteAll: 'Delete all',
-  deleteAllConfirm:
-    'This cannot be undone. Delete all items ({n}) from this view?',
+  deleteAllConfirm: 'This cannot be undone. Delete all items ({n}) from this view?',
   deleteAllSuccess: 'Deleted all items ({n}).',
   deleteAllPartial:
     'Deleted {n} of {total}. {blocked} could not be deleted — they are referenced by other entries.',
@@ -1466,6 +1490,8 @@ const en: T = {
   reset: 'Reset',
   columns: 'Columns',
   columnsConfigure: 'Configure visible columns',
+  columnResetWidth: 'Restore default column width',
+  columnResetWidthShort: 'width',
   preview: 'Preview',
   previewMode: 'Preview mode',
   editMode: 'Edit mode',
@@ -1563,6 +1589,7 @@ const en: T = {
   magazynStockIgnore: 'Skip',
   magazynStockCreateAll: 'Create all',
   magazynStockIgnoreAll: 'Skip all',
+  applyToAllLabel: 'Apply to all:',
   // Warehouse raw-stock import (batches / expiry)
   rawStockImportHint:
     'Loads raw-material stock from the warehouse file ("Stan surowców" tab). Matches existing materials by name only. Stock can be split into batches with different expiry dates (column F, or column H after a retest). New items from the file are ignored.',
@@ -1627,12 +1654,13 @@ const en: T = {
   productTabBasics: 'Basics',
   componentDependencies: 'Consumes',
   componentDependenciesHint:
-    'One unit of this component pulls the components below. Values are in the consumed component\'s capacity-unit.',
+    "One unit of this component pulls the components below. Values are in the consumed component's capacity-unit.",
   componentDependenciesConsumed: 'Component',
   componentDependenciesAmount: 'Amount',
   unitUnits: 'units',
   moqUnits: 'Product MOQ (units)',
-  planItemBelowMoqWarning: 'Quantity below product MOQ ({moq} units) — the factory may reject the order.',
+  planItemBelowMoqWarning:
+    'Quantity below product MOQ ({moq} units) — the factory may reject the order.',
   sachetMassKg: 'Sachet mass (kg)',
   sachetsCount: 'Sachets count (from mass)',
   recipeSumWarning: 'Sum below 100% — water filling to 100% is ignored in cost calculation.',
@@ -1677,8 +1705,7 @@ const en: T = {
   recipeUnresolvedExpand: 'Expand one-by-one',
   recipeUnresolvedNoneTitle: 'Everything already exists in the catalog',
   recipeUnresolvedNoneSubtitle: 'You can continue with the import straight away.',
-  recipeUnresolvedRequiresTarget:
-    'To save an alias or rename, pick a catalog match first.',
+  recipeUnresolvedRequiresTarget: 'To save an alias or rename, pick a catalog match first.',
   selectXlsxFiles: 'Select xlsx files',
   importStockFiles: 'Import stock',
   rawXlsxLabel: 'Raw materials export (xlsx)',
@@ -1723,17 +1750,21 @@ const en: T = {
   bsxMissingConfig: 'Configure BSX credentials in Settings first.',
   bsxImporting: 'Fetching from BSX…',
   bsxShowWarehouses: 'Show available warehouses',
-  bsxWarehousesHint: 'Assign the right IDs below. For most setups, raw materials warehouse is ID 6 and components is ID 7.',
+  bsxWarehousesHint:
+    'Assign the right IDs below. For most setups, raw materials warehouse is ID 6 and components is ID 7.',
   bsxLastFetched: 'Last fetched',
   bsxFetchStock: 'Fetch stock',
-  bsxFetchStockSubtitle: 'Connect to BSX and pull current stock levels for raw materials and components',
+  bsxFetchStockSubtitle:
+    'Connect to BSX and pull current stock levels for raw materials and components',
   bsxNotConfigured: 'Configure BSX integration in Settings to fetch stock automatically.',
   manualXlsxImport: 'Manual xlsx import',
-  manualXlsxImportHint: 'Alternative source — use when BSX is unavailable or to load a snapshot from a file.',
+  manualXlsxImportHint:
+    'Alternative source — use when BSX is unavailable or to load a snapshot from a file.',
   show: 'Show',
   hide: 'Hide',
   bsxPricesLoading: 'Loading prices from PZ…',
-  bsxPricesLoadingHint: 'Stock is already visible. Net/VAT/gross prices will appear in ~30-60 seconds. You can resolve matches in the meantime.',
+  bsxPricesLoadingHint:
+    'Stock is already visible. Net/VAT/gross prices will appear in ~30-60 seconds. You can resolve matches in the meantime.',
   bsxPricesFailed: 'Failed to fetch prices',
   planName: 'Plan name',
   reportName: 'Report name',
@@ -1746,8 +1777,10 @@ const en: T = {
   planStatusDraft: 'Draft',
   planStatusComputed: 'Computed',
   planStatusArchived: 'Archived',
-  planStatusDraftTooltip: 'Plan created, but raw material and component shortages have not been computed yet.',
-  planStatusComputedTooltip: 'Shortages have been computed — you can view the shortage report, cost and generate RFQ emails.',
+  planStatusDraftTooltip:
+    'Plan created, but raw material and component shortages have not been computed yet.',
+  planStatusComputedTooltip:
+    'Shortages have been computed — you can view the shortage report, cost and generate RFQ emails.',
   planStatusArchivedTooltip: 'Plan archived — kept for history.',
   duplicatePlan: 'Duplicate plan',
   planCreatedAt: 'Created',
@@ -1770,7 +1803,8 @@ const en: T = {
   unitCost: 'Unit cost',
   totalPlanCost: 'Total plan cost',
   missingPrices: 'Missing prices for',
-  costCalculatorHeroHint: 'Pick one or more plans to compute unit cost for each product and the total plan cost.',
+  costCalculatorHeroHint:
+    'Pick one or more plans to compute unit cost for each product and the total plan cost.',
   costCalculatorSelectPlans: 'Select plans',
   missingPricesTooltipHeader: 'Items without a purchase price',
   missingPricesTooltipExplain:
@@ -1823,7 +1857,8 @@ const en: T = {
   unassignedSupplier: 'No supplier assigned',
   unitsShort: 'pcs',
   maxProducibleHero: 'You can produce',
-  maxProducibleHeroHint: 'Pick one or more products to see how many units you can assemble from current stock.',
+  maxProducibleHeroHint:
+    'Pick one or more products to see how many units you can assemble from current stock.',
   maxProducibleEmptyRecipe: 'Product has no recipe — add raw materials and components.',
   maxProducibleNoLimit: 'All items are factory-supplied — no material constraints.',
   maxProducibleLimitedBy: 'Limited by',
@@ -1877,11 +1912,13 @@ const en: T = {
   wipeDataButton: 'Wipe all data',
   wipeDataConfirm:
     'This cannot be undone. Delete every supplier, raw material, component, product, plan and stock snapshot? Settings will be preserved.',
-  wipeDataSuccess: 'Data wiped. You can now add your own suppliers, materials and products, or import a backup.',
+  wipeDataSuccess:
+    'Data wiped. You can now add your own suppliers, materials and products, or import a backup.',
   adoptAsRaw: 'Add as raw material',
   adoptAsComponent: 'Add as component',
   adoptAllUnmatched: 'Add all unmatched ({n})',
-  adoptAllConfirm: 'Create {n} new catalog entries from unmatched rows? Defaults: unit "kg" for raw materials, type "other" for components; no supplier. You can fill in details later in Raw materials/Components.',
+  adoptAllConfirm:
+    'Create {n} new catalog entries from unmatched rows? Defaults: unit "kg" for raw materials, type "other" for components; no supplier. You can fill in details later in Raw materials/Components.',
   resolveRowTitle: 'Unrecognized item',
   resolveRowSubtitleRaw: 'Raw material from import — choose how to map it to the catalog.',
   resolveRowSubtitleComponent: 'Component from import — choose how to map it to the catalog.',
@@ -1892,9 +1929,11 @@ const en: T = {
   resolveRowActionUseOnce: 'Use just for this import',
   resolveRowActionUseOnceHint: 'Link this row to the selected catalog entry, no permanent mapping.',
   resolveRowActionSaveAlias: 'Save alias permanently',
-  resolveRowActionSaveAliasHint: 'Remember “{import}” as an alias of “{catalog}”. Future imports with that name will be matched automatically.',
+  resolveRowActionSaveAliasHint:
+    'Remember “{import}” as an alias of “{catalog}”. Future imports with that name will be matched automatically.',
   resolveRowActionRename: 'Rename in catalog',
-  resolveRowActionRenameHint: 'Rename the catalog entry “{catalog}” to “{import}” (from the import). The old name will be kept as an alias so existing links keep working.',
+  resolveRowActionRenameHint:
+    'Rename the catalog entry “{catalog}” to “{import}” (from the import). The old name will be kept as an alias so existing links keep working.',
   resolveRowActionAddNew: 'Add as new entry',
   resolveRowActionAddNewHint: 'Create a brand-new catalog entry using the import name.',
   resolveRowChooseSuggestion: 'Pick a catalog entry to map this row to.',
@@ -1903,7 +1942,8 @@ const en: T = {
   resolveRowSkip: 'Skip',
   resolveRowDone: 'Done',
   resolveRowAliasAdded: 'Alias saved.',
-  resolveRowRenameConfirm: 'Rename catalog entry “{catalog}” to “{import}”? The old name will be kept as an alias.',
+  resolveRowRenameConfirm:
+    'Rename catalog entry “{catalog}” to “{import}”? The old name will be kept as an alias.',
   bulkResolveTitle: 'Unrecognized items ({n})',
   bulkSetAll: 'Set all to:',
   bulkColMapTo: 'Map to (catalog)',

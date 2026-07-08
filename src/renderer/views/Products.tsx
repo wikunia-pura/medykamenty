@@ -15,6 +15,7 @@ import LoadingOverlay from '../components/LoadingOverlay';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
+import { useColumnResize } from '../utils/useColumnResize';
 import {
   IconEdit,
   IconTrash,
@@ -89,9 +90,13 @@ const Products: React.FC = () => {
     toggle,
     reorder,
     reset: resetColumns,
+    widths,
+    setWidth,
+    resetWidth,
     orderedColumns,
     orderedVisibleIds,
   } = useColumnPrefs('products', COLUMNS);
+  const { decorateHeader } = useColumnResize(setWidth);
 
   const headerFor = (id: string): React.ReactNode => {
     switch (id) {
@@ -562,6 +567,8 @@ const Products: React.FC = () => {
               toggle={toggle}
               reorder={reorder}
               reset={resetColumns}
+              widths={widths}
+              resetWidth={resetWidth}
             />
             <button
               className="btn danger"
@@ -585,7 +592,7 @@ const Products: React.FC = () => {
           <table className="table">
             <thead>
               <tr>
-                {orderedVisibleIds.map((id) => headerFor(id))}
+                {orderedVisibleIds.map((id) => decorateHeader(headerFor(id), id, widths[id]))}
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>

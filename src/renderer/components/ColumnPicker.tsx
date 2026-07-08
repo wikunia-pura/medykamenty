@@ -10,9 +10,21 @@ interface Props {
   toggle: (id: string) => void;
   reorder: (fromIndex: number, toIndex: number) => void;
   reset: () => void;
+  /** Explicit column widths the user set by dragging (px), keyed by column id. */
+  widths?: Record<string, number>;
+  /** Drop a single column's custom width → back to the default. */
+  resetWidth?: (id: string) => void;
 }
 
-const ColumnPicker: React.FC<Props> = ({ columns, isVisible, toggle, reorder, reset }) => {
+const ColumnPicker: React.FC<Props> = ({
+  columns,
+  isVisible,
+  toggle,
+  reorder,
+  reset,
+  widths,
+  resetWidth,
+}) => {
   const t = useT();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
@@ -139,6 +151,16 @@ const ColumnPicker: React.FC<Props> = ({ columns, isVisible, toggle, reorder, re
                       onChange={() => toggle(c.id)}
                     />
                     <span className="column-picker-label">{c.label}</span>
+                    {resetWidth && widths && widths[c.id] != null && (
+                      <button
+                        type="button"
+                        className="column-picker-width-reset"
+                        title={t.columnResetWidth}
+                        onClick={() => resetWidth(c.id)}
+                      >
+                        ↔ {t.columnResetWidthShort}
+                      </button>
+                    )}
                   </div>
                 );
               })}

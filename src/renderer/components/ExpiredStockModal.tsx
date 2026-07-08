@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useT } from '../i18n';
 import ModalHeader from './ModalHeader';
+import SegmentedControl from './SegmentedControl';
 import { IconClose } from './Icons';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import type { ExpiredBatchRef } from '../../shared/types';
@@ -36,8 +37,7 @@ const ExpiredStockModal: React.FC<Props> = ({ batches, onCancel, onConfirm }) =>
   };
   const toggle = (id: string) => setIncluded((prev) => ({ ...prev, [id]: !prev[id] }));
 
-  const confirm = () =>
-    onConfirm(batches.filter((b) => included[b.batchId]).map((b) => b.batchId));
+  const confirm = () => onConfirm(batches.filter((b) => included[b.batchId]).map((b) => b.batchId));
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
@@ -52,7 +52,8 @@ const ExpiredStockModal: React.FC<Props> = ({ batches, onCancel, onConfirm }) =>
           <div className="hint" style={{ marginBottom: 12 }}>
             {t.expiredStockIntro}
           </div>
-          <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+          <div className="apply-all-row">
+            <span className="apply-all-label">{t.applyToAllLabel}</span>
             <button type="button" className="btn btn-sm" onClick={() => setAll(false)}>
               {t.expiredStockSkipAll}
             </button>
@@ -92,22 +93,18 @@ const ExpiredStockModal: React.FC<Props> = ({ batches, onCancel, onConfirm }) =>
                         )}
                       </td>
                       <td>
-                        <div className="btn-row">
-                          <button
-                            type="button"
-                            className={`btn btn-sm ${!on ? 'primary-filled' : ''}`}
-                            onClick={() => on && toggle(b.batchId)}
-                          >
-                            {t.expiredStockSkip}
-                          </button>
-                          <button
-                            type="button"
-                            className={`btn btn-sm ${on ? 'primary-filled' : ''}`}
-                            onClick={() => !on && toggle(b.batchId)}
-                          >
-                            {t.expiredStockInclude}
-                          </button>
-                        </div>
+                        <SegmentedControl
+                          size="sm"
+                          ariaLabel={b.rawMaterialName}
+                          value={on ? 'include' : 'skip'}
+                          onChange={(v) => {
+                            if ((v === 'include') !== on) toggle(b.batchId);
+                          }}
+                          options={[
+                            { value: 'skip', label: t.expiredStockSkip, tone: 'neutral' },
+                            { value: 'include', label: t.expiredStockInclude, tone: 'success' },
+                          ]}
+                        />
                       </td>
                     </tr>
                   );

@@ -11,12 +11,7 @@ import type {
   Supplier,
   Unit,
 } from '../../shared/types';
-import {
-  totalStockQty,
-  hasExpiredBatch,
-  batchExpiryStatus,
-  isExpired,
-} from '../../shared/expiry';
+import { totalStockQty, hasExpiredBatch, batchExpiryStatus, isExpired } from '../../shared/expiry';
 import ConfirmDialog from '../components/ConfirmDialog';
 import BlockedByDialog from '../components/BlockedByDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
@@ -28,12 +23,14 @@ import StockCell from '../components/StockCell';
 import OverageCell from '../components/OverageCell';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
+import { useColumnResize } from '../utils/useColumnResize';
 import {
   IconEdit,
   IconTrash,
   IconPlus,
   IconStar,
   IconImport,
+  IconInfo,
   IconClose,
   IconSettings,
   IconDuplicate,
@@ -41,6 +38,7 @@ import {
 import HoverTooltip from '../components/HoverTooltip';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
+import SegmentedControl from '../components/SegmentedControl';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import {
   exportRawMaterialsCsv,
@@ -125,38 +123,94 @@ const RawMaterials: React.FC = () => {
     toggle,
     reorder,
     reset: resetColumns,
+    widths,
+    setWidth,
+    resetWidth,
     orderedColumns,
     orderedVisibleIds,
   } = useColumnPrefs('rawMaterials', COLUMNS);
+  const { decorateHeader } = useColumnResize(setWidth);
 
   const headerFor = (id: string): React.ReactNode => {
     switch (id) {
       case 'name':
-        return <th key={id} className="col-w-lg">{t.name}</th>;
+        return (
+          <th key={id} className="col-w-lg">
+            {t.name}
+          </th>
+        );
       case 'symbol':
-        return <th key={id} className="col-w-md">{t.symbol}</th>;
+        return (
+          <th key={id} className="col-w-md">
+            {t.symbol}
+          </th>
+        );
       case 'unit':
-        return <th key={id} className="col-w-sm">{t.unit}</th>;
+        return (
+          <th key={id} className="col-w-sm">
+            {t.unit}
+          </th>
+        );
       case 'stock':
-        return <th key={id} className="num col-w-md">{t.stock}</th>;
+        return (
+          <th key={id} className="num col-w-md">
+            {t.stock}
+          </th>
+        );
       case 'suppliers':
-        return <th key={id} className="col-w-xl">{t.suppliers}</th>;
+        return (
+          <th key={id} className="col-w-xl">
+            {t.suppliers}
+          </th>
+        );
       case 'moq':
-        return <th key={id} className="num col-w-sm">{t.moq}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.moq}
+          </th>
+        );
       case 'leadTime':
-        return <th key={id} className="num col-w-sm">{t.leadTime}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.leadTime}
+          </th>
+        );
       case 'shelfLife':
-        return <th key={id} className="num col-w-sm">{t.shelfLife}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.shelfLife}
+          </th>
+        );
       case 'price':
-        return <th key={id} className="num col-w-sm">{t.price}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.price}
+          </th>
+        );
       case 'overage':
-        return <th key={id} className="num col-w-sm">{t.overage}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.overage}
+          </th>
+        );
       case 'currency':
-        return <th key={id} className="col-w-sm">{t.currency}</th>;
+        return (
+          <th key={id} className="col-w-sm">
+            {t.currency}
+          </th>
+        );
       case 'factory':
-        return <th key={id} className="col-w-sm">{t.factorySupplied}</th>;
+        return (
+          <th key={id} className="col-w-sm">
+            {t.factorySupplied}
+          </th>
+        );
       case 'notes':
-        return <th key={id} className="col-w-lg">{t.notes}</th>;
+        return (
+          <th key={id} className="col-w-lg">
+            {t.notes}
+          </th>
+        );
       default:
         return null;
     }
@@ -165,7 +219,11 @@ const RawMaterials: React.FC = () => {
   const cellFor = (id: string, rm: RawMaterial): React.ReactNode => {
     switch (id) {
       case 'name':
-        return <td key={id} className="col-name col-wrap">{rm.name}</td>;
+        return (
+          <td key={id} className="col-name col-wrap">
+            {rm.name}
+          </td>
+        );
       case 'symbol':
         return <td key={id}>{rm.mpFirmaSymbol ?? ''}</td>;
       case 'unit':
@@ -184,15 +242,35 @@ const RawMaterials: React.FC = () => {
           />
         );
       case 'suppliers':
-        return <td key={id} className="col-wrap">{renderSupplierChips(rm)}</td>;
+        return (
+          <td key={id} className="col-wrap">
+            {renderSupplierChips(rm)}
+          </td>
+        );
       case 'moq':
-        return <td key={id} className="num">{rm.moq ?? ''}</td>;
+        return (
+          <td key={id} className="num">
+            {rm.moq ?? ''}
+          </td>
+        );
       case 'leadTime':
-        return <td key={id} className="num">{rm.leadTimeDays ?? ''}</td>;
+        return (
+          <td key={id} className="num">
+            {rm.leadTimeDays ?? ''}
+          </td>
+        );
       case 'shelfLife':
-        return <td key={id} className="num">{rm.shelfLifeMonths ?? ''}</td>;
+        return (
+          <td key={id} className="num">
+            {rm.shelfLifeMonths ?? ''}
+          </td>
+        );
       case 'price':
-        return <td key={id} className="num">{rm.lastPurchasePriceNet ?? ''}</td>;
+        return (
+          <td key={id} className="num">
+            {rm.lastPurchasePriceNet ?? ''}
+          </td>
+        );
       case 'overage':
         return (
           <OverageCell
@@ -207,13 +285,19 @@ const RawMaterials: React.FC = () => {
       case 'factory':
         return (
           <td key={id}>
-            {rm.factorySupplied
-              ? <span className="tag success">{t.yes}</span>
-              : <span className="tag danger">{t.no}</span>}
+            {rm.factorySupplied ? (
+              <span className="tag success">{t.yes}</span>
+            ) : (
+              <span className="tag danger">{t.no}</span>
+            )}
           </td>
         );
       case 'notes':
-        return <td key={id} className="col-wrap">{rm.notes ?? ''}</td>;
+        return (
+          <td key={id} className="col-wrap">
+            {rm.notes ?? ''}
+          </td>
+        );
       default:
         return null;
     }
@@ -350,13 +434,18 @@ const RawMaterials: React.FC = () => {
         : e,
     );
   };
-  const updateBatch = (idx: number, patch: Partial<NonNullable<RawMaterial['stockBatches']>[number]>) => {
+  const updateBatch = (
+    idx: number,
+    patch: Partial<NonNullable<RawMaterial['stockBatches']>[number]>,
+  ) => {
     setStockDirty(true);
     setEditing((e) =>
       e
         ? {
             ...e,
-            stockBatches: (e.stockBatches ?? []).map((b, i) => (i === idx ? { ...b, ...patch } : b)),
+            stockBatches: (e.stockBatches ?? []).map((b, i) =>
+              i === idx ? { ...b, ...patch } : b,
+            ),
           }
         : e,
     );
@@ -692,12 +781,7 @@ const RawMaterials: React.FC = () => {
       <div className="card">
         <div className="toolbar">
           <div className="toolbar-actions">
-            <ExportImportButtons
-              format="csv"
-              onExport={onExport}
-              onImport={onImport}
-              busy={busy}
-            />
+            <ExportImportButtons format="csv" onExport={onExport} onImport={onImport} busy={busy} />
             <button
               className="btn btn-import"
               onClick={onClickImportXlsx}
@@ -720,6 +804,8 @@ const RawMaterials: React.FC = () => {
               toggle={toggle}
               reorder={reorder}
               reset={resetColumns}
+              widths={widths}
+              resetWidth={resetWidth}
             />
             <button
               className="btn danger"
@@ -774,13 +860,21 @@ const RawMaterials: React.FC = () => {
             <span className="hint">{t.days}</span>
           </div>
         </div>
-        {error && <div className="error-text" style={{ marginBottom: 8 }}>{error}</div>}
-        {info && <div className="hint" style={{ marginBottom: 8 }}>{info}</div>}
+        {error && (
+          <div className="error-text" style={{ marginBottom: 8 }}>
+            {error}
+          </div>
+        )}
+        {info && (
+          <div className="hint" style={{ marginBottom: 8 }}>
+            {info}
+          </div>
+        )}
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                {orderedVisibleIds.map((id) => headerFor(id))}
+                {orderedVisibleIds.map((id) => decorateHeader(headerFor(id), id, widths[id]))}
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
@@ -844,205 +938,207 @@ const RawMaterials: React.FC = () => {
               onClose={() => setEditing(null)}
             />
             <div className="modal-body">
-            <div className="form-row">
-              <label>{t.name}</label>
-              <input
-                className="input"
-                value={editing.name ?? ''}
-                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.symbol}</label>
-              <input
-                className="input"
-                value={editing.mpFirmaSymbol ?? ''}
-                onChange={(e) => setEditing({ ...editing, mpFirmaSymbol: e.target.value })}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.unit}</label>
-              <SearchableSelect
-                options={UNITS.map((u) => ({ value: u, label: u }))}
-                value={editing.unit ?? 'kg'}
-                onChange={(val) => setEditing({ ...editing, unit: val as Unit })}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.factorySupplied}</label>
-              <input
-                type="checkbox"
-                checked={!!editing.factorySupplied}
-                onChange={(e) => setEditing({ ...editing, factorySupplied: e.target.checked })}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.suppliers}</label>
-              <SupplierMultiPicker
-                suppliers={suppliers.filter((s) => s.type !== 'component')}
-                selectedIds={editing.supplierIds ?? []}
-                preferredId={editing.preferredSupplierId}
-                onChange={(ids, pref) =>
-                  setEditing({ ...editing, supplierIds: ids, preferredSupplierId: pref })
-                }
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.moq}</label>
-              <NumberInput
-                className="input"
-                value={editing.moq}
-                onChange={(v) => setEditing({ ...editing, moq: v })}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.leadTime}</label>
-              <NumberInput
-                className="input"
-                value={editing.leadTimeDays}
-                onChange={(v) => setEditing({ ...editing, leadTimeDays: v })}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.shelfLife}</label>
-              <NumberInput
-                className="input"
-                value={editing.shelfLifeMonths}
-                onChange={(v) => setEditing({ ...editing, shelfLifeMonths: v })}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.price}</label>
-              <NumberInput
-                className="input"
-                step="0.01"
-                value={editing.lastPurchasePriceNet}
-                onChange={(v) => setEditing({ ...editing, lastPurchasePriceNet: v })}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.currency}</label>
-              <input
-                className="input"
-                value={editing.currency ?? ''}
-                placeholder="PLN"
-                onChange={(e) => setEditing({ ...editing, currency: e.target.value })}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.overage} (%)</label>
-              <NumberInput
-                className="input"
-                step="0.1"
-                value={editing.overagePct}
-                placeholder={String(defaultOveragePct)}
-                onChange={(v) => setEditing({ ...editing, overagePct: v })}
-              />
-            </div>
-            <div className="hint" style={{ marginTop: -4, marginBottom: 8 }}>
-              {t.overageInheritHint.replace('{n}', String(defaultOveragePct))}
-            </div>
-            <div className="form-row">
-              <label>{t.notes}</label>
-              <textarea
-                value={editing.notes ?? ''}
-                onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
-              />
-            </div>
-            <div className="form-row" style={{ alignItems: 'flex-start' }}>
-              <label>{t.stockBatches}</label>
-              <div style={{ flex: 1 }}>
-                {(editing.stockBatches ?? []).length > 0 && (
-                  <table className="table batch-table">
-                    <thead>
-                      <tr>
-                        <th className="num">{t.stock}</th>
-                        <th>{t.expiry}</th>
-                        <th>{t.expiryRetest}</th>
-                        <th>{t.notes}</th>
-                        <th className="actions" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(editing.stockBatches ?? []).map((b, idx) => {
-                        const expired = isExpired(b);
-                        return (
-                          <tr key={b.id} className={expired ? 'stock-batch-expired' : undefined}>
-                            <td className="num">
-                              <NumberInput
-                                className="input"
-                                style={{ width: 90 }}
-                                value={b.qty}
-                                emptyValue={0}
-                                step="0.001"
-                                onChange={(v) => updateBatch(idx, { qty: v ?? 0 })}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                type="date"
-                                className="input"
-                                value={b.expiryDate ?? ''}
-                                onChange={(e) =>
-                                  updateBatch(idx, { expiryDate: e.target.value || undefined })
-                                }
-                              />
-                              {expired && <span className="stock-batch-flag">{t.expired}</span>}
-                            </td>
-                            <td>
-                              <input
-                                type="date"
-                                className="input"
-                                value={b.retestExpiryDate ?? ''}
-                                onChange={(e) =>
-                                  updateBatch(idx, { retestExpiryDate: e.target.value || undefined })
-                                }
-                              />
-                            </td>
-                            <td>
-                              <input
-                                className="input"
-                                value={b.note ?? ''}
-                                onChange={(e) =>
-                                  updateBatch(idx, { note: e.target.value || undefined })
-                                }
-                              />
-                            </td>
-                            <td className="actions">
-                              <button
-                                type="button"
-                                className="btn btn-sm soft-danger btn-icon-only"
-                                onClick={() => removeBatch(idx)}
-                                title={t.delete}
-                              >
-                                <IconClose size={12} />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-                <div className="row" style={{ gap: 8, marginTop: 6, alignItems: 'center' }}>
-                  <button type="button" className="btn btn-sm soft-edit" onClick={addBatch}>
-                    <IconPlus size={13} /> {t.stockBatchAdd}
-                  </button>
+              <div className="form-row">
+                <label>{t.name}</label>
+                <input
+                  className="input"
+                  value={editing.name ?? ''}
+                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.symbol}</label>
+                <input
+                  className="input"
+                  value={editing.mpFirmaSymbol ?? ''}
+                  onChange={(e) => setEditing({ ...editing, mpFirmaSymbol: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.unit}</label>
+                <SearchableSelect
+                  options={UNITS.map((u) => ({ value: u, label: u }))}
+                  value={editing.unit ?? 'kg'}
+                  onChange={(val) => setEditing({ ...editing, unit: val as Unit })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.factorySupplied}</label>
+                <input
+                  type="checkbox"
+                  checked={!!editing.factorySupplied}
+                  onChange={(e) => setEditing({ ...editing, factorySupplied: e.target.checked })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.suppliers}</label>
+                <SupplierMultiPicker
+                  suppliers={suppliers.filter((s) => s.type !== 'component')}
+                  selectedIds={editing.supplierIds ?? []}
+                  preferredId={editing.preferredSupplierId}
+                  onChange={(ids, pref) =>
+                    setEditing({ ...editing, supplierIds: ids, preferredSupplierId: pref })
+                  }
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.moq}</label>
+                <NumberInput
+                  className="input"
+                  value={editing.moq}
+                  onChange={(v) => setEditing({ ...editing, moq: v })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.leadTime}</label>
+                <NumberInput
+                  className="input"
+                  value={editing.leadTimeDays}
+                  onChange={(v) => setEditing({ ...editing, leadTimeDays: v })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.shelfLife}</label>
+                <NumberInput
+                  className="input"
+                  value={editing.shelfLifeMonths}
+                  onChange={(v) => setEditing({ ...editing, shelfLifeMonths: v })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.price}</label>
+                <NumberInput
+                  className="input"
+                  step="0.01"
+                  value={editing.lastPurchasePriceNet}
+                  onChange={(v) => setEditing({ ...editing, lastPurchasePriceNet: v })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.currency}</label>
+                <input
+                  className="input"
+                  value={editing.currency ?? ''}
+                  placeholder="PLN"
+                  onChange={(e) => setEditing({ ...editing, currency: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t.overage} (%)</label>
+                <NumberInput
+                  className="input"
+                  step="0.1"
+                  value={editing.overagePct}
+                  placeholder={String(defaultOveragePct)}
+                  onChange={(v) => setEditing({ ...editing, overagePct: v })}
+                />
+              </div>
+              <div className="hint" style={{ marginTop: -4, marginBottom: 8 }}>
+                {t.overageInheritHint.replace('{n}', String(defaultOveragePct))}
+              </div>
+              <div className="form-row">
+                <label>{t.notes}</label>
+                <textarea
+                  value={editing.notes ?? ''}
+                  onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
+                />
+              </div>
+              <div className="form-row" style={{ alignItems: 'flex-start' }}>
+                <label>{t.stockBatches}</label>
+                <div style={{ flex: 1 }}>
                   {(editing.stockBatches ?? []).length > 0 && (
-                    <span className="hint">
-                      {t.stock}:{' '}
-                      {(editing.stockBatches ?? [])
-                        .reduce((s, b) => s + (b.qty ?? 0), 0)
-                        .toLocaleString()}{' '}
-                      {editing.unit}
-                    </span>
+                    <table className="table batch-table">
+                      <thead>
+                        <tr>
+                          <th className="num">{t.stock}</th>
+                          <th>{t.expiry}</th>
+                          <th>{t.expiryRetest}</th>
+                          <th>{t.notes}</th>
+                          <th className="actions" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(editing.stockBatches ?? []).map((b, idx) => {
+                          const expired = isExpired(b);
+                          return (
+                            <tr key={b.id} className={expired ? 'stock-batch-expired' : undefined}>
+                              <td className="num">
+                                <NumberInput
+                                  className="input"
+                                  style={{ width: 90 }}
+                                  value={b.qty}
+                                  emptyValue={0}
+                                  step="0.001"
+                                  onChange={(v) => updateBatch(idx, { qty: v ?? 0 })}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="date"
+                                  className="input"
+                                  value={b.expiryDate ?? ''}
+                                  onChange={(e) =>
+                                    updateBatch(idx, { expiryDate: e.target.value || undefined })
+                                  }
+                                />
+                                {expired && <span className="stock-batch-flag">{t.expired}</span>}
+                              </td>
+                              <td>
+                                <input
+                                  type="date"
+                                  className="input"
+                                  value={b.retestExpiryDate ?? ''}
+                                  onChange={(e) =>
+                                    updateBatch(idx, {
+                                      retestExpiryDate: e.target.value || undefined,
+                                    })
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="input"
+                                  value={b.note ?? ''}
+                                  onChange={(e) =>
+                                    updateBatch(idx, { note: e.target.value || undefined })
+                                  }
+                                />
+                              </td>
+                              <td className="actions">
+                                <button
+                                  type="button"
+                                  className="btn btn-sm soft-danger btn-icon-only"
+                                  onClick={() => removeBatch(idx)}
+                                  title={t.delete}
+                                >
+                                  <IconClose size={12} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   )}
-                </div>
-                <div className="hint" style={{ marginTop: 4 }}>
-                  {t.stockBatchesEditHint}
+                  <div className="row" style={{ gap: 8, marginTop: 6, alignItems: 'center' }}>
+                    <button type="button" className="btn btn-sm soft-edit" onClick={addBatch}>
+                      <IconPlus size={13} /> {t.stockBatchAdd}
+                    </button>
+                    {(editing.stockBatches ?? []).length > 0 && (
+                      <span className="hint">
+                        {t.stock}:{' '}
+                        {(editing.stockBatches ?? [])
+                          .reduce((s, b) => s + (b.qty ?? 0), 0)
+                          .toLocaleString()}{' '}
+                        {editing.unit}
+                      </span>
+                    )}
+                  </div>
+                  <div className="hint" style={{ marginTop: 4 }}>
+                    {t.stockBatchesEditHint}
+                  </div>
                 </div>
               </div>
-            </div>
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setEditing(null)}>
@@ -1103,10 +1199,7 @@ const RawMaterials: React.FC = () => {
       )}
 
       {xlsxSummary && (
-        <XlsxImportSummaryModal
-          summary={xlsxSummary}
-          onClose={() => setXlsxSummary(null)}
-        />
+        <XlsxImportSummaryModal summary={xlsxSummary} onClose={() => setXlsxSummary(null)} />
       )}
 
       {rawStockAnalysis && (
@@ -1117,9 +1210,7 @@ const RawMaterials: React.FC = () => {
         />
       )}
 
-      {blockedBy && (
-        <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />
-      )}
+      {blockedBy && <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />}
 
       {settingsOpen && (
         <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
@@ -1226,10 +1317,7 @@ const RawMaterialsImportModeDialog: React.FC<ModeDialogProps> = ({
           onClose={onCancel}
         />
         <div className="modal-body">
-          <label
-            className="form-row"
-            style={{ alignItems: 'flex-start', cursor: 'pointer' }}
-          >
+          <label className="form-row" style={{ alignItems: 'flex-start', cursor: 'pointer' }}>
             <input
               type="radio"
               name="raw-import-mode"
@@ -1245,10 +1333,7 @@ const RawMaterialsImportModeDialog: React.FC<ModeDialogProps> = ({
               </div>
             </div>
           </label>
-          <label
-            className="form-row"
-            style={{ alignItems: 'flex-start', cursor: 'pointer' }}
-          >
+          <label className="form-row" style={{ alignItems: 'flex-start', cursor: 'pointer' }}>
             <input
               type="radio"
               name="raw-import-mode"
@@ -1318,12 +1403,10 @@ const XlsxImportSummaryModal: React.FC<XlsxSummaryModalProps> = ({ summary, onCl
               </li>
             )}
             <li>
-              {t.rawMaterialsImportSuppliersCreated}:{' '}
-              <strong>{summary.suppliersCreated}</strong>
+              {t.rawMaterialsImportSuppliersCreated}: <strong>{summary.suppliersCreated}</strong>
             </li>
             <li>
-              {t.rawMaterialsImportSuppliersUpdated}:{' '}
-              <strong>{summary.suppliersUpdated}</strong>
+              {t.rawMaterialsImportSuppliersUpdated}: <strong>{summary.suppliersUpdated}</strong>
             </li>
           </ul>
           {summary.warnings.length > 0 && (
@@ -1368,16 +1451,16 @@ interface RawStockDiffModalProps {
 }
 
 // Hover tooltip listing a material's file batches (qty + effective expiry).
-const BatchTooltip: React.FC<{ batches: RawStockAnalysis['unmatched'][number]['batches']; unit: string }> = ({
-  batches,
-  unit,
-}) => {
+const BatchTooltip: React.FC<{
+  batches: RawStockAnalysis['unmatched'][number]['batches'];
+  unit: string;
+}> = ({ batches, unit }) => {
   const t = useT();
   return (
     <HoverTooltip
       align="left"
       triggerClassName="stock-note-icon"
-      trigger={<IconImport size={12} />}
+      trigger={<IconInfo size={12} />}
     >
       <div className="shortage-tooltip-header">{t.stockBatches}</div>
       <ul className="stock-batch-list">
@@ -1401,10 +1484,7 @@ const BatchTooltip: React.FC<{ batches: RawStockAnalysis['unmatched'][number]['b
 const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCancel, onApply }) => {
   const t = useT();
   useEscapeKey(onCancel);
-  const mismatches = useMemo(
-    () => analysis.matches.filter((m) => m.sumMismatch),
-    [analysis],
-  );
+  const mismatches = useMemo(() => analysis.matches.filter((m) => m.sumMismatch), [analysis]);
   const unmatched = analysis.unmatched;
   // Default to taking the import — the file is the fresh source of truth.
   const [actions, setActions] = useState<Map<string, 'take' | 'reject'>>(
@@ -1444,7 +1524,8 @@ const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCance
               <div className="hint" style={{ marginBottom: 12 }}>
                 {t.rawStockDiffIntro}
               </div>
-              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <div className="apply-all-row">
+                <span className="apply-all-label">{t.applyToAllLabel}</span>
                 <button type="button" className="btn btn-sm" onClick={() => setAll('reject')}>
                   {t.rawStockRejectAll}
                 </button>
@@ -1478,22 +1559,16 @@ const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCance
                             {fmt(m.reportedTotal)} {m.unit}
                           </td>
                           <td>
-                            <div className="btn-row">
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${action === 'reject' ? 'primary-filled' : ''}`}
-                                onClick={() => setOne(m.itemId, 'reject')}
-                              >
-                                {t.rawStockReject}
-                              </button>
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${action === 'take' ? 'primary-filled' : ''}`}
-                                onClick={() => setOne(m.itemId, 'take')}
-                              >
-                                {t.rawStockTake}
-                              </button>
-                            </div>
+                            <SegmentedControl
+                              size="sm"
+                              ariaLabel={m.name}
+                              value={action}
+                              onChange={(v) => setOne(m.itemId, v)}
+                              options={[
+                                { value: 'reject', label: t.rawStockReject, tone: 'danger' },
+                                { value: 'take', label: t.rawStockTake, tone: 'success' },
+                              ]}
+                            />
                           </td>
                         </tr>
                       );
@@ -1512,7 +1587,8 @@ const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCance
               >
                 {t.magazynStockUnmatchedIntro.replace('{n}', String(unmatched.length))}
               </div>
-              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <div className="apply-all-row">
+                <span className="apply-all-label">{t.applyToAllLabel}</span>
                 <button type="button" className="btn btn-sm" onClick={() => setCreateAll(false)}>
                   {t.magazynStockIgnoreAll}
                 </button>
@@ -1542,22 +1618,18 @@ const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCance
                             {fmt(u.batchSum)} {u.unit}
                           </td>
                           <td>
-                            <div className="btn-row">
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${!create ? 'primary-filled' : ''}`}
-                                onClick={() => create && toggleCreate(u.name)}
-                              >
-                                {t.magazynStockIgnore}
-                              </button>
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${create ? 'primary-filled' : ''}`}
-                                onClick={() => !create && toggleCreate(u.name)}
-                              >
-                                {t.magazynStockCreate}
-                              </button>
-                            </div>
+                            <SegmentedControl
+                              size="sm"
+                              ariaLabel={u.name}
+                              value={create ? 'create' : 'ignore'}
+                              onChange={(v) => {
+                                if ((v === 'create') !== create) toggleCreate(u.name);
+                              }}
+                              options={[
+                                { value: 'ignore', label: t.magazynStockIgnore, tone: 'neutral' },
+                                { value: 'create', label: t.magazynStockCreate, tone: 'success' },
+                              ]}
+                            />
                           </td>
                         </tr>
                       );

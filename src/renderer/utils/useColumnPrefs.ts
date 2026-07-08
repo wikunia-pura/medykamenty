@@ -12,7 +12,13 @@ export interface ColumnDef {
 interface StoredPrefs {
   visible: string[];
   order: string[];
+  // Per-column pixel widths the user set by dragging the column border. Columns
+  // absent here fall back to their CSS default width (col-w-* class).
+  widths: Record<string, number>;
 }
+
+// Smallest a column may be dragged to, in px.
+export const MIN_COLUMN_WIDTH = 48;
 
 const STORAGE_PREFIX = 'cutis.columns.';
 
@@ -24,7 +30,7 @@ const loadPrefs = (key: string): StoredPrefs | null => {
     // Legacy format: bare string[] of visible ids — keep default order.
     if (Array.isArray(parsed)) {
       const visible = parsed.filter((x): x is string => typeof x === 'string');
-      return { visible, order: [] };
+      return { visible, order: [], widths: {} };
     }
     if (parsed && typeof parsed === 'object') {
       const visible = Array.isArray(parsed.visible)
@@ -33,7 +39,13 @@ const loadPrefs = (key: string): StoredPrefs | null => {
       const order = Array.isArray(parsed.order)
         ? parsed.order.filter((x: unknown): x is string => typeof x === 'string')
         : [];
-      return { visible, order };
+      const widths: Record<string, number> = {};
+      if (parsed.widths && typeof parsed.widths === 'object') {
+        for (const [k, v] of Object.entries(parsed.widths as Record<string, unknown>)) {
+          if (typeof v === 'number' && Number.isFinite(v) && v > 0) widths[k] = v;
+        }
+      }
+      return { visible, order, widths };
     }
     return null;
   } catch {
@@ -80,6 +92,9 @@ export function useColumnPrefs(viewKey: string, columns: ColumnDef[]) {
   const [order, setOrder] = useState<string[]>(() =>
     initialOrder(columns, loadPrefs(viewKey)),
   );
+  const [widths, setWidths] = useState<Record<string, number>>(
+    () => loadPrefs(viewKey)?.widths ?? {},
+  );
 
   // If new columns are introduced after the user already has saved prefs,
   // append them so they're not invisible to the picker.
@@ -97,8 +112,8 @@ export function useColumnPrefs(viewKey: string, columns: ColumnDef[]) {
   }, [columns]);
 
   useEffect(() => {
-    savePrefs(viewKey, { visible: [...visible], order });
-  }, [viewKey, visible, order]);
+    savePrefs(viewKey, { visible: [...visible], order, widths });
+  }, [viewKey, visible, order, widths]);
 
   const toggle = useCallback(
     (id: string) => {
@@ -131,9 +146,31 @@ export function useColumnPrefs(viewKey: string, columns: ColumnDef[]) {
     });
   }, []);
 
+  // Set an explicit pixel width for a column (from dragging its border).
+  const setWidth = useCallback((id: string, px: number) => {
+    setWidths((prev) => {
+      const next = Math.max(MIN_COLUMN_WIDTH, Math.round(px));
+      if (prev[id] === next) return prev;
+      return { ...prev, [id]: next };
+    });
+  }, []);
+
+  // Drop a column's explicit width → it falls back to the CSS default.
+  const resetWidth = useCallback((id: string) => {
+    setWidths((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
+
+  const resetWidths = useCallback(() => setWidths({}), []);
+
   const reset = useCallback(() => {
     setVisible(initialVisible(columns, null));
     setOrder(columns.map((c) => c.id));
+    setWidths({});
   }, [columns]);
 
   const isVisible = useCallback((id: string) => visible.has(id), [visible]);
@@ -156,6 +193,10 @@ export function useColumnPrefs(viewKey: string, columns: ColumnDef[]) {
     toggle,
     reorder,
     reset,
+    widths,
+    setWidth,
+    resetWidth,
+    resetWidths,
     orderedColumns,
     orderedVisibleIds,
   };

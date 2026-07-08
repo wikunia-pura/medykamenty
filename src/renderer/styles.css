@@ -15,7 +15,14 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.08);
   font-family:
-    system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
   font-size: 14px;
   color: var(--text);
 }
@@ -83,7 +90,6 @@ a:hover {
      and pushes the footer off-screen on tall views (RawMaterials/Components). */
   min-height: 0;
 }
-
 
 /* Sidebar */
 .sidebar-slot {
@@ -680,6 +686,122 @@ body.dark-mode .btn.btn-import:hover:not(:disabled) {
   justify-content: center;
 }
 
+/* Segmented control — a "pick one" selector, NOT an action button. Rendered as
+   a recessed pill track with a single raised, tone-colored chip for the current
+   choice. Used in decision tables (stock imports, conflicts, expired batches)
+   where the selection is applied later on submit, so it must not look clickable
+   like a .btn that fires immediately. See components/SegmentedControl.tsx. */
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.05);
+  max-width: 100%;
+}
+body.dark-mode .segmented {
+  background: rgba(255, 255, 255, 0.06);
+}
+.segmented__option {
+  --seg-tone: var(--text);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    box-shadow 0.12s;
+}
+.segmented--sm .segmented__option {
+  padding: 4px 11px;
+  font-size: 12.5px;
+}
+.segmented__option--primary {
+  --seg-tone: var(--primary);
+}
+.segmented__option--success {
+  --seg-tone: var(--success);
+}
+.segmented__option--danger {
+  --seg-tone: var(--danger);
+}
+.segmented__option--warning {
+  --seg-tone: var(--warning);
+}
+.segmented__option--neutral {
+  --seg-tone: var(--text);
+}
+.segmented__option:hover:not(.is-selected):not(.is-disabled) {
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.05);
+}
+body.dark-mode .segmented__option:hover:not(.is-selected):not(.is-disabled) {
+  background: rgba(255, 255, 255, 0.07);
+}
+.segmented__option.is-selected {
+  background: var(--bg-elev);
+  color: var(--seg-tone);
+  font-weight: 600;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.16),
+    inset 0 0 0 1px color-mix(in srgb, var(--seg-tone) 42%, transparent);
+}
+body.dark-mode .segmented__option.is-selected {
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px color-mix(in srgb, var(--seg-tone) 50%, transparent);
+}
+.segmented__option.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+/* The radio is the real control; keep it in the layout for focus but invisible. */
+.segmented__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.segmented__option:has(.segmented__input:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.segmented__label {
+  pointer-events: none;
+}
+
+/* "Set all rows" shortcut row above a decision table. These ARE immediate
+   actions, so they stay as buttons — a leading label disambiguates them from
+   the per-row segmented selectors. */
+.apply-all-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.apply-all-row .apply-all-label {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
 /* Forms */
 .form-row {
   display: grid;
@@ -717,7 +839,10 @@ textarea {
   background: #f3f5fa;
   color: var(--text);
   font: inherit;
-  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s,
+    background 0.12s;
 }
 body.dark-mode .input,
 body.dark-mode select,
@@ -874,6 +999,73 @@ body.dark-mode .table tr:hover td {
 .col-w-xl {
   width: 320px;
 }
+
+/* ---- resizable columns ---- */
+/* Handle sits on the right border of a header cell; drag to resize. */
+th.resizable-th {
+  position: relative;
+}
+.col-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+  user-select: none;
+  touch-action: none;
+}
+.col-resizer::after {
+  content: '';
+  position: absolute;
+  top: 18%;
+  right: 3px;
+  width: 2px;
+  height: 64%;
+  border-radius: 1px;
+  /* Always-visible faint divider so it's clear the column can be resized. */
+  background: var(--border);
+  transition:
+    background 0.12s ease,
+    width 0.12s ease,
+    height 0.12s ease;
+}
+/* Hovering anywhere on the header hints which columns are draggable. */
+.resizable-th:hover .col-resizer::after {
+  background: var(--text-muted);
+}
+/* Hovering the handle itself (or actively dragging) shows the accent grip. */
+.col-resizer:hover::after,
+body.col-resizing .col-resizer:hover::after {
+  background: var(--primary);
+  width: 3px;
+  height: 74%;
+}
+/* While dragging, kill selection/hover flicker across the whole page. */
+body.col-resizing {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+body.col-resizing * {
+  cursor: col-resize !important;
+}
+/* Per-column "restore default width" button in the column picker. */
+.column-picker-width-reset {
+  margin-left: auto;
+  border: 1px solid var(--line, #e3e9e6);
+  background: transparent;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--muted, #5a6b67);
+  padding: 1px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.column-picker-width-reset:hover {
+  border-color: var(--accent, #0f766e);
+  color: var(--accent, #0f766e);
+}
 .col-name-wide {
   min-width: 360px;
 }
@@ -930,7 +1122,9 @@ body.dark-mode .table tr:hover td {
 .match-badge.as-button {
   cursor: pointer;
   padding: 0;
-  transition: background 0.12s, transform 0.12s;
+  transition:
+    background 0.12s,
+    transform 0.12s;
 }
 .match-badge.as-button:hover:not(:disabled) {
   background: rgba(217, 79, 79, 0.25);
@@ -1049,7 +1243,10 @@ body.dark-mode .search-input .input {
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
 }
 .filter-chip:hover:not(:disabled) {
   border-color: var(--text-muted);
@@ -1203,7 +1400,7 @@ body.dark-mode .column-picker-row:hover {
 }
 .column-picker-row.drag-over {
   border-color: var(--primary);
-  background: rgba(79, 109, 240, 0.10);
+  background: rgba(79, 109, 240, 0.1);
 }
 body.dark-mode .column-picker-row.drag-over {
   background: rgba(100, 126, 245, 0.18);
@@ -1253,7 +1450,10 @@ body.dark-mode .column-picker-row.drag-over {
   font: inherit;
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s,
+    background 0.12s;
 }
 body.dark-mode .searchable-select-trigger {
   background: rgba(255, 255, 255, 0.04);
@@ -1371,7 +1571,7 @@ body.dark-mode .searchable-select-clear:hover {
   font-size: 13px;
 }
 .searchable-select-row.active {
-  background: rgba(79, 109, 240, 0.10);
+  background: rgba(79, 109, 240, 0.1);
 }
 body.dark-mode .searchable-select-row.active {
   background: rgba(100, 126, 245, 0.18);
@@ -1431,7 +1631,7 @@ body.dark-mode .supplier-picker-row:hover {
   background: rgba(79, 109, 240, 0.06);
 }
 body.dark-mode .supplier-picker-row.selected {
-  background: rgba(100, 126, 245, 0.10);
+  background: rgba(100, 126, 245, 0.1);
 }
 .supplier-picker-row.selected:hover {
   background: rgba(79, 109, 240, 0.12);
@@ -1467,7 +1667,9 @@ body.dark-mode .supplier-picker-row.selected:hover {
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
-  transition: color 0.12s, background 0.12s;
+  transition:
+    color 0.12s,
+    background 0.12s;
 }
 .supplier-picker-star:hover {
   background: rgba(192, 138, 22, 0.12);
@@ -1542,14 +1744,14 @@ body.dark-mode .supplier-chip-star {
   flex-shrink: 0;
 }
 .supplier-chip-remove:hover {
-  background: rgba(0, 0, 0, 0.10);
+  background: rgba(0, 0, 0, 0.1);
   color: var(--text);
 }
 body.dark-mode .supplier-chip-remove:hover {
   background: rgba(255, 255, 255, 0.14);
 }
 .supplier-chip.preferred .supplier-chip-remove:hover {
-  background: rgba(192, 138, 22, 0.30);
+  background: rgba(192, 138, 22, 0.3);
   color: #7d4f00;
 }
 body.dark-mode .supplier-chip.preferred .supplier-chip-remove:hover {
@@ -1712,6 +1914,7 @@ body.dark-mode .page-header-count {
 .stock-note-icon {
   display: inline-flex;
   align-items: center;
+  margin-left: 6px;
   color: var(--accent, #3b82f6);
   cursor: help;
 }
@@ -1879,7 +2082,10 @@ tr:hover .stock-cell .stock-edit-btn {
   text-align: center;
   background: rgba(79, 109, 240, 0.03);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.15s;
 }
 .drop-zone:hover {
   border-color: var(--primary);
@@ -2028,10 +2234,19 @@ tr:hover .stock-cell .stock-edit-btn {
   animation: heart-beat 1.4s ease-in-out infinite;
 }
 @keyframes heart-beat {
-  0%, 100% { transform: scale(1); }
-  20% { transform: scale(1.2); }
-  40% { transform: scale(1); }
-  60% { transform: scale(1.15); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  20% {
+    transform: scale(1.2);
+  }
+  40% {
+    transform: scale(1);
+  }
+  60% {
+    transform: scale(1.15);
+  }
 }
 
 .app-footer-track {
@@ -2067,19 +2282,44 @@ tr:hover .stock-cell .stock-edit-btn {
   animation-delay: 2.4s, 0s;
 }
 @keyframes footer-runner-sparse {
-  0% { left: -10%; opacity: 1; }
-  13% { left: 110%; opacity: 1; }
-  13.01% { left: -10%; opacity: 0; }
-  99.99% { left: -10%; opacity: 0; }
-  100% { left: -10%; opacity: 1; }
+  0% {
+    left: -10%;
+    opacity: 1;
+  }
+  13% {
+    left: 110%;
+    opacity: 1;
+  }
+  13.01% {
+    left: -10%;
+    opacity: 0;
+  }
+  99.99% {
+    left: -10%;
+    opacity: 0;
+  }
+  100% {
+    left: -10%;
+    opacity: 1;
+  }
 }
 @keyframes footer-pig-waddle {
-  0%, 100% { transform: scaleX(-1) translateY(0)    rotate(-4deg); }
-  50%      { transform: scaleX(-1) translateY(-2px) rotate(4deg); }
+  0%,
+  100% {
+    transform: scaleX(-1) translateY(0) rotate(-4deg);
+  }
+  50% {
+    transform: scaleX(-1) translateY(-2px) rotate(4deg);
+  }
 }
 @keyframes footer-cat-bounce {
-  0%, 100% { transform: scaleX(-1) translateY(0)    rotate(-2deg); }
-  50%      { transform: scaleX(-1) translateY(-4px) rotate(2deg); }
+  0%,
+  100% {
+    transform: scaleX(-1) translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: scaleX(-1) translateY(-4px) rotate(2deg);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-footer-runner,
@@ -2160,7 +2400,7 @@ body.dark-mode .modal-header-icon {
   color: var(--primary);
 }
 body.dark-mode .modal-header-icon-edit {
-  background: rgba(100, 126, 245, 0.20);
+  background: rgba(100, 126, 245, 0.2);
   color: #aab8ff;
 }
 .modal-header-icon-add {
@@ -2359,16 +2599,20 @@ body.dark-mode .blocked-by-group-count {
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 6px 20px rgba(20, 28, 60, 0.35),
+  box-shadow:
+    0 6px 20px rgba(20, 28, 60, 0.35),
     0 2px 6px rgba(0, 0, 0, 0.15);
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
 }
 body.dark-mode .floating-next {
   background: linear-gradient(135deg, #232c5a 0%, #2f3d85 100%);
 }
 .floating-next:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 10px 28px rgba(20, 28, 60, 0.45),
+  box-shadow:
+    0 10px 28px rgba(20, 28, 60, 0.45),
     0 4px 8px rgba(0, 0, 0, 0.18);
 }
 .floating-next:disabled {
@@ -2405,7 +2649,8 @@ body.dark-mode .floating-next {
 /* Highlight callout for user attention */
 .highlight-callout {
   border: 2px solid var(--primary) !important;
-  box-shadow: 0 0 0 4px rgba(79, 109, 240, 0.15),
+  box-shadow:
+    0 0 0 4px rgba(79, 109, 240, 0.15),
     0 8px 24px rgba(79, 109, 240, 0.18);
   position: relative;
   animation: callout-pulse 1.6s ease-in-out 2;
@@ -2413,11 +2658,13 @@ body.dark-mode .floating-next {
 @keyframes callout-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 4px rgba(79, 109, 240, 0.15),
+    box-shadow:
+      0 0 0 4px rgba(79, 109, 240, 0.15),
       0 8px 24px rgba(79, 109, 240, 0.18);
   }
   50% {
-    box-shadow: 0 0 0 8px rgba(79, 109, 240, 0.22),
+    box-shadow:
+      0 0 0 8px rgba(79, 109, 240, 0.22),
       0 8px 24px rgba(79, 109, 240, 0.28);
   }
 }
@@ -2514,11 +2761,11 @@ body.dark-mode .row-clickable:hover td {
   background: rgba(79, 109, 240, 0.14);
 }
 body.dark-mode .searchable-select-footer-action {
-  background: rgba(100, 126, 245, 0.10);
+  background: rgba(100, 126, 245, 0.1);
   color: #aab8ff;
 }
 body.dark-mode .searchable-select-footer-action:hover {
-  background: rgba(100, 126, 245, 0.20);
+  background: rgba(100, 126, 245, 0.2);
 }
 
 /* Compute-shortages hero — CTA panel for the shortage report list view */
@@ -2617,7 +2864,9 @@ body.dark-mode .compute-hero {
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 .compute-hero-cta:hover:not(:disabled) {
   transform: translateY(-1px);
@@ -2749,14 +2998,19 @@ body.dark-mode .shortage-count {
   visibility: hidden;
   opacity: 0;
   transform: translateY(-2px);
-  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0s linear 0.12s;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease,
+    visibility 0s linear 0.12s;
   pointer-events: none;
 }
 .cell-hover-wrap:hover .cell-hover-tooltip {
   visibility: visible;
   opacity: 1;
   transform: translateY(0);
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
 }
 .shortage-tooltip-header {
   font-size: 12px;
@@ -2940,7 +3194,10 @@ body.dark-mode .email-card-sent {
   text-align: left;
   font: inherit;
   color: inherit;
-  transition: border-color 0.12s ease, background 0.12s ease, transform 0.05s ease;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    transform 0.05s ease;
 }
 .existing-batch-row-btn:hover {
   border-color: var(--primary);
@@ -3048,7 +3305,9 @@ body.dark-mode .email-card-sent {
   cursor: pointer;
   text-align: left;
   box-shadow: 0 4px 14px rgba(20, 28, 60, 0.25);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 body.dark-mode .dashboard-hero {
   background: linear-gradient(135deg, #232c5a 0%, #2f3d85 100%);
@@ -3112,11 +3371,13 @@ body.dark-mode .dashboard-hero {
 @keyframes dashboard-hero-pulse {
   0%,
   100% {
-    box-shadow: 0 4px 14px rgba(20, 28, 60, 0.25),
+    box-shadow:
+      0 4px 14px rgba(20, 28, 60, 0.25),
       0 0 0 0 rgba(58, 76, 163, 0.45);
   }
   50% {
-    box-shadow: 0 4px 14px rgba(20, 28, 60, 0.25),
+    box-shadow:
+      0 4px 14px rgba(20, 28, 60, 0.25),
       0 0 0 12px rgba(58, 76, 163, 0);
   }
 }
@@ -3161,7 +3422,10 @@ body.dark-mode .dashboard-hero {
   cursor: pointer;
   text-align: left;
   overflow: hidden;
-  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    border-color 0.12s ease;
   box-shadow: var(--shadow-1);
   color: var(--text);
 }
@@ -3254,7 +3518,10 @@ body.dark-mode .dashboard-tile-cyan {
   cursor: pointer;
   text-align: left;
   box-shadow: var(--shadow-1);
-  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    border-color 0.12s ease;
   color: var(--text);
   min-width: 0;
   overflow: hidden;
@@ -3365,7 +3632,9 @@ body.dark-mode .dashboard-tile-cyan {
   border-radius: 12px;
   background: var(--bg-elev);
   box-shadow: var(--shadow-1);
-  transition: box-shadow 0.12s ease, transform 0.12s ease;
+  transition:
+    box-shadow 0.12s ease,
+    transform 0.12s ease;
 }
 .dashboard-order-tile:hover {
   transform: translateY(-1px);
@@ -3434,8 +3703,8 @@ body.dark-mode .dashboard-tile-cyan {
   padding: 14px 32px;
   border-radius: 24px;
   background:
-    radial-gradient(120% 140% at 100% 0%, rgba(150, 190, 235, 0.20) 0%, transparent 55%),
-    radial-gradient(120% 140% at 0% 100%, rgba(60, 75, 100, 0.30) 0%, transparent 55%),
+    radial-gradient(120% 140% at 100% 0%, rgba(150, 190, 235, 0.2) 0%, transparent 55%),
+    radial-gradient(120% 140% at 0% 100%, rgba(60, 75, 100, 0.3) 0%, transparent 55%),
     linear-gradient(135deg, #0a0d12 0%, #1c2230 50%, #303a52 100%);
   color: #fff;
   box-shadow:
@@ -3512,16 +3781,31 @@ body.dark-mode .dashboard-welcome-image {
   animation: dashboard-welcome-float-c 22s ease-in-out infinite;
 }
 @keyframes dashboard-welcome-float-a {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(-18px, 14px); }
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-18px, 14px);
+  }
 }
 @keyframes dashboard-welcome-float-b {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(22px, -16px); }
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(22px, -16px);
+  }
 }
 @keyframes dashboard-welcome-float-c {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(14px, 10px) scale(1.08); }
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(14px, 10px) scale(1.08);
+  }
 }
 
 .dashboard-welcome-content {
@@ -3636,7 +3920,7 @@ body.dark-mode .dashboard-welcome-image {
   gap: 10px;
   padding: 22px 28px;
   border-radius: 28px;
-  background: rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.1);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.22),
     inset 0 -20px 40px rgba(0, 0, 0, 0.18);
@@ -3663,12 +3947,24 @@ body.dark-mode .dashboard-welcome-image {
   animation: dashboard-welcome-glow-pulse 4.5s ease-in-out infinite;
 }
 @keyframes dashboard-welcome-mark-bob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
 }
 @keyframes dashboard-welcome-glow-pulse {
-  0%, 100% { opacity: 0.7; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.08); }
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
 }
 
 @media (max-width: 720px) {
@@ -3748,9 +4044,9 @@ body.dark-mode .dashboard-welcome-image {
 .skeleton-block {
   background: linear-gradient(
     90deg,
-    rgba(127, 127, 127, 0.10) 0%,
+    rgba(127, 127, 127, 0.1) 0%,
     rgba(127, 127, 127, 0.22) 50%,
-    rgba(127, 127, 127, 0.10) 100%
+    rgba(127, 127, 127, 0.1) 100%
   );
   background-size: 200% 100%;
   animation: dashboard-skeleton-shimmer 1.2s linear infinite;
@@ -3886,7 +4182,9 @@ body.dark-mode * {
    tells the user the card opens. */
 .maxprod-result.is-clickable {
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 .maxprod-result.is-clickable:hover {
   border-color: color-mix(in srgb, var(--primary) 60%, var(--border));
@@ -4062,8 +4360,12 @@ body.dark-mode * {
 }
 
 @keyframes maxprod-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .spinning {
   animation: maxprod-spin 0.8s linear infinite;
@@ -4318,7 +4620,9 @@ body.dark-mode .cost-status-pill.is-warn .cost-status-pill-num {
   cursor: pointer;
   text-align: left;
   color: inherit;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 .plan-reports-item:hover {
   background: rgba(79, 109, 240, 0.1);
@@ -4404,7 +4708,9 @@ body.dark-mode .modal-meta-strip {
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
 }
 .modal-tab:hover {
   color: var(--text);
@@ -4479,7 +4785,9 @@ body.dark-mode .modal-tab.active .modal-tab-count {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: rgba(0, 0, 0, 0.015);
-  transition: background 0.12s, border-color 0.12s;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
 }
 body.dark-mode .plan-row {
   background: rgba(255, 255, 255, 0.02);
@@ -4559,7 +4867,10 @@ body.dark-mode .plan-row {
   border-radius: var(--radius);
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
 }
 .sidebar-account-signout:hover {
   background: rgba(217, 79, 79, 0.18);
@@ -4725,7 +5036,7 @@ body.dark-mode .login-error {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   color: var(--text-muted);
-  background: rgba(127, 127, 127, 0.10);
+  background: rgba(127, 127, 127, 0.1);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -4760,7 +5071,9 @@ body.dark-mode .login-error {
   background: var(--bg-elev);
   color: var(--text);
   cursor: pointer;
-  transition: border-color 0.12s, background-color 0.12s;
+  transition:
+    border-color 0.12s,
+    background-color 0.12s;
 }
 .resolve-suggestion:hover:not(:disabled) {
   border-color: var(--primary);
@@ -4839,7 +5152,10 @@ body.dark-mode .login-error {
   background: var(--bg-elev);
   color: var(--text);
   cursor: pointer;
-  transition: transform 0.08s, box-shadow 0.12s, border-color 0.12s;
+  transition:
+    transform 0.08s,
+    box-shadow 0.12s,
+    border-color 0.12s;
 }
 .resolve-action:hover:not(:disabled) {
   transform: translateY(-1px);
@@ -5147,8 +5463,8 @@ body.dark-mode .workflow-task-row.instance.status-todo:hover {
 }
 
 .workflow-task-row.instance.status-in_progress {
-  background: rgba(79, 124, 255, 0.10);
-  border-color: rgba(79, 124, 255, 0.40);
+  background: rgba(79, 124, 255, 0.1);
+  border-color: rgba(79, 124, 255, 0.4);
 }
 .workflow-task-row.instance.status-in_progress:hover {
   background: rgba(79, 124, 255, 0.16);
@@ -5161,7 +5477,7 @@ body.dark-mode .workflow-task-row.instance.status-in_progress:hover {
 }
 
 .workflow-task-row.instance.status-done {
-  background: rgba(56, 161, 105, 0.10);
+  background: rgba(56, 161, 105, 0.1);
   border-color: rgba(56, 161, 105, 0.35);
 }
 .workflow-task-row.instance.status-done:hover {
@@ -5315,7 +5631,9 @@ body.dark-mode .workflow-task-row.instance.status-done:hover {
   cursor: pointer;
   width: 100%;
   font: inherit;
-  transition: border-color 0.12s, background 0.12s;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
 }
 
 .picker-item:hover {
@@ -5454,7 +5772,10 @@ body.dark-mode .picker-item:hover {
   padding: 0;
   border-radius: 4px;
   background: rgba(127, 127, 127, 0.18);
-  transition: background 0.15s, transform 0.1s, filter 0.15s;
+  transition:
+    background 0.15s,
+    transform 0.1s,
+    filter 0.15s;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -6069,7 +6390,9 @@ body.dark-mode .clickable-row:hover {
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  transition: transform 0.08s ease, box-shadow 0.08s ease;
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.08s ease;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -6193,7 +6516,8 @@ body.dark-mode .tag.pricing-loading {
 }
 
 @keyframes pulse-dot {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 0.3;
     transform: scale(0.85);
   }
@@ -6210,7 +6534,7 @@ body.dark-mode .tag.pricing-loading {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: rgba(79, 109, 240, 0.10);
+  background: rgba(79, 109, 240, 0.1);
   border: 1px solid rgba(79, 109, 240, 0.35);
   border-left: 4px solid var(--primary);
   border-radius: var(--radius);

@@ -19,11 +19,21 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
-import { IconTrash, IconPlus, IconCheck, IconEdit, IconImport, IconChevronDown, IconChevronRight } from '../components/Icons';
+import { useColumnResize } from '../utils/useColumnResize';
+import {
+  IconTrash,
+  IconPlus,
+  IconCheck,
+  IconEdit,
+  IconImport,
+  IconChevronDown,
+  IconChevronRight,
+} from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import UnmatchedRowModal, { type ResolveAction } from '../components/UnmatchedRowModal';
 import BulkUnmatchedModal from '../components/BulkUnmatchedModal';
+import SegmentedControl from '../components/SegmentedControl';
 
 interface Props {
   onNavigate?: (key: ViewKey) => void;
@@ -84,9 +94,9 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     row: StockRow;
     snapshotId: string;
   } | null>(null);
-  const [confirmDeleteSnapshot, setConfirmDeleteSnapshot] = useState<
-    'raw' | 'component' | null
-  >(null);
+  const [confirmDeleteSnapshot, setConfirmDeleteSnapshot] = useState<'raw' | 'component' | null>(
+    null,
+  );
   // Queue of unmatched rows for the resolve-row modal. Single-row clicks push a
   // 1-element queue. The modal shows the head of the queue and advances on
   // each resolve/skip.
@@ -120,6 +130,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     [t],
   );
   const stockColumns = useColumnPrefs('stockImport', STOCK_COLUMNS);
+  const { decorateHeader } = useColumnResize(stockColumns.setWidth);
 
   const loadCurrent = async () => {
     const [stock, rms, cs, settings] = await Promise.all([
@@ -161,12 +172,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         lastPurchasePriceNet: row.netPrice,
         currency: row.currency,
       });
-      await window.electronAPI.resolveStockMatch(
-        snapshotId,
-        row.rowKey,
-        'component',
-        created.id,
-      );
+      await window.electronAPI.resolveStockMatch(snapshotId, row.rowKey, 'component', created.id);
     }
   };
 
@@ -191,11 +197,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
 
   // Applies a single resolution decision against its snapshot. Reused by both
   // the single-row modal and the bulk-apply loop.
-  const applyDecision = async (
-    row: StockRow,
-    kind: 'raw' | 'component',
-    action: ResolveAction,
-  ) => {
+  const applyDecision = async (row: StockRow, kind: 'raw' | 'component', action: ResolveAction) => {
     const snapshotId = kind === 'raw' ? rawSnapshot?.id : compSnapshot?.id;
     if (!snapshotId) throw new Error('No snapshot to resolve against');
     if (action.type === 'add-new') {
@@ -257,9 +259,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     }
   };
 
-  const handleBulkApply = async (
-    decisions: { row: StockRow; action: ResolveAction }[],
-  ) => {
+  const handleBulkApply = async (decisions: { row: StockRow; action: ResolveAction }[]) => {
     if (!bulkResolve) return;
     setError(null);
     setAdoptBusy(true);
@@ -354,8 +354,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     });
   };
 
-  const removeStaged = (path: string) =>
-    setStaged((prev) => prev.filter((f) => f.path !== path));
+  const removeStaged = (path: string) => setStaged((prev) => prev.filter((f) => f.path !== path));
 
   const setStagedKind = (path: string, kind: 'raw' | 'component') =>
     setStaged((prev) => prev.map((f) => (f.path === path ? { ...f, kind } : f)));
@@ -507,33 +506,89 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     const headerFor = (id: string): React.ReactNode => {
       switch (id) {
         case 'name':
-          return <th key={id} className="col-name-wide">{t.name}</th>;
+          return (
+            <th key={id} className="col-name-wide">
+              {t.name}
+            </th>
+          );
         case 'match':
-          return <th key={id} className="col-w-match">Match</th>;
+          return (
+            <th key={id} className="col-w-match">
+              Match
+            </th>
+          );
         case 'qty':
-          return <th key={id} className="num col-w-sm">{t.quantity}</th>;
+          return (
+            <th key={id} className="num col-w-sm">
+              {t.quantity}
+            </th>
+          );
         case 'netUnit':
-          return <th key={id} className="num col-w-sm">{t.stockNetUnit}</th>;
+          return (
+            <th key={id} className="num col-w-sm">
+              {t.stockNetUnit}
+            </th>
+          );
         case 'vatUnit':
-          return <th key={id} className="num col-w-sm">{t.stockVatUnit}</th>;
+          return (
+            <th key={id} className="num col-w-sm">
+              {t.stockVatUnit}
+            </th>
+          );
         case 'grossUnit':
-          return <th key={id} className="num col-w-sm">{t.stockGrossUnit}</th>;
+          return (
+            <th key={id} className="num col-w-sm">
+              {t.stockGrossUnit}
+            </th>
+          );
         case 'currency':
-          return <th key={id} className="col-w-sm">{t.currency}</th>;
+          return (
+            <th key={id} className="col-w-sm">
+              {t.currency}
+            </th>
+          );
         case 'netTotal':
-          return <th key={id} className="num col-w-sm">{t.stockNetTotal}</th>;
+          return (
+            <th key={id} className="num col-w-sm">
+              {t.stockNetTotal}
+            </th>
+          );
         case 'vatTotal':
-          return <th key={id} className="num col-w-sm">{t.stockVatTotal}</th>;
+          return (
+            <th key={id} className="num col-w-sm">
+              {t.stockVatTotal}
+            </th>
+          );
         case 'grossTotal':
-          return <th key={id} className="num col-w-sm">{t.stockGrossTotal}</th>;
+          return (
+            <th key={id} className="num col-w-sm">
+              {t.stockGrossTotal}
+            </th>
+          );
         case 'symbol':
-          return <th key={id} className="col-w-md">{t.symbol}</th>;
+          return (
+            <th key={id} className="col-w-md">
+              {t.symbol}
+            </th>
+          );
         case 'manufacturer':
-          return <th key={id} className="col-w-md">{t.stockManufacturer}</th>;
+          return (
+            <th key={id} className="col-w-md">
+              {t.stockManufacturer}
+            </th>
+          );
         case 'warehouse':
-          return <th key={id} className="col-w-md">{t.stockWarehouse}</th>;
+          return (
+            <th key={id} className="col-w-md">
+              {t.stockWarehouse}
+            </th>
+          );
         case 'notes':
-          return <th key={id} className="col-w-lg">{t.notes}</th>;
+          return (
+            <th key={id} className="col-w-lg">
+              {t.notes}
+            </th>
+          );
         default:
           return null;
       }
@@ -586,25 +641,61 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     const cellFor = (id: string, r: StockRow): React.ReactNode => {
       switch (id) {
         case 'name':
-          return <td key={id} className="col-name col-wrap">{r.name}</td>;
+          return (
+            <td key={id} className="col-name col-wrap">
+              {r.name}
+            </td>
+          );
         case 'match':
-          return <td key={id} className="col-match">{matchCell(r)}</td>;
+          return (
+            <td key={id} className="col-match">
+              {matchCell(r)}
+            </td>
+          );
         case 'qty':
-          return <td key={id} className="num">{r.qty}</td>;
+          return (
+            <td key={id} className="num">
+              {r.qty}
+            </td>
+          );
         case 'netUnit':
-          return <td key={id} className="num">{cell(r.netPrice, true)}</td>;
+          return (
+            <td key={id} className="num">
+              {cell(r.netPrice, true)}
+            </td>
+          );
         case 'vatUnit':
-          return <td key={id} className="num">{cell(r.vatPrice, true)}</td>;
+          return (
+            <td key={id} className="num">
+              {cell(r.vatPrice, true)}
+            </td>
+          );
         case 'grossUnit':
-          return <td key={id} className="num">{cell(r.grossPrice, true)}</td>;
+          return (
+            <td key={id} className="num">
+              {cell(r.grossPrice, true)}
+            </td>
+          );
         case 'currency':
           return <td key={id}>{cell(r.currency, true)}</td>;
         case 'netTotal':
-          return <td key={id} className="num">{cell(r.oNet, true)}</td>;
+          return (
+            <td key={id} className="num">
+              {cell(r.oNet, true)}
+            </td>
+          );
         case 'vatTotal':
-          return <td key={id} className="num">{cell(r.oVat, true)}</td>;
+          return (
+            <td key={id} className="num">
+              {cell(r.oVat, true)}
+            </td>
+          );
         case 'grossTotal':
-          return <td key={id} className="num">{cell(r.oGross, true)}</td>;
+          return (
+            <td key={id} className="num">
+              {cell(r.oGross, true)}
+            </td>
+          );
         case 'symbol':
           return <td key={id}>{cell(r.mpFirmaSymbol, false)}</td>;
         case 'manufacturer':
@@ -612,7 +703,11 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         case 'warehouse':
           return <td key={id}>{cell(r.warehouse, false)}</td>;
         case 'notes':
-          return <td key={id} className="col-wrap">{cell(r.notes, true)}</td>;
+          return (
+            <td key={id} className="col-wrap">
+              {cell(r.notes, true)}
+            </td>
+          );
         default:
           return null;
       }
@@ -672,23 +767,24 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
             toggle={stockColumns.toggle}
             reorder={stockColumns.reorder}
             reset={stockColumns.reset}
+            widths={stockColumns.widths}
+            resetWidth={stockColumns.resetWidth}
           />
         </div>
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                {stockColumns.orderedVisibleIds.map((id) => headerFor(id))}
+                {stockColumns.orderedVisibleIds.map((id) =>
+                  decorateHeader(headerFor(id), id, stockColumns.widths[id]),
+                )}
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={stockColumns.orderedVisibleIds.length + 1}
-                    className="hint"
-                  >
+                  <td colSpan={stockColumns.orderedVisibleIds.length + 1} className="hint">
                     {query || unmatchedOnly ? '—' : t.noData}
                   </td>
                 </tr>
@@ -718,10 +814,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
               ))}
               {filtered.length > 200 && (
                 <tr>
-                  <td
-                    colSpan={stockColumns.orderedVisibleIds.length + 1}
-                    className="hint"
-                  >
+                  <td colSpan={stockColumns.orderedVisibleIds.length + 1} className="hint">
                     … +{filtered.length - 200}
                   </td>
                 </tr>
@@ -760,9 +853,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <h2 style={{ margin: 0, userSelect: 'none' }}>
-              <span style={{ display: 'inline-block', width: 18 }}>
-                {expanded ? '▾' : '▸'}
-              </span>
+              <span style={{ display: 'inline-block', width: 18 }}>{expanded ? '▾' : '▸'}</span>
               {title} ({rows.length})
             </h2>
             {unmatched > 0 && (
@@ -803,9 +894,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         <HeaderNav />
         <h1>{t.stockImport}</h1>
         {(rawRows.length > 0 || compRows.length > 0) && (
-          <span className="page-header-count">
-            ({rawRows.length + compRows.length})
-          </span>
+          <span className="page-header-count">({rawRows.length + compRows.length})</span>
         )}
         <button
           type="button"
@@ -819,7 +908,11 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         </button>
       </div>
       {taskBanner}
-      {info && <div className="hint" style={{ marginTop: 8 }}>{info}</div>}
+      {info && (
+        <div className="hint" style={{ marginTop: 8 }}>
+          {info}
+        </div>
+      )}
       <p className="subtitle">
         Import xlsx z MP Firma. Aplikacja dopasuje pozycje do istniejących surowców i komponentów po
         symbolu lub nazwie. Pozycje wieloznaczne lub nierozpoznane można rozstrzygnąć ręcznie.
@@ -839,11 +932,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
           .sort()
           .pop();
         return (
-          <div
-            className="bsx-banner"
-            role="region"
-            aria-label={t.bsxFetchStock}
-          >
+          <div className="bsx-banner" role="region" aria-label={t.bsxFetchStock}>
             <div className="bsx-banner-icon" aria-hidden="true">
               <IconImport size={32} />
             </div>
@@ -855,9 +944,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
                   {t.bsxLastFetched}: {new Date(lastBsxAt).toLocaleString()}
                 </div>
               )}
-              {!bsxConfigured && (
-                <div className="bsx-banner-warning">{t.bsxNotConfigured}</div>
-              )}
+              {!bsxConfigured && <div className="bsx-banner-warning">{t.bsxNotConfigured}</div>}
             </div>
             <div className="bsx-banner-action">
               <button
@@ -914,58 +1001,60 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
             onRemoveFile={removeStaged}
           />
 
-        {staged.length > 0 && (
-          <>
-            <div className="table-wrap" style={{ marginTop: 12 }}>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th className="col-w-xl">{t.name}</th>
-                    <th className="col-w-md">Typ</th>
-                    <th className="actions">{t.actionsHeader}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {staged.map((f) => (
-                    <tr key={f.path}>
-                      <td className="col-name col-wrap">{f.name}</td>
-                      <td>
-                        <SearchableSelect
-                          options={[
-                            { value: 'raw', label: t.rawMaterials },
-                            { value: 'component', label: t.components },
-                          ]}
-                          value={f.kind}
-                          onChange={(val) =>
-                            setStagedKind(f.path, val as 'raw' | 'component')
-                          }
-                        />
-                      </td>
-                      <td className="actions">
-                        <button
-                          className="btn btn-sm soft-danger"
-                          onClick={() => removeStaged(f.path)}
-                          title={t.delete}
-                        >
-                          <IconTrash size={13} /> {t.delete}
-                        </button>
-                      </td>
+          {staged.length > 0 && (
+            <>
+              <div className="table-wrap" style={{ marginTop: 12 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th className="col-w-xl">{t.name}</th>
+                      <th className="col-w-md">Typ</th>
+                      <th className="actions">{t.actionsHeader}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="btn-row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
-              <button className="btn primary" disabled={busy} onClick={startImport}>
-                <IconPlus size={14} /> {busy ? t.loading : t.importStockFiles}
-              </button>
-            </div>
-          </>
-        )}
+                  </thead>
+                  <tbody>
+                    {staged.map((f) => (
+                      <tr key={f.path}>
+                        <td className="col-name col-wrap">{f.name}</td>
+                        <td>
+                          <SearchableSelect
+                            options={[
+                              { value: 'raw', label: t.rawMaterials },
+                              { value: 'component', label: t.components },
+                            ]}
+                            value={f.kind}
+                            onChange={(val) => setStagedKind(f.path, val as 'raw' | 'component')}
+                          />
+                        </td>
+                        <td className="actions">
+                          <button
+                            className="btn btn-sm soft-danger"
+                            onClick={() => removeStaged(f.path)}
+                            title={t.delete}
+                          >
+                            <IconTrash size={13} /> {t.delete}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="btn-row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+                <button className="btn primary" disabled={busy} onClick={startImport}>
+                  <IconPlus size={14} /> {busy ? t.loading : t.importStockFiles}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {error && <div className="error-text" style={{ marginTop: 8 }}>{error}</div>}
+      {error && (
+        <div className="error-text" style={{ marginTop: 8 }}>
+          {error}
+        </div>
+      )}
       {summary && (
         <div className="hint" style={{ marginTop: 8 }}>
           {t.rowsImported}: {(summary.rawCount ?? 0) + (summary.componentCount ?? 0)} ·{' '}
@@ -981,9 +1070,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         </div>
       )}
 
-      {rawRows.length === 0 && compRows.length === 0 && (
-        <div className="card">{t.noStockYet}</div>
-      )}
+      {rawRows.length === 0 && compRows.length === 0 && <div className="card">{t.noStockYet}</div>}
 
       {renderSnapshotCard('raw', rawRows, rawSnapshot)}
       {renderSnapshotCard('component', compRows, compSnapshot)}
@@ -1091,119 +1178,119 @@ const EditRowDialog: React.FC<EditRowProps> = ({ row, onChange, onSave, onCancel
           onClose={onCancel}
         />
         <div className="modal-body">
-        <div className="form-row">
-          <label>{t.name}</label>
-          <input
-            className="input"
-            value={row.name}
-            onChange={(e) => onChange({ ...row, name: e.target.value })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.symbol}</label>
-          <input
-            className="input"
-            value={row.mpFirmaSymbol ?? ''}
-            onChange={(e) => onChange({ ...row, mpFirmaSymbol: e.target.value || undefined })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.stockManufacturer}</label>
-          <input
-            className="input"
-            value={row.manufacturerSymbol ?? ''}
-            onChange={(e) =>
-              onChange({ ...row, manufacturerSymbol: e.target.value || undefined })
-            }
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.stockWarehouse}</label>
-          <input
-            className="input"
-            value={row.warehouse ?? ''}
-            onChange={(e) => onChange({ ...row, warehouse: e.target.value || undefined })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.quantity}</label>
-          <NumberInput
-            className="input"
-            step="0.01"
-            value={row.qty}
-            emptyValue={0}
-            onChange={(v) => onChange({ ...row, qty: v ?? 0 })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.stockNetUnit}</label>
-          <NumberInput
-            className="input"
-            step="0.01"
-            value={row.netPrice}
-            onChange={(v) => onChange({ ...row, netPrice: v })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.stockVatUnit}</label>
-          <NumberInput
-            className="input"
-            step="0.01"
-            value={row.vatPrice}
-            onChange={(v) => onChange({ ...row, vatPrice: v })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.stockGrossUnit}</label>
-          <NumberInput
-            className="input"
-            step="0.01"
-            value={row.grossPrice}
-            onChange={(v) => onChange({ ...row, grossPrice: v })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.currency}</label>
-          <input
-            className="input"
-            value={row.currency ?? ''}
-            onChange={(e) => onChange({ ...row, currency: e.target.value || undefined })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.stockNetTotal}</label>
-          <NumberInput
-            className="input"
-            step="0.01"
-            value={row.oNet}
-            onChange={(v) => onChange({ ...row, oNet: v })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.stockVatTotal}</label>
-          <NumberInput
-            className="input"
-            step="0.01"
-            value={row.oVat}
-            onChange={(v) => onChange({ ...row, oVat: v })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.stockGrossTotal}</label>
-          <NumberInput
-            className="input"
-            step="0.01"
-            value={row.oGross}
-            onChange={(v) => onChange({ ...row, oGross: v })}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t.notes}</label>
-          <textarea
-            value={row.notes ?? ''}
-            onChange={(e) => onChange({ ...row, notes: e.target.value || undefined })}
-          />
-        </div>
+          <div className="form-row">
+            <label>{t.name}</label>
+            <input
+              className="input"
+              value={row.name}
+              onChange={(e) => onChange({ ...row, name: e.target.value })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.symbol}</label>
+            <input
+              className="input"
+              value={row.mpFirmaSymbol ?? ''}
+              onChange={(e) => onChange({ ...row, mpFirmaSymbol: e.target.value || undefined })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.stockManufacturer}</label>
+            <input
+              className="input"
+              value={row.manufacturerSymbol ?? ''}
+              onChange={(e) =>
+                onChange({ ...row, manufacturerSymbol: e.target.value || undefined })
+              }
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.stockWarehouse}</label>
+            <input
+              className="input"
+              value={row.warehouse ?? ''}
+              onChange={(e) => onChange({ ...row, warehouse: e.target.value || undefined })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.quantity}</label>
+            <NumberInput
+              className="input"
+              step="0.01"
+              value={row.qty}
+              emptyValue={0}
+              onChange={(v) => onChange({ ...row, qty: v ?? 0 })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.stockNetUnit}</label>
+            <NumberInput
+              className="input"
+              step="0.01"
+              value={row.netPrice}
+              onChange={(v) => onChange({ ...row, netPrice: v })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.stockVatUnit}</label>
+            <NumberInput
+              className="input"
+              step="0.01"
+              value={row.vatPrice}
+              onChange={(v) => onChange({ ...row, vatPrice: v })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.stockGrossUnit}</label>
+            <NumberInput
+              className="input"
+              step="0.01"
+              value={row.grossPrice}
+              onChange={(v) => onChange({ ...row, grossPrice: v })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.currency}</label>
+            <input
+              className="input"
+              value={row.currency ?? ''}
+              onChange={(e) => onChange({ ...row, currency: e.target.value || undefined })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.stockNetTotal}</label>
+            <NumberInput
+              className="input"
+              step="0.01"
+              value={row.oNet}
+              onChange={(v) => onChange({ ...row, oNet: v })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.stockVatTotal}</label>
+            <NumberInput
+              className="input"
+              step="0.01"
+              value={row.oVat}
+              onChange={(v) => onChange({ ...row, oVat: v })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.stockGrossTotal}</label>
+            <NumberInput
+              className="input"
+              step="0.01"
+              value={row.oGross}
+              onChange={(v) => onChange({ ...row, oGross: v })}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t.notes}</label>
+            <textarea
+              value={row.notes ?? ''}
+              onChange={(e) => onChange({ ...row, notes: e.target.value || undefined })}
+            />
+          </div>
         </div>
         <div className="modal-footer">
           <button className="btn" onClick={onCancel}>
@@ -1272,7 +1359,8 @@ const StockConflictModal: React.FC<StockConflictModalProps> = ({
           onClose={onCancel}
         />
         <div className="modal-body">
-          <div className="toolbar-actions" style={{ marginBottom: 10 }}>
+          <div className="apply-all-row">
+            <span className="apply-all-label">{t.applyToAllLabel}</span>
             <button className="btn btn-sm" onClick={() => setAll('keep')}>
               {t.stockConflictKeepAll}
             </button>
@@ -1307,20 +1395,16 @@ const StockConflictModal: React.FC<StockConflictModalProps> = ({
                       </td>
                       <td className="num">{fmtQty(c.importedQty, c.unit)}</td>
                       <td>
-                        <div className="btn-row">
-                          <button
-                            className={`btn btn-sm ${action === 'keep' ? 'primary-filled' : ''}`}
-                            onClick={() => setActions((p) => ({ ...p, [key]: 'keep' }))}
-                          >
-                            {t.stockConflictKeep}
-                          </button>
-                          <button
-                            className={`btn btn-sm ${action === 'take' ? 'primary-filled' : ''}`}
-                            onClick={() => setActions((p) => ({ ...p, [key]: 'take' }))}
-                          >
-                            {t.stockConflictTake}
-                          </button>
-                        </div>
+                        <SegmentedControl
+                          size="sm"
+                          ariaLabel={c.name}
+                          value={action}
+                          onChange={(v) => setActions((p) => ({ ...p, [key]: v }))}
+                          options={[
+                            { value: 'keep', label: t.stockConflictKeep, tone: 'neutral' },
+                            { value: 'take', label: t.stockConflictTake, tone: 'success' },
+                          ]}
+                        />
                       </td>
                     </tr>
                   );

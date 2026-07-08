@@ -26,9 +26,22 @@ import OverageCell from '../components/OverageCell';
 import ColumnPicker from '../components/ColumnPicker';
 import HoverTooltip from '../components/HoverTooltip';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
-import { IconEdit, IconTrash, IconPlus, IconStar, IconClose, IconEye, IconDuplicate, IconImport, IconInfo, IconSettings } from '../components/Icons';
+import { useColumnResize } from '../utils/useColumnResize';
+import {
+  IconEdit,
+  IconTrash,
+  IconPlus,
+  IconStar,
+  IconClose,
+  IconEye,
+  IconDuplicate,
+  IconImport,
+  IconInfo,
+  IconSettings,
+} from '../components/Icons';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
+import SegmentedControl from '../components/SegmentedControl';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import {
   exportComponentsCsv,
@@ -140,38 +153,94 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     toggle,
     reorder,
     reset: resetColumns,
+    widths,
+    setWidth,
+    resetWidth,
     orderedColumns,
     orderedVisibleIds,
   } = useColumnPrefs(prefsKey, COLUMNS);
+  const { decorateHeader } = useColumnResize(setWidth);
 
   const headerFor = (id: string): React.ReactNode => {
     switch (id) {
       case 'name':
-        return <th key={id} className="col-w-lg">{t.name}</th>;
+        return (
+          <th key={id} className="col-w-lg">
+            {t.name}
+          </th>
+        );
       case 'symbol':
-        return <th key={id} className="col-w-md">{t.symbol}</th>;
+        return (
+          <th key={id} className="col-w-md">
+            {t.symbol}
+          </th>
+        );
       case 'stock':
-        return <th key={id} className="num col-w-md">{t.stock}</th>;
+        return (
+          <th key={id} className="num col-w-md">
+            {t.stock}
+          </th>
+        );
       case 'type':
-        return <th key={id} className="col-w-sm">Typ</th>;
+        return (
+          <th key={id} className="col-w-sm">
+            Typ
+          </th>
+        );
       case 'suppliers':
-        return <th key={id} className="col-w-xl">{t.suppliers}</th>;
+        return (
+          <th key={id} className="col-w-xl">
+            {t.suppliers}
+          </th>
+        );
       case 'moq':
-        return <th key={id} className="num col-w-sm">{t.moq}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.moq}
+          </th>
+        );
       case 'leadTime':
-        return <th key={id} className="num col-w-sm">{t.leadTime}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.leadTime}
+          </th>
+        );
       case 'price':
-        return <th key={id} className="num col-w-sm">{t.price}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.price}
+          </th>
+        );
       case 'overage':
-        return <th key={id} className="num col-w-sm">{t.overage}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.overage}
+          </th>
+        );
       case 'capacity':
-        return <th key={id} className="num col-w-sm">{t.packingCapacity}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.packingCapacity}
+          </th>
+        );
       case 'consumes':
-        return <th key={id} className="num col-w-sm">{t.componentDependencies}</th>;
+        return (
+          <th key={id} className="num col-w-sm">
+            {t.componentDependencies}
+          </th>
+        );
       case 'currency':
-        return <th key={id} className="col-w-sm">{t.currency}</th>;
+        return (
+          <th key={id} className="col-w-sm">
+            {t.currency}
+          </th>
+        );
       case 'notes':
-        return <th key={id} className="col-w-lg">{t.notes}</th>;
+        return (
+          <th key={id} className="col-w-lg">
+            {t.notes}
+          </th>
+        );
       default:
         return null;
     }
@@ -216,13 +285,29 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       case 'type':
         return <td key={id}>{c.type}</td>;
       case 'suppliers':
-        return <td key={id} className="col-wrap">{renderSupplierChips(c)}</td>;
+        return (
+          <td key={id} className="col-wrap">
+            {renderSupplierChips(c)}
+          </td>
+        );
       case 'moq':
-        return <td key={id} className="num">{c.moq ?? ''}</td>;
+        return (
+          <td key={id} className="num">
+            {c.moq ?? ''}
+          </td>
+        );
       case 'leadTime':
-        return <td key={id} className="num">{c.leadTimeDays ?? ''}</td>;
+        return (
+          <td key={id} className="num">
+            {c.leadTimeDays ?? ''}
+          </td>
+        );
       case 'price':
-        return <td key={id} className="num">{c.lastPurchasePriceNet ?? ''}</td>;
+        return (
+          <td key={id} className="num">
+            {c.lastPurchasePriceNet ?? ''}
+          </td>
+        );
       case 'overage':
         return (
           <OverageCell
@@ -237,9 +322,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
           <td key={id} className="num">
             {c.capacity !== undefined
               ? `${c.capacity.toLocaleString()} ${
-                  (c.capacityUnit ?? 'units') === 'units'
-                    ? t.unitUnits
-                    : c.capacityUnit
+                  (c.capacityUnit ?? 'units') === 'units' ? t.unitUnits : c.capacityUnit
                 }`
               : ''}
           </td>
@@ -247,15 +330,15 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       case 'consumes': {
         const deps = c.dependencies ?? [];
         if (deps.length === 0) {
-          return <td key={id} className="num"><span className="hint">0</span></td>;
+          return (
+            <td key={id} className="num">
+              <span className="hint">0</span>
+            </td>
+          );
         }
         return (
           <td key={id} className="num">
-            <HoverTooltip
-              align="right"
-              triggerClassName="count-bubble"
-              trigger={deps.length}
-            >
+            <HoverTooltip align="right" triggerClassName="count-bubble" trigger={deps.length}>
               <div className="shortage-tooltip-header">
                 {t.componentDependencies} — {deps.length}
               </div>
@@ -282,7 +365,11 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       case 'currency':
         return <td key={id}>{c.currency ?? ''}</td>;
       case 'notes':
-        return <td key={id} className="col-wrap">{c.notes ?? ''}</td>;
+        return (
+          <td key={id} className="col-wrap">
+            {c.notes ?? ''}
+          </td>
+        );
       default:
         return null;
     }
@@ -416,8 +503,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     // Only meaningful for secondary kind. Wipe on primary so a user toggling
     // a row from secondary → primary doesn't leave dangling values.
     capacity: kind === 'secondary' ? e.capacity : undefined,
-    capacityUnit:
-      kind === 'secondary' ? e.capacityUnit ?? 'units' : undefined,
+    capacityUnit: kind === 'secondary' ? (e.capacityUnit ?? 'units') : undefined,
     dependencies: kind === 'secondary' ? (e.dependencies ?? []) : undefined,
   });
 
@@ -706,12 +792,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       <div className="card">
         <div className="toolbar">
           <div className="toolbar-actions">
-            <ExportImportButtons
-              format="csv"
-              onExport={onExport}
-              onImport={onImport}
-              busy={busy}
-            />
+            <ExportImportButtons format="csv" onExport={onExport} onImport={onImport} busy={busy} />
             <button
               className="btn btn-import"
               onClick={onClickImportXlsx}
@@ -734,6 +815,8 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
               toggle={toggle}
               reorder={reorder}
               reset={resetColumns}
+              widths={widths}
+              resetWidth={resetWidth}
             />
             <button
               className="btn danger"
@@ -751,13 +834,21 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
             <SearchInput value={query} onChange={setQuery} block />
           </div>
         </div>
-        {error && <div className="error-text" style={{ marginBottom: 8 }}>{error}</div>}
-        {info && <div className="hint" style={{ marginBottom: 8 }}>{info}</div>}
+        {error && (
+          <div className="error-text" style={{ marginBottom: 8 }}>
+            {error}
+          </div>
+        )}
+        {info && (
+          <div className="hint" style={{ marginBottom: 8 }}>
+            {info}
+          </div>
+        )}
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                {orderedVisibleIds.map((id) => headerFor(id))}
+                {orderedVisibleIds.map((id) => decorateHeader(headerFor(id), id, widths[id]))}
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
@@ -812,10 +903,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       </div>
 
       {editing && (
-        <div
-          className="modal-overlay"
-          onClick={closeEditor}
-        >
+        <div className="modal-overlay" onClick={closeEditor}>
           <div
             className={`modal modal-md${editingReadOnly ? ' modal-readonly' : ''}`}
             onClick={(e) => e.stopPropagation()}
@@ -841,175 +929,177 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
               onClose={closeEditor}
             />
             <div className="modal-body">
-            {kind === 'secondary' && (
-              <div className="modal-tabs">
-                <button
-                  type="button"
-                  className={`modal-tab ${modalTab === 'basics' ? 'active' : ''}`}
-                  onClick={() => setModalTab('basics')}
-                >
-                  <span>{t.productTabBasics}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`modal-tab ${modalTab === 'dependencies' ? 'active' : ''}`}
-                  onClick={() => setModalTab('dependencies')}
-                >
-                  <span>{t.componentDependencies}</span>
-                  <span className="modal-tab-count">{editing.dependencies?.length ?? 0}</span>
-                </button>
-                <div className="modal-tabs-spacer" />
-              </div>
-            )}
-            {(kind !== 'secondary' || modalTab === 'basics') && (<>
-            <div className="form-row">
-              <label>{t.name}</label>
-              <input
-                className="input"
-                value={editing.name ?? ''}
-                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                disabled={editingReadOnly}
-              />
-            </div>
-            {kind === 'secondary' && (
-              <>
-                <div className="form-row">
-                  <label>{t.packingCapacity}</label>
-                  <NumberInput
-                    className="input"
-                    value={editing.capacity}
-                    onChange={(v) => setEditing({ ...editing, capacity: v })}
-                    disabled={editingReadOnly}
-                  />
-                </div>
-                <div className="form-row">
-                  <label>{t.packingCapacityUnit}</label>
-                  <select
-                    className="input"
-                    value={editing.capacityUnit ?? 'units'}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        capacityUnit: e.target.value as PackingCapacityUnit,
-                      })
-                    }
-                    disabled={editingReadOnly}
+              {kind === 'secondary' && (
+                <div className="modal-tabs">
+                  <button
+                    type="button"
+                    className={`modal-tab ${modalTab === 'basics' ? 'active' : ''}`}
+                    onClick={() => setModalTab('basics')}
                   >
-                    <option value="units">{t.unitUnits}</option>
-                    <option value="m">m</option>
-                    <option value="kg">kg</option>
-                    <option value="l">l</option>
-                  </select>
+                    <span>{t.productTabBasics}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`modal-tab ${modalTab === 'dependencies' ? 'active' : ''}`}
+                    onClick={() => setModalTab('dependencies')}
+                  >
+                    <span>{t.componentDependencies}</span>
+                    <span className="modal-tab-count">{editing.dependencies?.length ?? 0}</span>
+                  </button>
+                  <div className="modal-tabs-spacer" />
                 </div>
-              </>
-            )}
-            {kind === 'primary' && (
-              <div className="form-row">
-                <label>Typ</label>
-                <SearchableSelect
-                  options={TYPES.map((tt) => ({ value: tt, label: tt }))}
-                  value={editing.type ?? 'other'}
-                  onChange={(val) => setEditing({ ...editing, type: val as ComponentType })}
-                  disabled={editingReadOnly}
+              )}
+              {(kind !== 'secondary' || modalTab === 'basics') && (
+                <>
+                  <div className="form-row">
+                    <label>{t.name}</label>
+                    <input
+                      className="input"
+                      value={editing.name ?? ''}
+                      onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                      disabled={editingReadOnly}
+                    />
+                  </div>
+                  {kind === 'secondary' && (
+                    <>
+                      <div className="form-row">
+                        <label>{t.packingCapacity}</label>
+                        <NumberInput
+                          className="input"
+                          value={editing.capacity}
+                          onChange={(v) => setEditing({ ...editing, capacity: v })}
+                          disabled={editingReadOnly}
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>{t.packingCapacityUnit}</label>
+                        <select
+                          className="input"
+                          value={editing.capacityUnit ?? 'units'}
+                          onChange={(e) =>
+                            setEditing({
+                              ...editing,
+                              capacityUnit: e.target.value as PackingCapacityUnit,
+                            })
+                          }
+                          disabled={editingReadOnly}
+                        >
+                          <option value="units">{t.unitUnits}</option>
+                          <option value="m">m</option>
+                          <option value="kg">kg</option>
+                          <option value="l">l</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
+                  {kind === 'primary' && (
+                    <div className="form-row">
+                      <label>Typ</label>
+                      <SearchableSelect
+                        options={TYPES.map((tt) => ({ value: tt, label: tt }))}
+                        value={editing.type ?? 'other'}
+                        onChange={(val) => setEditing({ ...editing, type: val as ComponentType })}
+                        disabled={editingReadOnly}
+                      />
+                    </div>
+                  )}
+                  <div className="form-row">
+                    <label>{t.symbol}</label>
+                    <input
+                      className="input"
+                      value={editing.mpFirmaSymbol ?? ''}
+                      onChange={(e) => setEditing({ ...editing, mpFirmaSymbol: e.target.value })}
+                      disabled={editingReadOnly}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>{t.suppliers}</label>
+                    <SupplierMultiPicker
+                      suppliers={suppliers.filter((s) => s.type !== 'raw')}
+                      selectedIds={editing.supplierIds ?? []}
+                      preferredId={editing.preferredSupplierId}
+                      onChange={(ids, pref) =>
+                        setEditing({ ...editing, supplierIds: ids, preferredSupplierId: pref })
+                      }
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>{t.moq}</label>
+                    <NumberInput
+                      className="input"
+                      value={editing.moq}
+                      onChange={(v) => setEditing({ ...editing, moq: v })}
+                      disabled={editingReadOnly}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>{t.leadTime}</label>
+                    <NumberInput
+                      className="input"
+                      value={editing.leadTimeDays}
+                      onChange={(v) => setEditing({ ...editing, leadTimeDays: v })}
+                      disabled={editingReadOnly}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>{t.price}</label>
+                    <NumberInput
+                      className="input"
+                      step="0.01"
+                      value={editing.lastPurchasePriceNet}
+                      onChange={(v) => setEditing({ ...editing, lastPurchasePriceNet: v })}
+                      disabled={editingReadOnly}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>{t.currency}</label>
+                    <input
+                      className="input"
+                      placeholder="PLN"
+                      value={editing.currency ?? ''}
+                      onChange={(e) => setEditing({ ...editing, currency: e.target.value })}
+                      disabled={editingReadOnly}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>{t.overage} (%)</label>
+                    <NumberInput
+                      className="input"
+                      step="0.1"
+                      value={editing.overagePct}
+                      placeholder={String(defaultOveragePct)}
+                      onChange={(v) => setEditing({ ...editing, overagePct: v })}
+                      disabled={editingReadOnly}
+                    />
+                  </div>
+                  <div className="hint" style={{ marginTop: -4, marginBottom: 8 }}>
+                    {t.overageInheritHint.replace('{n}', String(defaultOveragePct))}
+                  </div>
+                  <div className="form-row">
+                    <label>{t.notes}</label>
+                    <textarea
+                      value={editing.notes ?? ''}
+                      onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
+                      disabled={editingReadOnly}
+                    />
+                  </div>
+                </>
+              )}
+              {kind === 'secondary' && modalTab === 'dependencies' && (
+                <DependenciesEditor
+                  editing={editing}
+                  allComponents={items}
+                  onChange={(deps) => setEditing({ ...editing, dependencies: deps })}
+                  onOpenComponent={(c) => {
+                    // Stay in modal, just swap the entity being edited.
+                    setEditingReadOnly(true);
+                    setModalTab('basics');
+                    setEditing(c);
+                  }}
+                  readOnly={editingReadOnly}
+                  t={t}
                 />
-              </div>
-            )}
-            <div className="form-row">
-              <label>{t.symbol}</label>
-              <input
-                className="input"
-                value={editing.mpFirmaSymbol ?? ''}
-                onChange={(e) => setEditing({ ...editing, mpFirmaSymbol: e.target.value })}
-                disabled={editingReadOnly}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.suppliers}</label>
-              <SupplierMultiPicker
-                suppliers={suppliers.filter((s) => s.type !== 'raw')}
-                selectedIds={editing.supplierIds ?? []}
-                preferredId={editing.preferredSupplierId}
-                onChange={(ids, pref) =>
-                  setEditing({ ...editing, supplierIds: ids, preferredSupplierId: pref })
-                }
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.moq}</label>
-              <NumberInput
-                className="input"
-                value={editing.moq}
-                onChange={(v) => setEditing({ ...editing, moq: v })}
-                disabled={editingReadOnly}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.leadTime}</label>
-              <NumberInput
-                className="input"
-                value={editing.leadTimeDays}
-                onChange={(v) => setEditing({ ...editing, leadTimeDays: v })}
-                disabled={editingReadOnly}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.price}</label>
-              <NumberInput
-                className="input"
-                step="0.01"
-                value={editing.lastPurchasePriceNet}
-                onChange={(v) => setEditing({ ...editing, lastPurchasePriceNet: v })}
-                disabled={editingReadOnly}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.currency}</label>
-              <input
-                className="input"
-                placeholder="PLN"
-                value={editing.currency ?? ''}
-                onChange={(e) => setEditing({ ...editing, currency: e.target.value })}
-                disabled={editingReadOnly}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t.overage} (%)</label>
-              <NumberInput
-                className="input"
-                step="0.1"
-                value={editing.overagePct}
-                placeholder={String(defaultOveragePct)}
-                onChange={(v) => setEditing({ ...editing, overagePct: v })}
-                disabled={editingReadOnly}
-              />
-            </div>
-            <div className="hint" style={{ marginTop: -4, marginBottom: 8 }}>
-              {t.overageInheritHint.replace('{n}', String(defaultOveragePct))}
-            </div>
-            <div className="form-row">
-              <label>{t.notes}</label>
-              <textarea
-                value={editing.notes ?? ''}
-                onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
-                disabled={editingReadOnly}
-              />
-            </div>
-            </>)}
-            {kind === 'secondary' && modalTab === 'dependencies' && (
-              <DependenciesEditor
-                editing={editing}
-                allComponents={items}
-                onChange={(deps) => setEditing({ ...editing, dependencies: deps })}
-                onOpenComponent={(c) => {
-                  // Stay in modal, just swap the entity being edited.
-                  setEditingReadOnly(true);
-                  setModalTab('basics');
-                  setEditing(c);
-                }}
-                readOnly={editingReadOnly}
-                t={t}
-              />
-            )}
+              )}
             </div>
             <div className="modal-footer">
               {editingReadOnly ? (
@@ -1074,9 +1164,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         />
       )}
 
-      {blockedBy && (
-        <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />
-      )}
+      {blockedBy && <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />}
 
       {confirmOverageForAll !== null && (
         <ConfirmDialog
@@ -1236,10 +1324,7 @@ const DependenciesEditor: React.FC<DependenciesEditorProps> = ({
 
   const add = () => {
     if (availableOptions.length === 0) return;
-    onChange([
-      ...deps,
-      { componentId: availableOptions[0].value, consumption: 1 },
-    ]);
+    onChange([...deps, { componentId: availableOptions[0].value, consumption: 1 }]);
   };
 
   return (
@@ -1562,7 +1647,8 @@ const MagazynStockDiffModal: React.FC<MagazynStockDiffModalProps> = ({
               <div className="hint" style={{ marginBottom: 12 }}>
                 {t.magazynStockDiffIntro}
               </div>
-              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <div className="apply-all-row">
+                <span className="apply-all-label">{t.applyToAllLabel}</span>
                 <button type="button" className="btn btn-sm" onClick={() => setAll('keep')}>
                   {t.magazynStockKeepAll}
                 </button>
@@ -1601,22 +1687,16 @@ const MagazynStockDiffModal: React.FC<MagazynStockDiffModalProps> = ({
                           <td className="num">{fmt(m.currentQty)}</td>
                           <td className="num">{fmt(m.importedQty)}</td>
                           <td>
-                            <div className="btn-row">
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${action === 'keep' ? 'primary-filled' : ''}`}
-                                onClick={() => setOne(m.itemId, 'keep')}
-                              >
-                                {t.magazynStockKeep}
-                              </button>
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${action === 'take' ? 'primary-filled' : ''}`}
-                                onClick={() => setOne(m.itemId, 'take')}
-                              >
-                                {t.magazynStockTake}
-                              </button>
-                            </div>
+                            <SegmentedControl
+                              size="sm"
+                              ariaLabel={m.name}
+                              value={action}
+                              onChange={(v) => setOne(m.itemId, v)}
+                              options={[
+                                { value: 'keep', label: t.magazynStockKeep, tone: 'neutral' },
+                                { value: 'take', label: t.magazynStockTake, tone: 'success' },
+                              ]}
+                            />
                           </td>
                         </tr>
                       );
@@ -1635,7 +1715,8 @@ const MagazynStockDiffModal: React.FC<MagazynStockDiffModalProps> = ({
               >
                 {t.magazynStockUnmatchedIntro.replace('{n}', String(unmatched.length))}
               </div>
-              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <div className="apply-all-row">
+                <span className="apply-all-label">{t.applyToAllLabel}</span>
                 <button type="button" className="btn btn-sm" onClick={() => setCreateAll(false)}>
                   {t.magazynStockIgnoreAll}
                 </button>
@@ -1672,22 +1753,18 @@ const MagazynStockDiffModal: React.FC<MagazynStockDiffModalProps> = ({
                           </td>
                           <td className="num">{fmt(u.qty)}</td>
                           <td>
-                            <div className="btn-row">
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${!create ? 'primary-filled' : ''}`}
-                                onClick={() => create && toggleCreate(u.name)}
-                              >
-                                {t.magazynStockIgnore}
-                              </button>
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${create ? 'primary-filled' : ''}`}
-                                onClick={() => !create && toggleCreate(u.name)}
-                              >
-                                {t.magazynStockCreate}
-                              </button>
-                            </div>
+                            <SegmentedControl
+                              size="sm"
+                              ariaLabel={u.name}
+                              value={create ? 'create' : 'ignore'}
+                              onChange={(v) => {
+                                if ((v === 'create') !== create) toggleCreate(u.name);
+                              }}
+                              options={[
+                                { value: 'ignore', label: t.magazynStockIgnore, tone: 'neutral' },
+                                { value: 'create', label: t.magazynStockCreate, tone: 'success' },
+                              ]}
+                            />
                           </td>
                         </tr>
                       );

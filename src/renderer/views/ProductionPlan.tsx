@@ -17,6 +17,7 @@ import { IconEdit, IconTrash, IconPlus, IconDuplicate } from '../components/Icon
 import ExportImportButtons from '../components/ExportImportButtons';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
+import { useColumnResize } from '../utils/useColumnResize';
 import PlanEditorModal from '../components/PlanEditorModal';
 import HoverTooltip from '../components/HoverTooltip';
 import PlanReportsPopover from '../components/PlanReportsPopover';
@@ -76,9 +77,13 @@ const ProductionPlanView: React.FC<Props> = ({
     toggle,
     reorder,
     reset: resetColumns,
+    widths,
+    setWidth,
+    resetWidth,
     orderedColumns,
     orderedVisibleIds,
   } = useColumnPrefs('plans', COLUMNS);
+  const { decorateHeader } = useColumnResize(setWidth);
 
   const filteredPlans = useMemo(() => {
     if (!query.trim()) return plans;
@@ -308,6 +313,8 @@ const ProductionPlanView: React.FC<Props> = ({
               toggle={toggle}
               reorder={reorder}
               reset={resetColumns}
+              widths={widths}
+              resetWidth={resetWidth}
             />
             <button className="btn primary toolbar-action-primary" onClick={onAdd}>
               <IconPlus size={14} /> {t.add}
@@ -324,22 +331,25 @@ const ProductionPlanView: React.FC<Props> = ({
             <thead>
               <tr>
                 {orderedVisibleIds.map((id) => {
-                  switch (id) {
-                    case 'name':
-                      return <th key={id} className="col-w-xl">{t.planName}</th>;
-                    case 'status':
-                      return <th key={id} className="col-w-md">Status</th>;
-                    case 'items':
-                      return <th key={id} className="num col-w-sm">{t.planItems}</th>;
-                    case 'bulk':
-                      return <th key={id} className="num col-w-sm">{t.bulkMass}</th>;
-                    case 'created':
-                      return <th key={id} className="col-w-md">{t.planCreatedAt}</th>;
-                    case 'updated':
-                      return <th key={id} className="col-w-md">{t.planUpdatedAt}</th>;
-                    default:
-                      return null;
-                  }
+                  const th = ((): React.ReactNode => {
+                    switch (id) {
+                      case 'name':
+                        return <th key={id} className="col-w-xl">{t.planName}</th>;
+                      case 'status':
+                        return <th key={id} className="col-w-md">Status</th>;
+                      case 'items':
+                        return <th key={id} className="num col-w-sm">{t.planItems}</th>;
+                      case 'bulk':
+                        return <th key={id} className="num col-w-sm">{t.bulkMass}</th>;
+                      case 'created':
+                        return <th key={id} className="col-w-md">{t.planCreatedAt}</th>;
+                      case 'updated':
+                        return <th key={id} className="col-w-md">{t.planUpdatedAt}</th>;
+                      default:
+                        return null;
+                    }
+                  })();
+                  return decorateHeader(th, id, widths[id]);
                 })}
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
