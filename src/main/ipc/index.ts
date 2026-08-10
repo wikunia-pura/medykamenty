@@ -29,6 +29,7 @@ import type {
   RawStockUnmatched,
   StockBatch,
 } from '../../shared/types';
+import { getBackupsDir, getBackupStatus, validateBackup } from '../backupService';
 import { parseStockXlsx } from '../services/xlsxStockImporter';
 import { importRawMaterialsXlsx } from '../services/xlsxRawMaterialsImporter';
 import { importComponentsXlsx, inferComponentType } from '../services/xlsxComponentsImporter';
@@ -1060,7 +1061,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       filters: [{ name: 'JSON', extensions: ['json'] }],
     });
     if (result.canceled || !result.filePath) return { ok: false };
-    const data = await db.exportAll();
+    const data = await db.exportAll(app.getVersion());
     fs.writeFileSync(result.filePath, JSON.stringify(data, null, 2), 'utf-8');
     return { ok: true, path: result.filePath };
   });
@@ -1069,14 +1070,39 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     const win = getMainWindow();
     const result = await dialog.showOpenDialog(win!, {
       title: 'Import danych',
+      defaultPath: getBackupsDir(),
       filters: [{ name: 'JSON', extensions: ['json'] }],
       properties: ['openFile'],
     });
     if (result.canceled || result.filePaths.length === 0) return { ok: false };
-    const raw = fs.readFileSync(result.filePaths[0], 'utf-8');
-    const parsed = JSON.parse(raw) as StoreSchema;
-    const out = await db.importAll(parsed, mode);
-    return { ok: true, applied: out.applied };
+    try {
+      const raw = fs.readFileSync(result.filePaths[0], 'utf-8');
+      const parsed = validateBackup(JSON.parse(raw));
+      // Snapshot the current state before it's replaced, so a restore of the
+      // wrong file is itself recoverable from the backups folder.
+      const preRestore = await db.exportAll(app.getVersion());
+      const dir = getBackupsDir();
+      fs.mkdirSync(dir, { recursive: true });
+      const safetyPath = path.join(dir, `pre-restore-${Date.now()}.json`);
+      fs.writeFileSync(safetyPath, JSON.stringify(preRestore, null, 2), 'utf-8');
+      log.info(`[BACKUP] Pre-restore safety copy: ${safetyPath}`);
+
+      const out = await db.importAll(parsed, mode);
+      log.info(`[BACKUP] Restored from: ${result.filePaths[0]} (${mode})`);
+      return { ok: true, applied: out.applied };
+    } catch (error) {
+      log.error('[BACKUP] Restore failed:', error);
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle(IPC.BACKUP_GET_STATUS, () => getBackupStatus());
+
+  ipcMain.handle(IPC.BACKUP_OPEN_FOLDER, () => {
+    const dir = getBackupsDir();
+    fs.mkdirSync(dir, { recursive: true });
+    shell.openPath(dir);
+    return { ok: true };
   });
 
   // ---- Generic file save/open (per-view CSV/JSON export/import) ----

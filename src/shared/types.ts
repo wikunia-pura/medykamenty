@@ -585,8 +585,24 @@ export interface AppSettings {
   bsx?: BsxIntegrationSettings;
 }
 
+/**
+ * A full snapshot of everything the app persists: the shared Supabase tables
+ * plus this machine's local settings. Written as a single JSON file by manual
+ * export and by the daily auto-backup; consumed by the restore flow.
+ *
+ * ADDING PERSISTED DATA (do this in the SAME change that adds the table):
+ * a new Supabase table is not "done" until it is in the backup — an unbacked
+ * table is silently lost on restore, and restore in 'replace' mode wipes the
+ * shared cloud data for EVERY install, so the gap only surfaces when it is
+ * already too late. New keys are OPTIONAL (`?`), so older backup files still
+ * validate; a missing key must mean "leave the live rows alone", never "wipe
+ * them". Touch `Database.exportAll` and `Database.importAll` together.
+ */
 export interface StoreSchema {
   schemaVersion: number;
+  /** Absent in backups written before the auto-backup system existed. */
+  exportedAt?: string;
+  appVersion?: string;
   suppliers: Supplier[];
   rawMaterials: RawMaterial[];
   components: PackagingComponent[];
@@ -597,6 +613,9 @@ export interface StoreSchema {
   emailBatches?: EmailBatch[];
   orders?: Order[];
   workflowTemplates?: WorkflowTemplate[];
+  /** Aliasy nauczone przy imporcie stanów — absent in older backups. */
+  rawMaterialAliases?: CatalogAlias[];
+  componentAliases?: CatalogAlias[];
   settings: AppSettings;
 }
 

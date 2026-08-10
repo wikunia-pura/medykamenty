@@ -297,7 +297,16 @@ export interface ElectronAPI {
 
   // Backup
   exportBackup(): Promise<{ ok: boolean; path?: string }>;
-  importBackup(mode: 'merge' | 'replace'): Promise<{ ok: boolean; applied?: number }>;
+  importBackup(
+    mode: 'merge' | 'replace',
+  ): Promise<{ ok: boolean; applied?: number; error?: string }>;
+  backupGetStatus(): Promise<{
+    folder: string;
+    lastAutoBackup: string | null;
+    autoBackupCount: number;
+    offsiteConfigured: boolean;
+  }>;
+  backupOpenFolder(): Promise<{ ok: boolean }>;
 
   // Generic file save/open (per-view CSV/JSON)
   saveTextFile(args: {
@@ -344,6 +353,14 @@ export interface ElectronAPI {
   onUpdateDownloaded(cb: (info: any) => void): void;
   onUpdateError(cb: (msg: string) => void): void;
   onDownloadProgress(cb: (p: any) => void): void;
+  onBackupCreated(
+    cb: (info: {
+      filePath: string;
+      date: string;
+      upload: 'uploaded' | 'failed' | 'disabled';
+      trigger: 'startup' | 'quit';
+    }) => void,
+  ): () => void;
 
   // Zoom
   getZoomFactor(): number;

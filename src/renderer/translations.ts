@@ -419,6 +419,21 @@ export interface T {
   importData: string;
   importDataMerge: string;
   importDataReplace: string;
+  backupStatusLine: string;
+  backupStatusNone: string;
+  backupOffsiteOn: string;
+  backupOffsiteOff: string;
+  backupOpenFolder: string;
+  backupExported: string;
+  backupImported: string;
+  backupImportConfirmMerge: string;
+  backupImportConfirmReplace1: string;
+  backupImportConfirmReplace2: string;
+  backupError: string;
+  backupAutoCreated: string;
+  backupExitCreated: string;
+  backupOffsiteOk: string;
+  backupOffsiteFailed: string;
   about: string;
   appVersion: string;
   checkForUpdates: string;
@@ -1132,6 +1147,25 @@ const pl: T = {
   importData: 'Importuj dane',
   importDataMerge: 'Importuj (scal)',
   importDataReplace: 'Importuj (zastąp)',
+  backupStatusLine: 'Ostatnia automatyczna kopia: {date} • plików w folderze: {count}',
+  backupStatusNone: 'Nie zapisano jeszcze automatycznej kopii.',
+  backupOffsiteOn: 'Kopia do prywatnego repozytorium GitHub: włączona.',
+  backupOffsiteOff:
+    'Kopia do GitHub: nieskonfigurowana na tej maszynie (opcjonalne — patrz config/backup-config.example.yml).',
+  backupOpenFolder: 'Otwórz folder kopii',
+  backupExported: 'Zapisano kopię: {path}',
+  backupImported: 'Przywrócono dane ({applied} rekordów).',
+  backupImportConfirmMerge:
+    'Import scali dane z pliku z obecnymi (nadpisze rekordy o tych samych identyfikatorach). Kontynuować?',
+  backupImportConfirmReplace1:
+    'Import w trybie ZASTĄP usunie WSZYSTKIE obecne dane (u każdego użytkownika tej bazy!) i wstawi dane z pliku. Kontynuować?',
+  backupImportConfirmReplace2:
+    'Na pewno? Przed importem zapisze się kopia bezpieczeństwa obecnego stanu w folderze kopii.',
+  backupError: 'Błąd kopii zapasowej',
+  backupAutoCreated: 'Automatyczna kopia danych z {date} zapisana.{offsite}',
+  backupExitCreated: 'Kopia danych odświeżona przy zamykaniu ({date}).{offsite}',
+  backupOffsiteOk: ' Wysłano też do repozytorium GitHub.',
+  backupOffsiteFailed: ' Nie udało się wysłać do GitHub — kopia tylko lokalna.',
   about: 'Informacje',
   appVersion: 'Wersja aplikacji',
   checkForUpdates: 'Sprawdź aktualizacje',
@@ -1845,6 +1879,25 @@ const en: T = {
   importData: 'Import data',
   importDataMerge: 'Import (merge)',
   importDataReplace: 'Import (replace)',
+  backupStatusLine: 'Last automatic backup: {date} • files in folder: {count}',
+  backupStatusNone: 'No automatic backup saved yet.',
+  backupOffsiteOn: 'Off-site copy to private GitHub repo: enabled.',
+  backupOffsiteOff:
+    'Off-site copy to GitHub: not configured on this machine (optional — see config/backup-config.example.yml).',
+  backupOpenFolder: 'Open backups folder',
+  backupExported: 'Backup saved: {path}',
+  backupImported: 'Data restored ({applied} records).',
+  backupImportConfirmMerge:
+    'Import will merge file data with the current data (records with matching ids get overwritten). Continue?',
+  backupImportConfirmReplace1:
+    'REPLACE mode deletes ALL current data (for every user of this database!) and inserts the file contents. Continue?',
+  backupImportConfirmReplace2:
+    'Are you sure? A safety copy of the current state will be saved to the backups folder first.',
+  backupError: 'Backup error',
+  backupAutoCreated: 'Automatic data backup for {date} saved.{offsite}',
+  backupExitCreated: 'Data backup refreshed on exit ({date}).{offsite}',
+  backupOffsiteOk: ' Also pushed to the GitHub repository.',
+  backupOffsiteFailed: ' GitHub upload failed — local copy only.',
   about: 'About',
   appVersion: 'App version',
   checkForUpdates: 'Check for updates',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import { HeaderNav } from '../navigation';
 import type { AppSettings, BsxIntegrationSettings, Lang } from '../../shared/types';
@@ -92,6 +92,8 @@ const SettingsView: React.FC<Props> = ({ settings, onChange }) => {
         }}
       />
 
+      <BackupSection />
+
       <div className="card">
         <h2 style={{ marginTop: 0 }}>{t.about}</h2>
         <div className="btn-row">
@@ -110,6 +112,106 @@ const SettingsView: React.FC<Props> = ({ settings, onChange }) => {
       </div>
 
       {info && <div className="card hint">{info}</div>}
+    </div>
+  );
+};
+
+interface BackupStatusInfo {
+  folder: string;
+  lastAutoBackup: string | null;
+  autoBackupCount: number;
+  offsiteConfigured: boolean;
+}
+
+// Full data backup: manual export/import of everything the app persists, plus
+// visibility into the daily auto-backup (userData/backups + optional GitHub
+// off-site push). Restore in 'replace' mode wipes the shared cloud data for
+// every install, hence the double confirmation.
+const BackupSection: React.FC = () => {
+  const t = useT();
+  const [status, setStatus] = useState<BackupStatusInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const loadStatus = async () => {
+    try {
+      setStatus(await window.electronAPI.backupGetStatus());
+    } catch {
+      setStatus(null);
+    }
+  };
+
+  useEffect(() => {
+    void loadStatus();
+  }, []);
+
+  const handleExport = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const r = await window.electronAPI.exportBackup();
+      if (r.ok && r.path) setMessage(t.backupExported.replace('{path}', r.path));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleImport = async (mode: 'merge' | 'replace') => {
+    if (mode === 'merge') {
+      if (!window.confirm(t.backupImportConfirmMerge)) return;
+    } else {
+      if (!window.confirm(t.backupImportConfirmReplace1)) return;
+      if (!window.confirm(t.backupImportConfirmReplace2)) return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      const r = await window.electronAPI.importBackup(mode);
+      if (r.ok) {
+        setMessage(t.backupImported.replace('{applied}', String(r.applied ?? 0)));
+        await loadStatus();
+      } else if (r.error) {
+        setMessage(`${t.backupError}: ${r.error}`);
+      }
+    } catch (error) {
+      setMessage(`${t.backupError}: ${(error as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>{t.settingsBackup}</h2>
+      <div className="hint">
+        {status?.lastAutoBackup
+          ? t.backupStatusLine
+              .replace('{date}', status.lastAutoBackup)
+              .replace('{count}', String(status.autoBackupCount))
+          : t.backupStatusNone}
+      </div>
+      <div className="hint" style={{ marginTop: 4 }}>
+        {status?.offsiteConfigured ? t.backupOffsiteOn : t.backupOffsiteOff}
+      </div>
+      <div className="btn-row" style={{ marginTop: 12 }}>
+        <button className="btn" disabled={busy} onClick={handleExport}>
+          {t.exportData}
+        </button>
+        <button className="btn" disabled={busy} onClick={() => handleImport('merge')}>
+          {t.importDataMerge}
+        </button>
+        <button className="btn soft-danger" disabled={busy} onClick={() => handleImport('replace')}>
+          {t.importDataReplace}
+        </button>
+        <button className="btn" onClick={() => void window.electronAPI.backupOpenFolder()}>
+          {t.backupOpenFolder}
+        </button>
+      </div>
+      {message && (
+        <div className="hint" style={{ marginTop: 8 }}>
+          {message}
+        </div>
+      )}
     </div>
   );
 };

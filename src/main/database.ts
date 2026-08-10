@@ -1562,7 +1562,7 @@ export default class Database {
 
   // =============================== Backup ===============================
 
-  async exportAll(): Promise<StoreSchema> {
+  async exportAll(appVersion?: string): Promise<StoreSchema> {
     const [
       suppliers,
       rawMaterials,
@@ -1574,6 +1574,8 @@ export default class Database {
       emailBatches,
       orders,
       workflowTemplates,
+      rawMaterialAliases,
+      componentAliases,
     ] = await Promise.all([
       this.listSuppliers(),
       this.listRawMaterials(),
@@ -1585,9 +1587,13 @@ export default class Database {
       this.listEmailBatches(),
       this.listOrders().catch(() => [] as Order[]),
       this.listWorkflowTemplates().catch(() => [] as WorkflowTemplate[]),
+      this.listRawMaterialAliases(),
+      this.listComponentAliases(),
     ]);
     return {
       schemaVersion: 1,
+      exportedAt: nowIso(),
+      ...(appVersion ? { appVersion } : {}),
       suppliers,
       rawMaterials,
       components,
@@ -1598,6 +1604,8 @@ export default class Database {
       emailBatches,
       orders,
       workflowTemplates,
+      rawMaterialAliases,
+      componentAliases,
       settings: this.getSettings(),
     };
   }
@@ -1687,9 +1695,44 @@ export default class Database {
       () => ({ updated_at: nowIso() }),
     );
 
+    // Aliases reference raw_materials/components (FK, on delete cascade), so
+    // they go in after their targets. Keys absent in backups written before
+    // aliases were added to the schema → leave the live rows alone.
+    if (data.rawMaterialAliases) {
+      applied += await this.restoreAliases('raw_material_aliases', data.rawMaterialAliases);
+    }
+    if (data.componentAliases) {
+      applied += await this.restoreAliases('component_aliases', data.componentAliases);
+    }
+
     if (data.settings) {
       this.settingsStore.set('settings', { ...DEFAULT_SETTINGS, ...data.settings });
     }
     return { applied };
+  }
+
+  // Aliases are re-learnable from the next stock import, so a conflict (e.g. a
+  // live row already claims the same alias_normalized in merge mode) must not
+  // sink the whole restore — log and move on.
+  private async restoreAliases(
+    table: 'raw_material_aliases' | 'component_aliases',
+    list: CatalogAlias[],
+  ): Promise<number> {
+    if (list.length === 0) return 0;
+    const rows = list
+      .map(a => ({
+        id: a.id,
+        target_id: a.targetId,
+        alias: a.alias,
+        alias_normalized: normalizeAlias(a.alias),
+        created_at: a.createdAt,
+      }))
+      .filter(r => r.alias_normalized);
+    const { error } = await getSupabase().from(table).upsert(rows, { onConflict: 'id' });
+    if (error) {
+      log.warn(`importAll ${table}: ${error.message}`);
+      return 0;
+    }
+    return rows.length;
   }
 }

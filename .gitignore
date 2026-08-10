@@ -11,6 +11,7 @@ release/
 coverage/
 test-output/
 config/ai-config.yml
+config/backup-config.yml
 
 # Local test data — contains real client info (prices, suppliers).
 # Never commit to public repo. Share via private channel if needed.

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Footer from './components/Footer';
 import UpdateNotification from './components/UpdateNotification';
+import BackupNotifier from './components/BackupNotifier';
 import ExistingBatchChooser from './components/ExistingBatchChooser';
 import { I18nProvider } from './i18n';
 import { NavigationProvider } from './navigation';
@@ -499,6 +500,7 @@ const App: React.FC = () => {
     <I18nProvider lang={lang} setLang={setLang}>
       <div className="app">
         <UpdateNotification />
+        <BackupNotifier />
         {migrationInfo && migrationInfo.hasLocalData && !migrationInfo.migrated && (
           <div
             style={{

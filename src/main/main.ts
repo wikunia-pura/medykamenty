@@ -4,6 +4,7 @@ import path from 'path';
 import log from './utils/logger';
 import Database from './database';
 import { registerIpcHandlers } from './ipc';
+import { runAutoBackup } from './backupService';
 import { IPC } from '../shared/ipcChannels';
 
 const DEV_SERVER_PORT = 5183;
@@ -33,7 +34,47 @@ function resolveIconPath(): string | undefined {
   });
 }
 
+// Exit-time backup. Closing the window (or quitting) is intercepted exactly
+// once: today's auto backup is refreshed with everything changed during the
+// session, an in-app toast is shown while the window is still visible, and
+// only then does the close/quit proceed. `backupOnExitDone` guards re-entry
+// and lets the auto-updater's quit skip the whole dance.
+let backupOnExitDone = false;
+
+function runExitBackup(resume: () => void): void {
+  if (backupOnExitDone || !database) {
+    backupOnExitDone = true;
+    resume();
+    return;
+  }
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    backupOnExitDone = true;
+    resume();
+  };
+  // Never block closing for long — if Supabase is slow/offline, give up.
+  const failsafe = setTimeout(finish, 15000);
+
+  runAutoBackup(database, { force: true })
+    .then((info) => {
+      if (info && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC.EVT_BACKUP_CREATED, { ...info, trigger: 'quit' });
+        // Keep the window up long enough for the toast to be seen.
+        return new Promise<void>((resolve) => setTimeout(resolve, 2500));
+      }
+    })
+    .finally(() => {
+      clearTimeout(failsafe);
+      finish();
+    });
+}
+
 function createWindow(): void {
+  // A fresh window starts a fresh session — its close deserves its own backup.
+  backupOnExitDone = false;
+
   const iconPath = resolveIconPath();
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -55,6 +96,14 @@ function createWindow(): void {
   } else {
     mainWindow.loadURL(DEV_SERVER_URL);
   }
+
+  mainWindow.on('close', (event) => {
+    // Intercept the X button too — on the app-quit path before-quit fires only
+    // after the window is gone, too late for an in-app notification.
+    if (backupOnExitDone) return;
+    event.preventDefault();
+    runExitBackup(() => mainWindow?.close());
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -78,7 +127,12 @@ function setupAutoUpdater(): void {
   autoUpdater.on('update-downloaded', (info) => {
     if (mainWindow) mainWindow.webContents.send(IPC.EVT_UPDATE_DOWNLOADED, info);
     if (process.platform === 'win32') {
-      setTimeout(() => autoUpdater.quitAndInstall(), 2000);
+      setTimeout(() => {
+        // Don't let the exit-time backup preventDefault this quit — the updater
+        // relaunches the app and the startup backup covers the gap.
+        backupOnExitDone = true;
+        autoUpdater.quitAndInstall();
+      }, 2000);
     }
   });
   autoUpdater.on('error', (err) => {
@@ -129,6 +183,18 @@ app.whenReady().then(() => {
   setupAutoUpdater();
   createWindow();
 
+  // Startup auto backup — a safety net for days whose exit backup never ran:
+  // it writes (and toasts) only when today's file is missing, i.e. on the
+  // first open of the day or after a crash killed the previous session before
+  // its exit backup. Delayed so the persisted Supabase session has time to
+  // restore; without a session the reads fail and the backup is skipped (logged).
+  setTimeout(async () => {
+    const info = await runAutoBackup(database);
+    if (info && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC.EVT_BACKUP_CREATED, { ...info, trigger: 'startup' });
+    }
+  }, 15000);
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -136,4 +202,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', (event) => {
+  if (backupOnExitDone || !database) return;
+  event.preventDefault();
+  runExitBackup(() => app.quit());
 });

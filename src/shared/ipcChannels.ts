@@ -134,6 +134,11 @@ export const IPC = {
   // Backup
   BACKUP_EXPORT: 'backup:export',
   BACKUP_IMPORT: 'backup:import',
+  BACKUP_GET_STATUS: 'backup:get-status',
+  BACKUP_OPEN_FOLDER: 'backup:open-folder',
+
+  // Auto-backup event (main → renderer)
+  EVT_BACKUP_CREATED: 'backup:auto-created',
 
   // Generic file save/open (per-view export/import)
   FILE_SAVE_TEXT: 'file:save-text',

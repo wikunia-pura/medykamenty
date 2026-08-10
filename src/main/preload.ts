@@ -123,6 +123,8 @@ const CH = {
 
   BACKUP_EXPORT: 'backup:export',
   BACKUP_IMPORT: 'backup:import',
+  BACKUP_GET_STATUS: 'backup:get-status',
+  BACKUP_OPEN_FOLDER: 'backup:open-folder',
 
   FILE_SAVE_TEXT: 'file:save-text',
   FILE_OPEN_TEXT: 'file:open-text',
@@ -364,6 +366,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Backup
   exportBackup: () => ipcRenderer.invoke(CH.BACKUP_EXPORT),
   importBackup: (mode: 'merge' | 'replace') => ipcRenderer.invoke(CH.BACKUP_IMPORT, mode),
+  backupGetStatus: () => ipcRenderer.invoke(CH.BACKUP_GET_STATUS),
+  backupOpenFolder: () => ipcRenderer.invoke(CH.BACKUP_OPEN_FOLDER),
 
   // Generic file save/open
   saveTextFile: (args: {
@@ -405,6 +409,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-error', (_e: IpcRendererEvent, msg) => cb(msg)),
   onDownloadProgress: (cb: (p: any) => void) =>
     ipcRenderer.on('download-progress', (_e: IpcRendererEvent, p) => cb(p)),
+  onBackupCreated: (cb: (info: any) => void) => {
+    const listener = (_e: IpcRendererEvent, info: any) => cb(info);
+    ipcRenderer.on('backup:auto-created', listener);
+    return () => ipcRenderer.off('backup:auto-created', listener);
+  },
 
   // Zoom (in-renderer only — uses webFrame, no IPC needed)
   getZoomFactor: () => webFrame.getZoomFactor(),

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { Order, OrderStatus, WorkflowTemplate } from '../../shared/types';
 import { useT } from '../i18n';
 import ModalHeader from './ModalHeader';
-import { IconPlus, IconClose, IconEdit } from './Icons';
+import { IconPlus, IconEdit } from './Icons';
 import { useEscapeKey } from '../utils/useEscapeKey';
 
 interface Props {
