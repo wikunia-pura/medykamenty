@@ -137,8 +137,12 @@ export const IPC = {
   BACKUP_GET_STATUS: 'backup:get-status',
   BACKUP_OPEN_FOLDER: 'backup:open-folder',
 
-  // Auto-backup event (main → renderer)
+  // Auto-backup events (main → renderer). STARTED fires the moment the exit
+  // backup begins, so the closing window shows feedback during the few seconds
+  // the export + off-site push take; CREATED then replaces it with the result.
+  EVT_BACKUP_STARTED: 'backup:auto-started',
   EVT_BACKUP_CREATED: 'backup:auto-created',
+  EVT_BACKUP_FAILED: 'backup:auto-failed',
 
   // Generic file save/open (per-view export/import)
   FILE_SAVE_TEXT: 'file:save-text',

@@ -239,6 +239,45 @@ a:hover {
   border-left-color: var(--primary);
 }
 
+/* Drag & drop reordering of nav items */
+.nav-item[draggable='true'] {
+  position: relative;
+}
+.nav-item.nav-item-dragging {
+  opacity: 0.4;
+}
+.nav-item.nav-item-drop-before::before,
+.nav-item.nav-item-drop-after::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  background: var(--primary);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.nav-item.nav-item-drop-before::before {
+  top: -1px;
+}
+.nav-item.nav-item-drop-after::after {
+  bottom: -1px;
+}
+.nav-drop-zone {
+  margin: 4px 12px;
+  padding: 10px 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(243, 244, 246, 0.5);
+}
+.nav-drop-zone.over {
+  border-color: var(--primary);
+  background: rgba(79, 109, 240, 0.14);
+  color: #fff;
+}
+
 .nav-divider {
   height: 1px;
   margin: 12px 16px;
@@ -2364,6 +2403,9 @@ tr:hover .stock-cell .stock-edit-btn {
 .modal.modal-lg {
   width: 860px;
 }
+.modal.modal-xl {
+  width: 1080px;
+}
 .modal-header {
   display: flex;
   flex-direction: column;
@@ -3270,33 +3312,106 @@ body.dark-mode .email-card-sent {
 }
 
 /* Backup toast — floating confirmation of the auto backup (startup / exit) */
+/* Backup toast. It has one shot at being noticed — it shows up while the app
+   is closing — so it is deliberately loud: wide, 2px coloured frame, tinted
+   background and a state mark (spinner / ✓ / !) on the left. */
 .backup-toast {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 200;
-  max-width: 420px;
-  padding: 12px 16px;
-  border-radius: 8px;
+  right: 24px;
+  bottom: 24px;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 340px;
+  max-width: 520px;
+  padding: 16px 20px;
+  border-radius: 10px;
   background: var(--bg-elev);
   color: var(--text);
-  border: 1px solid var(--border);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
-  font-size: 13px;
+  border: 2px solid var(--border);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.28),
+    0 2px 6px rgba(0, 0, 0, 0.16);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.45;
   cursor: pointer;
-  animation: backup-toast-in 200ms ease-out;
+  animation: backup-toast-in 220ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.backup-toast-text {
+  flex: 1;
+}
+.backup-toast-mark {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: 50%;
+}
+
+/* Running: green frame, as requested — plus a spinning ring so it reads as
+   "working", not "finished". */
+.backup-toast.progress {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, var(--bg-elev));
+}
+.backup-toast.progress .backup-toast-mark {
+  color: var(--success);
+}
+.backup-toast.ok {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, var(--bg-elev));
+}
+.backup-toast.ok .backup-toast-mark {
+  background: var(--success);
+  color: #fff;
 }
 .backup-toast.warn {
   border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, var(--bg-elev));
+}
+.backup-toast.warn .backup-toast-mark {
+  background: var(--warning);
+  color: #fff;
+}
+/* #2e8b57 is too dim against the dark surface. */
+body.dark-mode .backup-toast.progress,
+body.dark-mode .backup-toast.ok {
+  border-color: #3fbe7d;
+}
+body.dark-mode .backup-toast.progress .backup-toast-mark {
+  color: #3fbe7d;
+}
+body.dark-mode .backup-toast.ok .backup-toast-mark {
+  background: #3fbe7d;
+}
+
+.backup-toast-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: backup-toast-spin 700ms linear infinite;
+}
+@keyframes backup-toast-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 @keyframes backup-toast-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(12px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 

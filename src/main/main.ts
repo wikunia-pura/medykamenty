@@ -57,13 +57,27 @@ function runExitBackup(resume: () => void): void {
   // Never block closing for long — if Supabase is slow/offline, give up.
   const failsafe = setTimeout(finish, 15000);
 
+  const notify = (channel: string, payload: unknown) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(channel, payload);
+    }
+  };
+
+  // The export + off-site push take a few seconds, during which the window
+  // just sits there — say what's happening before starting the work, not only
+  // after it finishes.
+  notify(IPC.EVT_BACKUP_STARTED, { trigger: 'quit' });
+
   runAutoBackup(database, { force: true })
     .then((info) => {
-      if (info && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(IPC.EVT_BACKUP_CREATED, { ...info, trigger: 'quit' });
-        // Keep the window up long enough for the toast to be seen.
-        return new Promise<void>((resolve) => setTimeout(resolve, 2500));
-      }
+      // A failed exit backup used to close the window in silence, leaving the
+      // "backing up…" toast as the last thing seen. Report both outcomes.
+      notify(
+        info ? IPC.EVT_BACKUP_CREATED : IPC.EVT_BACKUP_FAILED,
+        info ? { ...info, trigger: 'quit' } : { trigger: 'quit' },
+      );
+      // Keep the window up long enough for the toast to be seen.
+      return new Promise<void>((resolve) => setTimeout(resolve, 2500));
     })
     .finally(() => {
       clearTimeout(failsafe);
@@ -164,6 +178,21 @@ function ensureAutoLaunch(): void {
   } catch (err) {
     log.warn('Failed to set login item:', err);
   }
+}
+
+// Two instances sharing one user-data-dir fight over the Chromium storage
+// backend: the second one's first synchronous localStorage read blocks for
+// ~4s waiting on the LevelDB lock (measured 3861ms vs 0ms), and both would
+// write the same Supabase data and run their own exit backup. Focus the
+// window that already exists instead.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
 }
 
 app.whenReady().then(() => {

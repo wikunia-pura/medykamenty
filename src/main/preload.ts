@@ -414,6 +414,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('backup:auto-created', listener);
     return () => ipcRenderer.off('backup:auto-created', listener);
   },
+  onBackupStarted: (cb: (info: any) => void) => {
+    const listener = (_e: IpcRendererEvent, info: any) => cb(info);
+    ipcRenderer.on('backup:auto-started', listener);
+    return () => ipcRenderer.off('backup:auto-started', listener);
+  },
+  onBackupFailed: (cb: (info: any) => void) => {
+    const listener = (_e: IpcRendererEvent, info: any) => cb(info);
+    ipcRenderer.on('backup:auto-failed', listener);
+    return () => ipcRenderer.off('backup:auto-failed', listener);
+  },
 
   // Zoom (in-renderer only — uses webFrame, no IPC needed)
   getZoomFactor: () => webFrame.getZoomFactor(),

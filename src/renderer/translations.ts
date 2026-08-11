@@ -432,6 +432,8 @@ export interface T {
   backupError: string;
   backupAutoCreated: string;
   backupExitCreated: string;
+  backupExitInProgress: string;
+  backupExitFailed: string;
   backupOffsiteOk: string;
   backupOffsiteFailed: string;
   about: string;
@@ -860,7 +862,7 @@ const pl: T = {
     'Plik staje się źródłem prawdy: usuwa z bazy komponenty, których nie ma w pliku, oraz nadpisuje pola z pliku dla pozostałych (MOQ, czas oczekiwania, dostawca, notatki). Dostawcy są zachowywani w obu trybach.',
   componentsImportConfirm: 'Importuj',
   // Warehouse ("Magazyn") stock import
-  magazynStockImport: 'Importuj stany z magazynu',
+  magazynStockImport: 'Importuj stany z GD',
   magazynStockImportHint:
     'Wczytuje stany z pliku magazynu (zakładka „Stan komponentów”). Dopasowuje tylko istniejące pozycje katalogu po nazwie — kolumna C (stan) i kolumna E (uwagi). Nowe pozycje z pliku są pomijane.',
   magazynStockImportFailed: 'Nie udało się zaimportować stanów z magazynu',
@@ -895,9 +897,9 @@ const pl: T = {
   rawStockImportSummary: 'Zaimportowano surowców: {imported}, odrzucono: {rejected}.',
   rawStockDiffTitle: 'Import stanów surowców — niezgodne sumy',
   rawStockDiffIntro:
-    'Dla poniższych surowców partie z pliku (kolumna C) nie sumują się do wartości sumarycznej z pliku (kolumna D). Zdecyduj, czy zaimportować dane z pliku, czy odrzucić (zostawić obecny stan w katalogu).',
-  rawStockBatchSum: 'Suma partii (C)',
-  rawStockReportedTotal: 'Suma z pliku (D)',
+    'Dla poniższych surowców partie z pliku („Stan potwierdzony przez magazyn”) nie sumują się do wartości sumarycznej z pliku („Stan MP Firma GD”). Zdecyduj, czy zaimportować dane z pliku, czy odrzucić (zostawić obecny stan w katalogu).',
+  rawStockBatchSum: 'Stan potwierdzony przez magazyn',
+  rawStockReportedTotal: 'Stan MP Firma GD',
   rawStockTake: 'Importuj z pliku',
   rawStockReject: 'Odrzuć',
   rawStockTakeAll: 'Importuj wszystkie',
@@ -1164,6 +1166,9 @@ const pl: T = {
   backupError: 'Błąd kopii zapasowej',
   backupAutoCreated: 'Automatyczna kopia danych z {date} zapisana.{offsite}',
   backupExitCreated: 'Kopia danych odświeżona przy zamykaniu ({date}).{offsite}',
+  backupExitInProgress: 'Tworzę kopię zapasową danych — zamykam aplikację…',
+  backupExitFailed:
+    'Nie udało się utworzyć kopii zapasowej przy zamykaniu (szczegóły w logu aplikacji).',
   backupOffsiteOk: ' Wysłano też do repozytorium GitHub.',
   backupOffsiteFailed: ' Nie udało się wysłać do GitHub — kopia tylko lokalna.',
   about: 'Informacje',
@@ -1597,7 +1602,7 @@ const en: T = {
     'The file becomes the source of truth: deletes components missing from the file and overwrites file-driven fields (MOQ, lead time, supplier, notes) for the rest. Suppliers are preserved in both modes.',
   componentsImportConfirm: 'Import',
   // Warehouse ("Magazyn") stock import
-  magazynStockImport: 'Import stock from warehouse',
+  magazynStockImport: 'Import stock from GD',
   magazynStockImportHint:
     'Loads stock from the warehouse file ("Stan komponentów" tab). Matches existing catalog items by name only — column C (stock) and column E (notes). New items from the file are ignored.',
   magazynStockImportFailed: 'Failed to import warehouse stock',
@@ -1631,9 +1636,9 @@ const en: T = {
   rawStockImportSummary: 'Imported materials: {imported}, rejected: {rejected}.',
   rawStockDiffTitle: 'Import raw-material stock — sum mismatch',
   rawStockDiffIntro:
-    "For the materials below, the file's batch quantities (column C) don't add up to the file's own total (column D). Decide whether to import the file's data or reject it (keep the current catalog stock).",
-  rawStockBatchSum: 'Batch sum (C)',
-  rawStockReportedTotal: 'File total (D)',
+    "For the materials below, the file's batch quantities (\"Stock confirmed by warehouse\") don't add up to the file's own total (\"MP Firma GD stock\"). Decide whether to import the file's data or reject it (keep the current catalog stock).",
+  rawStockBatchSum: 'Stock confirmed by warehouse',
+  rawStockReportedTotal: 'MP Firma GD stock',
   rawStockTake: 'Import from file',
   rawStockReject: 'Reject',
   rawStockTakeAll: 'Import all',
@@ -1896,6 +1901,8 @@ const en: T = {
   backupError: 'Backup error',
   backupAutoCreated: 'Automatic data backup for {date} saved.{offsite}',
   backupExitCreated: 'Data backup refreshed on exit ({date}).{offsite}',
+  backupExitInProgress: 'Creating a data backup — closing the app…',
+  backupExitFailed: 'The exit backup could not be created (details in the app log).',
   backupOffsiteOk: ' Also pushed to the GitHub repository.',
   backupOffsiteFailed: ' GitHub upload failed — local copy only.',
   about: 'About',

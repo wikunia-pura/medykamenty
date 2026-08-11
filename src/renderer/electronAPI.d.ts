@@ -361,6 +361,8 @@ export interface ElectronAPI {
       trigger: 'startup' | 'quit';
     }) => void,
   ): () => void;
+  onBackupStarted(cb: (info: { trigger: 'startup' | 'quit' }) => void): () => void;
+  onBackupFailed(cb: (info: { trigger: 'startup' | 'quit' }) => void): () => void;
 
   // Zoom
   getZoomFactor(): number;

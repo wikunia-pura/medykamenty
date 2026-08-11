@@ -490,6 +490,9 @@ const App: React.FC = () => {
     return (
       <I18nProvider lang={lang} setLang={setLang}>
         <div className="app">
+          {/* Also on the login screen: without a session the exit backup is the
+              one that fails, and that warning must not be swallowed. */}
+          <BackupNotifier />
           <Login onSignedIn={handleSignedIn} />
         </div>
       </I18nProvider>

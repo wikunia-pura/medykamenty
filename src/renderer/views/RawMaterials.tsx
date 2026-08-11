@@ -1511,7 +1511,7 @@ const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCance
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-xl" onClick={(e) => e.stopPropagation()}>
         <ModalHeader
           icon={<IconImport size={18} />}
           tone="add"

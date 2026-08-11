@@ -1,16 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 
+/** 'progress' = work running (green frame + spinner), 'ok' = done, 'warn' = problem. */
+type ToastTone = 'progress' | 'ok' | 'warn';
+
 interface ToastState {
   message: string;
-  warn: boolean;
+  tone: ToastTone;
+  /** In-progress toasts stay until replaced — the app is closing anyway. */
+  sticky?: boolean;
 }
 
 /**
- * Invisible bridge: listens for the main process's "auto backup written"
- * push and surfaces it as a floating toast. Fired after the startup backup
- * and on exit — the main process holds the window open for a moment after
- * the exit backup so this toast is actually seen before the app closes.
+ * Invisible bridge: listens for the main process's auto-backup pushes and
+ * surfaces them as a floating toast. On exit the sequence is "backing up…"
+ * (sent before the work starts, because the export plus off-site push take a
+ * few seconds of frozen window) and then the result; the main process holds
+ * the window open for a moment so that result is actually seen. The startup
+ * backup only sends the result, since it usually has nothing to do.
  *
  * The toast also reports the off-site push, so "saved locally" and "saved
  * locally AND copied to the backups repo" are distinguishable without
@@ -22,7 +29,7 @@ const BackupNotifier: React.FC = () => {
   const [toast, setToast] = useState<ToastState | null>(null);
 
   useEffect(() => {
-    return window.electronAPI.onBackupCreated((info) => {
+    const offCreated = window.electronAPI.onBackupCreated((info) => {
       const offsite =
         info.upload === 'uploaded'
           ? t.backupOffsiteOk
@@ -32,13 +39,24 @@ const BackupNotifier: React.FC = () => {
       const message = (info.trigger === 'quit' ? t.backupExitCreated : t.backupAutoCreated)
         .replace('{date}', info.date)
         .replace('{offsite}', offsite);
-      setToast({ message, warn: info.upload === 'failed' });
+      setToast({ message, tone: info.upload === 'failed' ? 'warn' : 'ok' });
     });
+    const offStarted = window.electronAPI.onBackupStarted(() => {
+      setToast({ message: t.backupExitInProgress, tone: 'progress', sticky: true });
+    });
+    const offFailed = window.electronAPI.onBackupFailed(() => {
+      setToast({ message: t.backupExitFailed, tone: 'warn' });
+    });
+    return () => {
+      offCreated();
+      offStarted();
+      offFailed();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);
 
   useEffect(() => {
-    if (!toast) return;
+    if (!toast || toast.sticky) return;
     const timer = setTimeout(() => setToast(null), 6000);
     return () => clearTimeout(timer);
   }, [toast]);
@@ -46,8 +64,22 @@ const BackupNotifier: React.FC = () => {
   if (!toast) return null;
 
   return (
-    <div className={`backup-toast${toast.warn ? ' warn' : ''}`} onClick={() => setToast(null)}>
-      {toast.message}
+    <div
+      className={`backup-toast ${toast.tone}`}
+      onClick={() => setToast(null)}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="backup-toast-mark" aria-hidden="true">
+        {toast.tone === 'progress' ? (
+          <span className="backup-toast-spinner" />
+        ) : toast.tone === 'ok' ? (
+          '✓'
+        ) : (
+          '!'
+        )}
+      </span>
+      <span className="backup-toast-text">{toast.message}</span>
     </div>
   );
 };

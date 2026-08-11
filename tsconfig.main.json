@@ -1,7 +1,12 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "outDir": "dist/main"
+    "outDir": "dist/main",
+    // `npm run dev` compiles the main process before every launch; incremental
+    // reuse cuts that from ~2s to ~1s (and the tsbuildinfo carries over to the
+    // watcher that starts right after). Lives in dist/, which is gitignored.
+    "incremental": true,
+    "tsBuildInfoFile": "dist/main/.tsbuildinfo"
   },
   "include": ["src/main/**/*", "src/shared/**/*"]
 }
