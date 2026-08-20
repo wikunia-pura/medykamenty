@@ -108,6 +108,13 @@ export function isSecondaryComponent(type: ComponentType): boolean {
   return (SECONDARY_COMPONENT_TYPES as readonly string[]).includes(type);
 }
 
+// "Typ opakowania" for secondary (shipping) packaging. 'product' — packs
+// finished product units (cartons, tape); only these can be attached to a
+// product's packing scheme. 'mass' — packs bulk mass (barrels, bags).
+// Required for secondary components; missing values are normalized to
+// 'product' on read (see normalizeComponentSchema).
+export type PackagingKind = 'product' | 'mass';
+
 export interface PackagingComponent {
   id: UUID;
   name: string;
@@ -131,6 +138,9 @@ export interface PackagingComponent {
   // 25 kg ('kg'). Ignored for primary components.
   capacity?: number;
   capacityUnit?: PackingCapacityUnit;
+  // "Typ opakowania" — secondary kind only. Required in the UI; legacy rows
+  // without it read as 'product'. Ignored for primary components.
+  packagingKind?: PackagingKind;
   // Current warehouse stock, expressed in units (pcs). Maintained by stock
   // imports and manual edits — see `stockSource`.
   stockQty?: number;
@@ -316,6 +326,7 @@ export function normalizeProductSchema(product: Product): Product {
 }
 
 export function normalizeComponentSchema(component: PackagingComponent): PackagingComponent {
+  let out = component;
   const legacy = component as PackagingComponent & {
     defaultCapacity?: number;
     defaultCapacityUnit?: PackingCapacityUnit;
@@ -326,13 +337,18 @@ export function normalizeComponentSchema(component: PackagingComponent): Packagi
     component.capacity === undefined &&
     legacy.defaultCapacity !== undefined
   ) {
-    return {
-      ...component,
+    out = {
+      ...out,
       capacity: legacy.defaultCapacity,
       capacityUnit: legacy.defaultCapacityUnit ?? 'units',
     };
   }
-  return component;
+  // "Typ opakowania" is required for secondary components; rows saved before
+  // the field existed default to 'product'.
+  if (isSecondaryComponent(out.type) && out.packagingKind === undefined) {
+    out = { ...out, packagingKind: 'product' };
+  }
+  return out;
 }
 
 export interface CatalogAlias {
@@ -760,6 +776,36 @@ export interface ShortageGroup {
   componentLines: ShortageLine[];
 }
 
+// A shared-packaging shortage surfaced for the per-run prompt: the component
+// entered the calculation through the packing scheme — either as a direct
+// tier (carton, barrel) or through the "zużywa" (consumes) cascade of another
+// packaging component (tape via carton, bag via barrel). The user can accept
+// such a shortage per run ("a substitute exists, don't order a new one") —
+// the calculators then leave the component out — or substitute it with
+// another component for the run.
+export interface DependencyShortageRef {
+  componentId: UUID;
+  componentName: string;
+  // 'tier' — direct packing-scheme tier; 'cascade' — reached only via
+  // 'dependencies'. Legacy reports without the field are 'cascade'.
+  origin?: 'tier' | 'cascade';
+  // Names of the packaging components (involved in this calculation) whose
+  // 'dependencies' pull this component in — context for the prompt.
+  consumedBy: string[];
+  // Pieces in stock.
+  available: number;
+  // Shortage-report context (whole pieces, after overage). Absent in
+  // max-producible results.
+  required?: number;
+  shortage?: number;
+  // Max-producible context: the production cap (finished units) this
+  // dependency imposes. Absent in shortage reports.
+  maxUnits?: number;
+  // True when the user accepted this shortage for the run — the component was
+  // excluded from the calculation.
+  accepted: boolean;
+}
+
 export interface ShortageReport {
   planId: UUID;
   computedAt: ISODate;
@@ -770,6 +816,9 @@ export interface ShortageReport {
   // Expired raw-material batches among the plan's materials, with whether each
   // was counted as available for this computation (per-run user decision).
   expiredBatches?: ExpiredBatchRef[];
+  // Shortages of "zużywa"-cascade components (see DependencyShortageRef).
+  // Drives the per-run accept prompt; accepted ones have no shortage line.
+  dependencyShortages?: DependencyShortageRef[];
 }
 
 export interface ShortageReportEntry {
@@ -859,10 +908,16 @@ export interface MaxProducibleResult {
     // (in the material's unit). Absent for batch-less items and components.
     nextExpiry?: ISODate;
     expiredExcludedQty?: number;
+    // The component entered only via the "zużywa" cascade of another packaging
+    // component (tape via carton) — its shortage can be accepted per run.
+    viaDependency?: boolean;
   }[];
   // Expired raw-material batches among this product's ingredients, with whether
   // each was counted as available for this computation.
   expiredBatches?: ExpiredBatchRef[];
+  // "Zużywa"-cascade components that cap production below every non-cascade
+  // limit (see DependencyShortageRef) — drives the per-run accept prompt.
+  dependencyShortages?: DependencyShortageRef[];
 }
 
 // ============================ Orders / Workflows ============================

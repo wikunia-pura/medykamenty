@@ -234,6 +234,21 @@ export interface T {
   packingScopePerUnit: string;
   packingScopePerBulk: string;
   packingBulkUnitInvalid: string;
+  packagingKind: string;
+  packagingKindProduct: string;
+  packagingKindMass: string;
+  packingFixedOneUnit: string;
+  packingMassPerPiece: string;
+  depShortageTitle: string;
+  depShortageIntro: string;
+  depShortageConsumedBy: string;
+  depShortageCount: string;
+  depShortageAccept: string;
+  depShortageContinue: string;
+  depShortageDetailReport: string;
+  depShortageDetailMax: string;
+  depShortageSubstitute: string;
+  depShortageSubstitutePick: string;
   productTabBasics: string;
   componentDependencies: string;
   componentDependenciesHint: string;
@@ -952,6 +967,22 @@ const pl: T = {
   packingScopePerUnit: 'Do produktu',
   packingScopePerBulk: 'Do masy własnej',
   packingBulkUnitInvalid: 'Powiązanie z masą wymaga jednostki kg lub l.',
+  packagingKind: 'Typ opakowania',
+  packagingKindProduct: 'Produkt',
+  packagingKindMass: 'Masa',
+  packingFixedOneUnit: 'Produkt zawsze zajmuje 1 szt.',
+  packingMassPerPiece: 'mieści ≈ {kg} kg masy / 1 szt.',
+  depShortageTitle: 'Braki opakowań zbiorczych',
+  depShortageIntro:
+    'Tych opakowań zbiorczych zabraknie. Zdecyduj dla każdego: licz brak normalnie (trafi do zamówienia), zaakceptuj brak (komponent zostanie pominięty w tym wyliczeniu), albo podmień na inne opakowanie na czas tego wyliczenia.',
+  depShortageConsumedBy: 'Zużywane przez',
+  depShortageCount: 'Licz brak',
+  depShortageAccept: 'Zaakceptuj brak',
+  depShortageContinue: 'Kontynuuj',
+  depShortageDetailReport: 'potrzeba {required} szt., stan {available} szt., brak {shortage} szt.',
+  depShortageDetailMax: 'stan {available} szt. — ogranicza produkcję do {maxUnits} szt.',
+  depShortageSubstitute: 'Podmień',
+  depShortageSubstitutePick: 'Wybierz zamiennik',
   productTabBasics: 'Podstawowe dane',
   componentDependencies: 'Zużywa',
   componentDependenciesHint:
@@ -1690,6 +1721,22 @@ const en: T = {
   packingScopePerUnit: 'Per product',
   packingScopePerBulk: 'Per bulk mass',
   packingBulkUnitInvalid: 'Bulk-mass scope requires kg or l capacity unit.',
+  packagingKind: 'Packaging type',
+  packagingKindProduct: 'Product',
+  packagingKindMass: 'Mass',
+  packingFixedOneUnit: 'A product always takes 1 unit.',
+  packingMassPerPiece: 'holds ≈ {kg} kg of bulk / 1 pc',
+  depShortageTitle: 'Secondary packaging shortages',
+  depShortageIntro:
+    'These secondary packaging components will run short. Decide for each: count the shortage normally (it will be ordered), accept the shortage (the component is left out of this calculation), or substitute another packaging component for this run.',
+  depShortageConsumedBy: 'Consumed by',
+  depShortageCount: 'Count shortage',
+  depShortageAccept: 'Accept shortage',
+  depShortageContinue: 'Continue',
+  depShortageDetailReport: 'needed {required} pcs, stock {available} pcs, short {shortage} pcs',
+  depShortageDetailMax: 'stock {available} pcs — caps production at {maxUnits} units',
+  depShortageSubstitute: 'Substitute',
+  depShortageSubstitutePick: 'Pick a substitute',
   productTabBasics: 'Basics',
   componentDependencies: 'Consumes',
   componentDependenciesHint:

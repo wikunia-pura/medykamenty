@@ -23,6 +23,7 @@ import type {
   RawStockCommitResult,
   RawStockUnmatched,
   ExpiredBatchRef,
+  DependencyShortageRef,
   RecipeImportAnalysis,
   RecipeImportMode,
   RecipeImportResolutions,
@@ -190,8 +191,14 @@ export interface ElectronAPI {
     planId: string,
     orderId?: string,
     includeExpiredBatchIds?: string[],
+    acceptedDependencyIds?: string[],
+    substitutions?: Record<string, string>,
   ): Promise<ShortageReport>;
   previewExpiredForPlan(planId: string): Promise<ExpiredBatchRef[]>;
+  previewDependencyShortages(
+    planId: string,
+    includeExpiredBatchIds?: string[],
+  ): Promise<DependencyShortageRef[]>;
   computeCost(planId: string): Promise<CostReport>;
 
   // Shortage report history
@@ -284,6 +291,8 @@ export interface ElectronAPI {
   maxProducible(
     productId: string,
     includeExpiredBatchIds?: string[],
+    acceptedDependencyIds?: string[],
+    substitutions?: Record<string, string>,
   ): Promise<MaxProducibleResult>;
 
   // Settings

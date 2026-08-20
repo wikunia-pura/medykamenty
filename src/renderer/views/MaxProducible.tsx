@@ -7,11 +7,15 @@ import type {
   RawMaterial,
   PackagingComponent,
   ExpiredBatchRef,
+  DependencyShortageRef,
 } from '../../shared/types';
 import MultiSelect from '../components/MultiSelect';
 import LoadingOverlay from '../components/LoadingOverlay';
 import ProductEditorModal from '../components/ProductEditorModal';
 import ExpiredStockModal from '../components/ExpiredStockModal';
+import DependencyShortageModal, {
+  buildSubstituteCandidates,
+} from '../components/DependencyShortageModal';
 import { IconRefresh, IconChevronDown } from '../components/Icons';
 
 type Bottleneck = MaxProducibleResult['bottlenecks'][number];
@@ -99,6 +103,21 @@ const MaxProducibleView: React.FC = () => {
   const [pendingExpired, setPendingExpired] = useState<
     { batches: ExpiredBatchRef[]; targetIds: string[]; base: MaxProducibleResult[] } | null
   >(null);
+  // "Zużywa"-shortage gate: cascade-consumed components (tape via carton)
+  // that cap production below every non-cascade limit. The user decides
+  // per-run whether to accept each shortage (a substitute exists — exclude it
+  // from the calculation) or keep it as the limiting bottleneck. `computed`
+  // holds the results of the pass that surfaced the prompt, for cancel.
+  const [pendingDeps, setPendingDeps] = useState<{
+    refs: DependencyShortageRef[];
+    targetIds: string[];
+    expiredIds: string[];
+    computed: MaxProducibleResult[];
+  } | null>(null);
+  // Remembers the accepted shortages / substitutions so the expired-panel
+  // regenerate keeps the same decision instead of re-prompting.
+  const [acceptedDepIds, setAcceptedDepIds] = useState<string[]>([]);
+  const [depSubstitutions, setDepSubstitutions] = useState<Record<string, string>>({});
   // Editable copy of the "count this expired batch?" decision, shown as a panel
   // over the results so the user can change it and recompute — mirrors the
   // shortage report. Re-seeded from the results' own `included` flags.
@@ -188,43 +207,70 @@ const MaxProducibleView: React.FC = () => {
     );
   };
 
-  const runCompute = async (targetIds: string[], includeExpiredBatchIds: string[]) => {
+  const runCompute = async (
+    targetIds: string[],
+    includeExpiredBatchIds: string[],
+    acceptedDependencyIds: string[] = [],
+    substitutions: Record<string, string> = {},
+  ): Promise<MaxProducibleResult[]> => {
     setBusy(true);
     setLoaderMessage(t.loaderComputing);
     try {
-      const next = await Promise.all(
-        targetIds.map((id) => window.electronAPI.maxProducible(id, includeExpiredBatchIds)),
+      return await Promise.all(
+        targetIds.map((id) =>
+          window.electronAPI.maxProducible(
+            id,
+            includeExpiredBatchIds,
+            acceptedDependencyIds,
+            substitutions,
+          ),
+        ),
       );
-      setResults(next);
     } finally {
       setBusy(false);
       setLoaderMessage(null);
     }
   };
 
+  // Last gate before showing results: if any "zużywa"-cascade component caps
+  // production, ask the user (accept shortage → substitute used, excluded)
+  // before committing the results.
+  const finishWithDepGate = (
+    targetIds: string[],
+    expiredIds: string[],
+    computed: MaxProducibleResult[],
+  ) => {
+    const byId = new Map<string, DependencyShortageRef>();
+    for (const r of computed) {
+      for (const d of r.dependencyShortages ?? []) {
+        if (!d.accepted) byId.set(d.componentId, d);
+      }
+    }
+    const refs = Array.from(byId.values());
+    if (refs.length > 0) {
+      setPendingDeps({ refs, targetIds, expiredIds, computed });
+      return;
+    }
+    setResults(computed);
+  };
+
   const compute = async (ids?: string[]) => {
     const targetIds = ids ?? productIds;
     if (targetIds.length === 0) return;
-    setBusy(true);
-    setLoaderMessage(t.loaderComputing);
-    try {
-      // First pass excludes all expired stock. If any expired batch is
-      // relevant, gate on the per-run decision before showing results.
-      const base = await Promise.all(
-        targetIds.map((id) => window.electronAPI.maxProducible(id)),
-      );
-      const byId = new Map<string, ExpiredBatchRef>();
-      for (const r of base) for (const b of r.expiredBatches ?? []) byId.set(b.batchId, b);
-      const expired = Array.from(byId.values());
-      if (expired.length > 0) {
-        setPendingExpired({ batches: expired, targetIds, base });
-        return;
-      }
-      setResults(base);
-    } finally {
-      setBusy(false);
-      setLoaderMessage(null);
+    // Fresh run — every per-run decision is asked again.
+    setAcceptedDepIds([]);
+    setDepSubstitutions({});
+    // First pass excludes all expired stock. If any expired batch is
+    // relevant, gate on the per-run decision before showing results.
+    const base = await runCompute(targetIds, []);
+    const byId = new Map<string, ExpiredBatchRef>();
+    for (const r of base) for (const b of r.expiredBatches ?? []) byId.set(b.batchId, b);
+    const expired = Array.from(byId.values());
+    if (expired.length > 0) {
+      setPendingExpired({ batches: expired, targetIds, base });
+      return;
     }
+    finishWithDepGate(targetIds, [], base);
   };
 
   return (
@@ -347,7 +393,11 @@ const MaxProducibleView: React.FC = () => {
             <button
               className="btn primary-filled"
               disabled={busy || productIds.length === 0}
-              onClick={() => void runCompute(productIds, [...expiredDraft])}
+              onClick={() =>
+                void runCompute(productIds, [...expiredDraft], acceptedDepIds, depSubstitutions).then(
+                  setResults,
+                )
+              }
               title={t.expiredReportRegenerate}
             >
               {t.expiredReportRegenerate}
@@ -560,8 +610,41 @@ const MaxProducibleView: React.FC = () => {
           onConfirm={(ids) => {
             const { targetIds, base } = pendingExpired;
             setPendingExpired(null);
-            if (ids.length === 0) setResults(base);
-            else void runCompute(targetIds, ids);
+            if (ids.length === 0) finishWithDepGate(targetIds, [], base);
+            else
+              void runCompute(targetIds, ids).then((next) =>
+                finishWithDepGate(targetIds, ids, next),
+              );
+          }}
+        />
+      )}
+
+      {pendingDeps && (
+        <DependencyShortageModal
+          rows={pendingDeps.refs.map((r) => ({
+            componentId: r.componentId,
+            name: r.componentName,
+            consumedBy: r.consumedBy,
+            detail: t.depShortageDetailMax
+              .replace('{available}', r.available.toLocaleString())
+              .replace('{maxUnits}', (r.maxUnits ?? 0).toLocaleString()),
+            candidates: buildSubstituteCandidates(components, r.componentId),
+          }))}
+          onCancel={() => {
+            // Cancel = keep the results with every shortage counted.
+            setResults(pendingDeps.computed);
+            setPendingDeps(null);
+          }}
+          onConfirm={({ acceptedIds, substitutions }) => {
+            const { targetIds, expiredIds, computed } = pendingDeps;
+            setPendingDeps(null);
+            setAcceptedDepIds(acceptedIds);
+            setDepSubstitutions(substitutions);
+            if (acceptedIds.length === 0 && Object.keys(substitutions).length === 0) {
+              setResults(computed);
+            } else {
+              void runCompute(targetIds, expiredIds, acceptedIds, substitutions).then(setResults);
+            }
           }}
         />
       )}

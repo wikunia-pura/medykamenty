@@ -4,7 +4,6 @@ import type {
   PackagingComponent,
   PackingScheme,
   PackingTier,
-  PackingTierScope,
   RecipeIngredient,
   RecipePackaging,
 } from '../../shared/types';
@@ -84,6 +83,12 @@ const RecipeEditor: React.FC<Props> = ({
     [components],
   );
 
+  // Both kinds attach here: the component's "typ opakowania" decides which
+  // production consumes it — 'product' binds to finished units (plan items),
+  // 'mass' binds to bulk-mass production (plan bulkMass).
+  const kindLabel = (c: PackagingComponent) =>
+    (c.packagingKind ?? 'product') === 'mass' ? t.packagingKindMass : t.packagingKindProduct;
+
   const secondaryComponentOptions = useMemo(
     () =>
       components
@@ -91,9 +96,9 @@ const RecipeEditor: React.FC<Props> = ({
         .map((c) => ({
           value: c.id,
           label: c.name,
-          hint: c.type ? `(${c.type})` : undefined,
+          hint: kindLabel(c),
         })),
-    [components],
+    [components, t],
   );
 
   const componentById = useMemo(
@@ -138,24 +143,17 @@ const RecipeEditor: React.FC<Props> = ({
     return 1;
   };
 
-  // Effective consumption per finished product — what the cost / shortage
-  // calculator will see, including the per_bulk_mass scaling.
+  // Effective consumption per finished product for 'product'-kind packaging —
+  // mirrors packingConsumption.ts. 'Mass'-kind binds to bulk production, not
+  // finished units, so it has its own display below.
   const effectiveConsumptionPerProduct = (
     comp: PackagingComponent | undefined,
     tier: PackingTier,
   ): number => {
     if (!comp) return 0;
     const unit = comp.capacityUnit ?? 'units';
-    const scope = tier.scope ?? 'per_unit';
-    if (scope === 'per_bulk_mass') {
-      // Each finished product carries its own mass/volume through the bulk
-      // container; the stored consumption is per kg/l of bulk.
-      let perProductInUnit = 1;
-      if (unit === 'kg') perProductInUnit = (productCapacityMl * productDensityGPerMl) / 1000;
-      else if (unit === 'l') perProductInUnit = productCapacityMl / 1000;
-      else perProductInUnit = 0; // per_bulk_mass with units/m is meaningless
-      return perProductInUnit * tier.consumption;
-    }
+    // A product always occupies exactly 1 slot — mirrors packingConsumption.ts.
+    if (unit === 'units') return 1;
     if ((unit === 'kg' || unit === 'l') && !tier.consumptionOverride) {
       return derivedConsumption(comp);
     }
@@ -165,14 +163,31 @@ const RecipeEditor: React.FC<Props> = ({
   const piecesPerProductDisplay = (
     comp: PackagingComponent | undefined,
     effectiveConsumption: number,
-    scope: PackingTierScope,
   ): string => {
     if (!comp || !comp.capacity || comp.capacity <= 0) return '?';
     const pieces = effectiveConsumption / comp.capacity;
     if (pieces <= 0 || !Number.isFinite(pieces)) return '?';
-    const noun = scope === 'per_bulk_mass' ? 'produkt.' : 'produkt.';
     if (pieces >= 1) return `${pieces.toFixed(3)} szt./produkt`;
-    return `1 / ${(1 / pieces).toFixed(0)} ${noun}`;
+    return `1 / ${(1 / pieces).toFixed(0)} produkt.`;
+  };
+
+  // 'Mass'-kind: how many kg of bulk one piece holds (barrel 120 l × density,
+  // bag 25 kg / consumption-per-kg). '?' when the math cannot resolve.
+  const bulkKgPerPieceDisplay = (comp: PackagingComponent, tier: PackingTier): string => {
+    const unit = comp.capacityUnit ?? 'units';
+    const capacity = comp.capacity ?? 0;
+    const consumption = tier.consumption || 1;
+    if (capacity <= 0 || consumption <= 0) return '?';
+    let kgPerPiece = 0;
+    if (unit === 'kg') kgPerPiece = capacity / consumption;
+    else if (unit === 'l') {
+      if (!productDensityGPerMl || productDensityGPerMl <= 0) return '?';
+      kgPerPiece = (capacity * productDensityGPerMl) / consumption;
+    } else return '?'; // units/m capacity is invalid for mass packaging
+    return t.packingMassPerPiece.replace(
+      '{kg}',
+      kgPerPiece.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+    );
   };
 
   const sumPercent = ingredients.reduce((acc, i) => acc + (i.percentage || 0), 0);
@@ -390,7 +405,7 @@ const RecipeEditor: React.FC<Props> = ({
         <thead>
           <tr>
             <th>{t.name}</th>
-            <th>{t.packingScope}</th>
+            <th>{t.packagingKind}</th>
             <th className="num">{t.packingConsumption}</th>
             <th>{t.packingPerProduct}</th>
             {!readOnly && <th className="actions">{t.actionsHeader}</th>}
@@ -408,22 +423,31 @@ const RecipeEditor: React.FC<Props> = ({
             const comp = componentById.get(tier.componentId);
             const unit = comp?.capacityUnit ?? 'units';
             const unitLabel = unit === 'units' ? t.unitUnits : unit;
-            const scope: PackingTierScope = tier.scope ?? 'per_unit';
-            // Auto-derive only applies to per_unit + kg/l. For per_bulk_mass
-            // the user enters consumption per kg/l of bulk (typically 1).
-            const isAutoDeriveCandidate =
-              scope === 'per_unit' && (unit === 'kg' || unit === 'l');
+            // The component's "typ opakowania" decides the semantics:
+            // 'product' — per finished unit; 'mass' — per kg of bulk.
+            const isMass = (comp?.packagingKind ?? 'product') === 'mass';
+            // Auto-derive only applies to product-kind + kg/l. For mass-kind
+            // the user enters consumption per kg of bulk (typically 1).
+            const isAutoDeriveCandidate = !isMass && (unit === 'kg' || unit === 'l');
             const isAuto = isAutoDeriveCandidate && !tier.consumptionOverride;
-            const displayedConsumption = isAuto ? derivedConsumption(comp) : tier.consumption;
+            // 'units' capacity has no per-product slot definition anymore —
+            // a product always takes exactly 1 slot.
+            const isFixedOneUnit = !isMass && unit === 'units';
+            const displayedConsumption = isFixedOneUnit
+              ? 1
+              : isAuto
+                ? derivedConsumption(comp)
+                : tier.consumption;
             const effective = effectiveConsumptionPerProduct(comp, {
               ...tier,
               consumption: displayedConsumption,
             });
             const needsReview = !!tier.note;
             const capacityMissing = !comp?.capacity || comp.capacity <= 0;
-            const bulkUnitInvalid = scope === 'per_bulk_mass' && (unit === 'units' || unit === 'm');
-            const inputUnitLabel =
-              scope === 'per_bulk_mass' ? `${unitLabel} / kg masy` : `${unitLabel} / produkt`;
+            const bulkUnitInvalid = isMass && (unit === 'units' || unit === 'm');
+            const inputUnitLabel = isMass
+              ? `${unitLabel} / kg masy`
+              : `${unitLabel} / produkt`;
             return (
               <tr key={idx}>
                 <td className="col-wrap">
@@ -458,46 +482,42 @@ const RecipeEditor: React.FC<Props> = ({
                   )}
                 </td>
                 <td>
-                  <select
-                    className="input"
-                    style={{ width: 140 }}
-                    value={scope}
-                    onChange={(e) => {
-                      const next = e.target.value as PackingTierScope;
-                      updateTier(idx, {
-                        scope: next,
-                        // Reset override + reasonable default when scope flips.
-                        consumptionOverride: false,
-                        consumption: 1,
-                      });
-                    }}
-                    disabled={readOnly}
-                  >
-                    <option value="per_unit">{t.packingScopePerUnit}</option>
-                    <option value="per_bulk_mass">{t.packingScopePerBulk}</option>
-                  </select>
+                  <span className="hint">{comp ? kindLabel(comp) : '—'}</span>
                 </td>
                 <td className="num">
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <NumberInput
-                      className="input"
-                      step="0.001"
-                      style={{ width: 110 }}
-                      value={displayedConsumption}
-                      emptyValue={0}
-                      onChange={(v) => {
-                        const c = v ?? 0;
-                        updateTier(idx, {
-                          consumption: c,
-                          consumptionOverride: isAutoDeriveCandidate ? true : undefined,
-                          note: undefined,
-                        });
-                      }}
-                      disabled={readOnly || isAuto}
-                    />
-                    <div className="hint" style={{ fontSize: 11 }}>
-                      {inputUnitLabel}
-                    </div>
+                    {isFixedOneUnit ? (
+                      <>
+                        <div>1</div>
+                        <div className="hint" style={{ fontSize: 11 }}>
+                          {inputUnitLabel}
+                          <br />
+                          {t.packingFixedOneUnit}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <NumberInput
+                          className="input"
+                          step="0.001"
+                          style={{ width: 110 }}
+                          value={displayedConsumption}
+                          emptyValue={0}
+                          onChange={(v) => {
+                            const c = v ?? 0;
+                            updateTier(idx, {
+                              consumption: c,
+                              consumptionOverride: isAutoDeriveCandidate ? true : undefined,
+                              note: undefined,
+                            });
+                          }}
+                          disabled={readOnly || isAuto}
+                        />
+                        <div className="hint" style={{ fontSize: 11 }}>
+                          {inputUnitLabel}
+                        </div>
+                      </>
+                    )}
                     {isAutoDeriveCandidate && (
                       <label
                         style={{
@@ -530,7 +550,10 @@ const RecipeEditor: React.FC<Props> = ({
                   {comp && comp.capacity && comp.capacity > 0 ? (
                     <div className="hint" style={{ fontSize: 11 }}>
                       1 {comp.name} = {comp.capacity.toLocaleString()} {unitLabel}
-                      <br />→ {piecesPerProductDisplay(comp, effective, scope)}
+                      <br />→{' '}
+                      {isMass
+                        ? bulkKgPerPieceDisplay(comp, { ...tier, consumption: displayedConsumption })
+                        : piecesPerProductDisplay(comp, effective)}
                     </div>
                   ) : (
                     <span className="hint">—</span>

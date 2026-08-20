@@ -894,8 +894,21 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.PLAN_DUPLICATE, (_e, id: string) => db.duplicatePlan(id));
   ipcMain.handle(
     IPC.PLAN_COMPUTE_SHORTAGES,
-    async (_e, planId: string, orderId?: string, includeExpiredBatchIds?: string[]) => {
-      const report = await computeShortages(planId, db, includeExpiredBatchIds ?? []);
+    async (
+      _e,
+      planId: string,
+      orderId?: string,
+      includeExpiredBatchIds?: string[],
+      acceptedDependencyIds?: string[],
+      substitutions?: Record<string, string>,
+    ) => {
+      const report = await computeShortages(
+        planId,
+        db,
+        includeExpiredBatchIds ?? [],
+        acceptedDependencyIds ?? [],
+        substitutions ?? {},
+      );
       await db.updatePlan(planId, { status: 'computed', computedAt: report.computedAt });
       await db.addShortageReport(planId, report, orderId);
       return report;
@@ -905,6 +918,16 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   // without computing or saving a report.
   ipcMain.handle(IPC.PLAN_PREVIEW_EXPIRED, (_e, planId: string) =>
     previewExpiredForPlan(planId, db),
+  );
+  // Pre-pass for the "zużywa" shortage prompt: run the shortage math WITHOUT
+  // saving a report and return only the cascade-dependency shortages so the
+  // UI can ask the user before the real compute.
+  ipcMain.handle(
+    IPC.PLAN_PREVIEW_DEPENDENCY_SHORTAGES,
+    async (_e, planId: string, includeExpiredBatchIds?: string[]) => {
+      const report = await computeShortages(planId, db, includeExpiredBatchIds ?? []);
+      return report.dependencyShortages ?? [];
+    },
   );
 
   // ---- Shortage report history ----
@@ -1026,8 +1049,20 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   // ---- Reverse ----
   ipcMain.handle(
     IPC.REVERSE_MAX_PRODUCIBLE,
-    (_e, productId: string, includeExpiredBatchIds?: string[]) =>
-      maxProducible(productId, db, includeExpiredBatchIds ?? []),
+    (
+      _e,
+      productId: string,
+      includeExpiredBatchIds?: string[],
+      acceptedDependencyIds?: string[],
+      substitutions?: Record<string, string>,
+    ) =>
+      maxProducible(
+        productId,
+        db,
+        includeExpiredBatchIds ?? [],
+        acceptedDependencyIds ?? [],
+        substitutions ?? {},
+      ),
   );
 
   // ---- Settings ----

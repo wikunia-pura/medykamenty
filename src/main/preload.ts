@@ -77,6 +77,7 @@ const CH = {
   PLAN_DUPLICATE: 'plan:duplicate',
   PLAN_COMPUTE_SHORTAGES: 'plan:compute-shortages',
   PLAN_PREVIEW_EXPIRED: 'plan:preview-expired',
+  PLAN_PREVIEW_DEPENDENCY_SHORTAGES: 'plan:preview-dependency-shortages',
   PLAN_COMPUTE_COST: 'plan:compute-cost',
 
   SHORTAGE_REPORT_LIST: 'shortageReport:list',
@@ -265,9 +266,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updatePlan: (id: string, patch: any) => ipcRenderer.invoke(CH.PLAN_UPDATE, id, patch),
   deletePlan: (id: string) => ipcRenderer.invoke(CH.PLAN_DELETE, id),
   duplicatePlan: (id: string) => ipcRenderer.invoke(CH.PLAN_DUPLICATE, id),
-  computeShortages: (planId: string, orderId?: string, includeExpiredBatchIds?: string[]) =>
-    ipcRenderer.invoke(CH.PLAN_COMPUTE_SHORTAGES, planId, orderId, includeExpiredBatchIds),
+  computeShortages: (
+    planId: string,
+    orderId?: string,
+    includeExpiredBatchIds?: string[],
+    acceptedDependencyIds?: string[],
+    substitutions?: Record<string, string>,
+  ) =>
+    ipcRenderer.invoke(
+      CH.PLAN_COMPUTE_SHORTAGES,
+      planId,
+      orderId,
+      includeExpiredBatchIds,
+      acceptedDependencyIds,
+      substitutions,
+    ),
   previewExpiredForPlan: (planId: string) => ipcRenderer.invoke(CH.PLAN_PREVIEW_EXPIRED, planId),
+  previewDependencyShortages: (planId: string, includeExpiredBatchIds?: string[]) =>
+    ipcRenderer.invoke(CH.PLAN_PREVIEW_DEPENDENCY_SHORTAGES, planId, includeExpiredBatchIds),
   computeCost: (planId: string) => ipcRenderer.invoke(CH.PLAN_COMPUTE_COST, planId),
 
   // Shortage report history
@@ -354,8 +370,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(CH.WORKFLOW_TEMPLATE_DUPLICATE, id),
 
   // Reverse
-  maxProducible: (productId: string, includeExpiredBatchIds?: string[]) =>
-    ipcRenderer.invoke(CH.REVERSE_MAX_PRODUCIBLE, productId, includeExpiredBatchIds),
+  maxProducible: (
+    productId: string,
+    includeExpiredBatchIds?: string[],
+    acceptedDependencyIds?: string[],
+    substitutions?: Record<string, string>,
+  ) =>
+    ipcRenderer.invoke(
+      CH.REVERSE_MAX_PRODUCIBLE,
+      productId,
+      includeExpiredBatchIds,
+      acceptedDependencyIds,
+      substitutions,
+    ),
 
   // Settings
   getSettings: () => ipcRenderer.invoke(CH.SETTINGS_GET),

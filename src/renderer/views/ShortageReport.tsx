@@ -13,9 +13,14 @@ import type {
   ShortageReportEntry,
   Supplier,
   ExpiredBatchRef,
+  DependencyShortageRef,
+  PackagingComponent,
 } from '../../shared/types';
 import type { ViewKey } from './types';
 import ExpiredStockModal from '../components/ExpiredStockModal';
+import DependencyShortageModal, {
+  buildSubstituteCandidates,
+} from '../components/DependencyShortageModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import NoPlansEmptyState from '../components/NoPlansEmptyState';
@@ -119,6 +124,18 @@ const ShortageReportView: React.FC<Props> = ({
     { batches: ExpiredBatchRef[]; planId: string; planName: string } | null
   >(null);
   const [expiredIncludeIds, setExpiredIncludeIds] = useState<string[]>([]);
+  // "Zużywa"-shortage gate: when a cascade-consumed component (tape via
+  // carton) would run short, the user decides per-run whether to accept the
+  // shortage (a substitute exists — leave it out) or count it normally.
+  // `acceptedDepIds` remembers the decision for recomputes.
+  const [pendingDeps, setPendingDeps] = useState<
+    { refs: DependencyShortageRef[]; planId: string; expiredIds: string[] } | null
+  >(null);
+  const [acceptedDepIds, setAcceptedDepIds] = useState<string[]>([]);
+  const [depSubstitutions, setDepSubstitutions] = useState<Record<string, string>>({});
+  // Full component catalog — used to offer substitution candidates in the
+  // shared-packaging shortage prompt.
+  const [components, setComponents] = useState<PackagingComponent[]>([]);
   // Editable copy of the "count this expired batch?" decision shown on the
   // generated report, so the user can change their mind and regenerate. Synced
   // from the report's own `included` flags whenever a fresh report loads.
@@ -169,18 +186,20 @@ const ShortageReportView: React.FC<Props> = ({
     void (async () => {
       setLoaderMessage(t.loading);
       try {
-        const [ps, ss, pr, os, bs] = await Promise.all([
+        const [ps, ss, pr, os, bs, cs] = await Promise.all([
           window.electronAPI.listPlans(),
           window.electronAPI.listSuppliers(),
           window.electronAPI.listProducts(),
           window.electronAPI.listOrders().catch(() => [] as Order[]),
           window.electronAPI.listEmailBatches().catch(() => [] as EmailBatch[]),
+          window.electronAPI.listComponents().catch(() => [] as PackagingComponent[]),
         ]);
         setPlans(ps);
         setSuppliers(ss);
         setProducts(pr);
         setOrders(os);
         setBatches(bs);
+        setComponents(cs);
         if (!selectedPlanId && ps[0]) onSelectPlan(ps[0].id);
         await loadHistory();
         setDataLoaded(true);
@@ -236,7 +255,12 @@ const ShortageReportView: React.FC<Props> = ({
   };
 
   // Runs the actual shortage computation + focuses the fresh report.
-  const runCompute = async (planId: string, includeExpiredBatchIds: string[]) => {
+  const runCompute = async (
+    planId: string,
+    includeExpiredBatchIds: string[],
+    acceptedDependencyIds: string[],
+    substitutions: Record<string, string>,
+  ) => {
     const plan = plans.find((p) => p.id === planId);
     setBusy(true);
     setLoaderMessage(t.loaderComputing);
@@ -246,6 +270,8 @@ const ShortageReportView: React.FC<Props> = ({
         planId,
         orderTaskContextOrderId,
         includeExpiredBatchIds,
+        acceptedDependencyIds,
+        substitutions,
       );
       const list = await loadHistory();
       const newest = list.find((e) => e.planId === planId);
@@ -265,6 +291,32 @@ const ShortageReportView: React.FC<Props> = ({
     }
   };
 
+  // Second gate (after the expired one): shortages of components consumed
+  // only via the "zużywa" cascade. If any exist, ask the user before the real
+  // compute; otherwise compute straight away with nothing accepted.
+  const gateDependencyShortages = async (planId: string, includeExpiredBatchIds: string[]) => {
+    setBusy(true);
+    setLoaderMessage(t.loaderComputing);
+    try {
+      const refs = await window.electronAPI.previewDependencyShortages(
+        planId,
+        includeExpiredBatchIds,
+      );
+      if (refs.length > 0) {
+        setPendingDeps({ refs, planId, expiredIds: includeExpiredBatchIds });
+        return;
+      }
+    } catch {
+      // If the preview fails, fall through and compute with every shortage counted.
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+    setAcceptedDepIds([]);
+    setDepSubstitutions({});
+    await runCompute(planId, includeExpiredBatchIds, [], {});
+  };
+
   const compute = async () => {
     if (!selectedPlanId) return;
     const plan = plans.find((p) => p.id === selectedPlanId);
@@ -281,7 +333,7 @@ const ShortageReportView: React.FC<Props> = ({
       // If the preview fails, fall through and compute with expired excluded.
     }
     setExpiredIncludeIds([]);
-    await runCompute(selectedPlanId, []);
+    await gateDependencyShortages(selectedPlanId, []);
   };
 
   const reassignSupplier = async (line: ShortageLine, newSupplierId: string) => {
@@ -316,6 +368,8 @@ const ShortageReportView: React.FC<Props> = ({
         focus.planId,
         orderTaskContextOrderId,
         expiredIncludeIds,
+        acceptedDepIds,
+        depSubstitutions,
       );
       const list = await loadHistory();
       const newest = list.find((e) => e.planId === focus.planId);
@@ -362,6 +416,8 @@ const ShortageReportView: React.FC<Props> = ({
         focus.planId,
         orderTaskContextOrderId,
         expiredIncludeIds,
+        acceptedDepIds,
+        depSubstitutions,
       );
       const list = await loadHistory();
       const newest = list.find((e) => e.planId === focus.planId);
@@ -866,7 +922,7 @@ const ShortageReportView: React.FC<Props> = ({
                 onClick={() => {
                   const ids = [...expiredDraft];
                   setExpiredIncludeIds(ids);
-                  void runCompute(focus.planId, ids);
+                  void runCompute(focus.planId, ids, acceptedDepIds, depSubstitutions);
                 }}
                 title={t.expiredReportRegenerate}
               >
@@ -1424,7 +1480,30 @@ const ShortageReportView: React.FC<Props> = ({
             const planId = pendingExpired.planId;
             setPendingExpired(null);
             setExpiredIncludeIds(ids);
-            void runCompute(planId, ids);
+            void gateDependencyShortages(planId, ids);
+          }}
+        />
+      )}
+
+      {pendingDeps && (
+        <DependencyShortageModal
+          rows={pendingDeps.refs.map((r) => ({
+            componentId: r.componentId,
+            name: r.componentName,
+            consumedBy: r.consumedBy,
+            detail: t.depShortageDetailReport
+              .replace('{required}', (r.required ?? 0).toLocaleString())
+              .replace('{available}', r.available.toLocaleString())
+              .replace('{shortage}', (r.shortage ?? 0).toLocaleString()),
+            candidates: buildSubstituteCandidates(components, r.componentId),
+          }))}
+          onCancel={() => setPendingDeps(null)}
+          onConfirm={({ acceptedIds, substitutions }) => {
+            const { planId, expiredIds } = pendingDeps;
+            setPendingDeps(null);
+            setAcceptedDepIds(acceptedIds);
+            setDepSubstitutions(substitutions);
+            void runCompute(planId, expiredIds, acceptedIds, substitutions);
           }}
         />
       )}

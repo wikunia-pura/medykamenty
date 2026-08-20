@@ -74,11 +74,19 @@ const PlanEditorModal: React.FC<Props> = ({
   const removeBulk = (idx: number) => {
     setEditing({ ...editing, bulkMass: bulkMass.filter((_, i) => i !== idx) });
   };
+  // Prefill from the product's configured bulk mass ("Masa na saszetki [kg]");
+  // 10 kg is the legacy fallback for products without one.
+  const defaultMassFor = (product: Product | undefined): number => {
+    const mass = product?.sachetMassKg;
+    if (mass && mass > 0) return mass;
+    return 10;
+  };
   const addBulk = () => {
     if (products.length === 0) return;
+    const first = products[0];
     setEditing({
       ...editing,
-      bulkMass: [...bulkMass, { productId: products[0].id, massKg: 10 }],
+      bulkMass: [...bulkMass, { productId: first.id, massKg: defaultMassFor(first) }],
     });
   };
 
@@ -314,7 +322,14 @@ const PlanEditorModal: React.FC<Props> = ({
                         <SearchableSelect
                           options={productOptions}
                           value={bm.productId}
-                          onChange={(val) => updateBulk(idx, { productId: val })}
+                          onChange={(val) =>
+                            // Switching the product re-seeds the mass from its
+                            // configured default.
+                            updateBulk(idx, {
+                              productId: val,
+                              massKg: defaultMassFor(productById.get(val)),
+                            })
+                          }
                           placeholder={t.search}
                           disabled={readOnly}
                         />

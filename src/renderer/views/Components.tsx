@@ -5,6 +5,7 @@ import type {
   AppSettings,
   ComponentDependency,
   PackagingComponent,
+  PackagingKind,
   PackingCapacityUnit,
   Supplier,
   ComponentType,
@@ -139,6 +140,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       { id: 'overage', label: t.overage, defaultVisible: true },
       ...(kind === 'secondary'
         ? [
+            { id: 'packagingKind', label: t.packagingKind, defaultVisible: true } as ColumnDef,
             { id: 'capacity', label: t.packingCapacity, defaultVisible: true } as ColumnDef,
             { id: 'consumes', label: t.componentDependencies, defaultVisible: true } as ColumnDef,
           ]
@@ -215,6 +217,12 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         return (
           <th key={id} className="num col-w-sm">
             {t.overage}
+          </th>
+        );
+      case 'packagingKind':
+        return (
+          <th key={id} className="col-w-sm">
+            {t.packagingKind}
           </th>
         );
       case 'capacity':
@@ -316,6 +324,14 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
             defaultPct={defaultOveragePct}
             onCommit={(pct) => onSetOverage(c.id, pct)}
           />
+        );
+      case 'packagingKind':
+        return (
+          <td key={id}>
+            {(c.packagingKind ?? 'product') === 'product'
+              ? t.packagingKindProduct
+              : t.packagingKindMass}
+          </td>
         );
       case 'capacity':
         return (
@@ -482,7 +498,13 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       // defaultType for secondary is 'outer_carton' → 'units'. If the user
       // picks 'barrel' from the type dropdown, the unit dropdown in the modal
       // lets them switch to 'l'.
-      ...(kind === 'secondary' ? { capacityUnit: 'units' as const, dependencies: [] } : {}),
+      ...(kind === 'secondary'
+        ? {
+            capacityUnit: 'units' as const,
+            packagingKind: 'product' as const,
+            dependencies: [],
+          }
+        : {}),
     });
 
   // Build the same payload that onSave persists — extracted so doPropagate can
@@ -504,6 +526,9 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     // a row from secondary → primary doesn't leave dangling values.
     capacity: kind === 'secondary' ? e.capacity : undefined,
     capacityUnit: kind === 'secondary' ? (e.capacityUnit ?? 'units') : undefined,
+    // Required for secondary — default 'product' so legacy rows opened and
+    // saved without touching the control stay valid.
+    packagingKind: kind === 'secondary' ? (e.packagingKind ?? 'product') : undefined,
     dependencies: kind === 'secondary' ? (e.dependencies ?? []) : undefined,
   });
 
@@ -962,6 +987,21 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
                   </div>
                   {kind === 'secondary' && (
                     <>
+                      <div className="form-row">
+                        <label>{t.packagingKind}</label>
+                        <SegmentedControl
+                          ariaLabel={t.packagingKind}
+                          value={editing.packagingKind ?? 'product'}
+                          onChange={(v) =>
+                            setEditing({ ...editing, packagingKind: v as PackagingKind })
+                          }
+                          disabled={editingReadOnly}
+                          options={[
+                            { value: 'product', label: t.packagingKindProduct },
+                            { value: 'mass', label: t.packagingKindMass },
+                          ]}
+                        />
+                      </div>
                       <div className="form-row">
                         <label>{t.packingCapacity}</label>
                         <NumberInput

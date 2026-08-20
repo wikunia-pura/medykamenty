@@ -184,6 +184,7 @@ export async function seedDemo(db: Database): Promise<DemoSeedResult> {
     currency: 'PLN',
     capacity: 66,
     capacityUnit: 'm',
+    packagingKind: 'product',
   });
   const kartonZbiorczy = await db.createComponent({
     name: 'Karton zbiorczy 50 szt.',
@@ -196,6 +197,7 @@ export async function seedDemo(db: Database): Promise<DemoSeedResult> {
     currency: 'PLN',
     capacity: 50,
     capacityUnit: 'units',
+    packagingKind: 'product',
     // 1 karton zbiorczy zużywa 2 m taśmy (3 razy oklejony)
     dependencies: [{ componentId: tasma.id, consumption: 2 }],
   });
@@ -209,6 +211,7 @@ export async function seedDemo(db: Database): Promise<DemoSeedResult> {
     currency: 'PLN',
     capacity: 200,
     capacityUnit: 'l',
+    packagingKind: 'mass',
   });
 
   // ---- Product with recipe ----
@@ -239,8 +242,9 @@ export async function seedDemo(db: Database): Promise<DemoSeedResult> {
         // Produkt zajmuje 1 slot w kartonie (karton mieści 50 slotów).
         // Taśma wynika z dependency na kartonie — nie powtarzamy jej tu.
         { componentId: kartonZbiorczy.id, consumption: 1 },
-        // Beczka kg/l: consumption auto-derive z capacityMl * density.
-        { componentId: beczka.id, consumption: 0 },
+        // Beczka (typ „masa"): zużycie 1 l pojemności na 1 kg/l masy —
+        // liczy się tylko przy produkcji masy w planie.
+        { componentId: beczka.id, consumption: 1 },
       ],
     },
     notes:

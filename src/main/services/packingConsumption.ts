@@ -56,21 +56,23 @@ function bulkKgInUnit(
   return 0;
 }
 
+// Which production type a tier binds to is decided by the component's
+// "typ opakowania" (packagingKind), not by the legacy tier-level scope:
+//   'product' — consumed by finished-unit production (plan items) only,
+//   'mass'    — consumed by bulk-mass production (plan bulkMass) only.
 function tierConsumptionPerProduct(
   product: Product,
   tier: PackingTier,
   comp: PackagingComponent,
 ): number {
+  // Mass packaging never binds to finished-unit production.
+  if ((comp.packagingKind ?? 'product') === 'mass') return 0;
   const unit = comp.capacityUnit ?? 'units';
-  const scope = tier.scope ?? 'per_unit';
-
-  if (scope === 'per_bulk_mass') {
-    // Per-product share of the bulk consumed: each finished product carries
-    // its own mass through the bulk container, so a barrel "amortizes" by
-    // (product mass in barrel's unit) × tier.consumption.
-    return productAmountInUnit(product, unit) * tier.consumption;
-  }
-  // per_unit. For kg/l auto-derive unless the user opted into manual.
+  // A product always occupies exactly 1 slot ('units' capacity) — a carton
+  // with capacity 24 fits 24 linked products, no per-product slot
+  // definition. Stored consumption is ignored for 'units'.
+  if (unit === 'units') return 1;
+  // For kg/l auto-derive unless the user opted into manual.
   if ((unit === 'kg' || unit === 'l') && !tier.consumptionOverride) {
     return productAmountInUnit(product, unit);
   }
@@ -82,9 +84,19 @@ function tierConsumptionPerBulkKg(
   tier: PackingTier,
   comp: PackagingComponent,
 ): number {
-  if ((tier.scope ?? 'per_unit') !== 'per_bulk_mass') return 0;
+  // Product packaging never binds to bulk-mass production.
+  if ((comp.packagingKind ?? 'product') !== 'mass') return 0;
   const unit = comp.capacityUnit ?? 'units';
   return bulkKgInUnit(product, unit) * tier.consumption;
+}
+
+export interface SchemeWalkEntry {
+  componentId: UUID;
+  unitsConsumedPerProduct: number;
+  // True when the component was reached ONLY through 'dependencies' edges
+  // ("zużywa" — tape via carton), never as a direct scheme tier. Such
+  // shortages can be accepted per run by the user (a substitute exists).
+  viaDependency: boolean;
 }
 
 // Generic cascade — visits every component reachable from the tier set,
@@ -93,28 +105,32 @@ function walk(
   product: Product,
   componentsById: Map<UUID, PackagingComponent>,
   seed: (tier: PackingTier, comp: PackagingComponent) => number,
-): Array<{ componentId: UUID; unitsConsumedPerProduct: number }> {
+): SchemeWalkEntry[] {
   const out = new Map<UUID, number>();
+  const direct = new Set<UUID>();
   const tiers = product.packingScheme?.tiers ?? [];
 
   const visit = (
     componentId: UUID,
     unitsConsumedHere: number,
     seen: Set<UUID>,
+    isDirect: boolean,
   ) => {
     if (seen.has(componentId)) return;
     seen.add(componentId);
     const comp = componentsById.get(componentId);
     if (!comp) return;
+    if (isDirect) direct.add(componentId);
     out.set(componentId, (out.get(componentId) ?? 0) + unitsConsumedHere);
     // Cascade: 1 of this component pulls `dep.consumption` units of the
     // dependent (in the dependent's capacity-unit). Scale by how many pieces
-    // of *this* component are consumed (units / capacity).
+    // of *this* component are consumed (units / capacity) — proportional,
+    // e.g. 1 carton × 0.3 m of tape → 0.3 m, not a whole roll.
     if (!comp.capacity || comp.capacity <= 0) return;
     const piecesOfThisPerScopeUnit = unitsConsumedHere / comp.capacity;
     for (const dep of comp.dependencies ?? []) {
       const depUnits = piecesOfThisPerScopeUnit * dep.consumption;
-      visit(dep.componentId, depUnits, new Set(seen));
+      visit(dep.componentId, depUnits, new Set(seen), false);
     }
   };
 
@@ -123,12 +139,13 @@ function walk(
     if (!comp) continue;
     const consumption = seed(tier, comp);
     if (consumption <= 0) continue;
-    visit(tier.componentId, consumption, new Set());
+    visit(tier.componentId, consumption, new Set(), true);
   }
 
   return Array.from(out.entries()).map(([componentId, unitsConsumedPerProduct]) => ({
     componentId,
     unitsConsumedPerProduct,
+    viaDependency: !direct.has(componentId),
   }));
 }
 
@@ -138,7 +155,7 @@ function walk(
 export function walkSchemePerProduct(
   product: Product,
   componentsById: Map<UUID, PackagingComponent>,
-): Array<{ componentId: UUID; unitsConsumedPerProduct: number }> {
+): SchemeWalkEntry[] {
   return walk(product, componentsById, (tier, comp) =>
     tierConsumptionPerProduct(product, tier, comp),
   );
@@ -149,7 +166,7 @@ export function walkSchemePerProduct(
 export function walkSchemePerBulkKg(
   product: Product,
   componentsById: Map<UUID, PackagingComponent>,
-): Array<{ componentId: UUID; unitsConsumedPerProduct: number }> {
+): SchemeWalkEntry[] {
   return walk(product, componentsById, (tier, comp) =>
     tierConsumptionPerBulkKg(product, tier, comp),
   );
@@ -161,6 +178,68 @@ export function piecesPerProduct(
 ): number {
   if (!comp.capacity || comp.capacity <= 0) return 0;
   return unitsConsumedPerProduct / comp.capacity;
+}
+
+// 'product'-kind shared packaging is consumed fractionally per product
+// (1/24 carton) and rounded up to whole pieces ONCE, on the plan total —
+// 3 cartons + 15/24 in the last one → 4. 'mass'-kind keeps the legacy
+// per-entry rounding until it gets its own model.
+export function isProductKindPackaging(comp: PackagingComponent): boolean {
+  return (comp.packagingKind ?? 'product') === 'product';
+}
+
+// Whole-piece rounding with a float guard: an exact multiple accumulated as
+// fractions (24 × 1/24) can land at 1.0000000000000002 — without the epsilon
+// that would ceil to a phantom extra piece.
+export function ceilPieces(pieces: number): number {
+  return Math.ceil(pieces - 1e-9);
+}
+
+// ---- Per-run packaging substitutions ("podmiana") ----
+//
+// The user can swap a missing shared-packaging component for another one for
+// a single calculation run (barrel 120l → barrel 50l, tape A → tape B).
+// Substitution is applied BEFORE the walks, in both places a component id can
+// enter a calculation: a product's scheme tiers and other components'
+// 'dependencies'. Everything downstream (capacity, stock, price, own
+// cascade) is then genuinely the substitute's. Applied once — no chaining.
+
+export type PackingSubstitutions = Record<UUID, UUID>;
+
+export function substituteProductScheme(product: Product, subs: PackingSubstitutions): Product {
+  const tiers = product.packingScheme?.tiers ?? [];
+  if (tiers.length === 0 || !tiers.some((t) => subs[t.componentId])) return product;
+  return {
+    ...product,
+    packingScheme: {
+      tiers: tiers.map((t) =>
+        subs[t.componentId] ? { ...t, componentId: subs[t.componentId] } : t,
+      ),
+    },
+  };
+}
+
+export function substituteComponentDependencies(
+  componentsById: Map<UUID, PackagingComponent>,
+  subs: PackingSubstitutions,
+): Map<UUID, PackagingComponent> {
+  if (Object.keys(subs).length === 0) return componentsById;
+  const next = new Map<UUID, PackagingComponent>();
+  for (const [id, comp] of componentsById) {
+    const deps = comp.dependencies ?? [];
+    next.set(
+      id,
+      deps.some((d) => subs[d.componentId])
+        ? {
+            ...comp,
+            dependencies: deps.map((d) =>
+              subs[d.componentId] ? { ...d, componentId: subs[d.componentId] } : d,
+            ),
+          }
+        : comp,
+    );
+  }
+  return next;
 }
 
 // Helper exposed for the editor preview only — same math the calculators use.

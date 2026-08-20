@@ -2,7 +2,7 @@ import type Database from '../database';
 import type { CostReport, CostBreakdownLine } from '../../shared/types';
 import { pricePerGram } from '../utils/units';
 import { nowIso } from '../utils/id';
-import { walkSchemePerProduct, piecesPerProduct } from './packingConsumption';
+import { walkSchemePerProduct, piecesPerProduct, ceilPieces } from './packingConsumption';
 
 export async function computeCost(planId: string, db: Database): Promise<CostReport> {
   const plan = await db.getPlan(planId);
@@ -14,6 +14,12 @@ export async function computeCost(planId: string, db: Database): Promise<CostRep
 
   const perProduct: CostBreakdownLine[] = [];
   let totalPlanCost = 0;
+  // Shared packaging: unit cost carries the fractional share (1/24 of a
+  // carton), but the plan buys whole pieces — and pieces are PER PRODUCT
+  // (different products never share a carton/barrel). Fractional totals
+  // accumulate here per (product, component); the last-piece remainder is
+  // added to totalPlanCost once, after the item loop.
+  const schemePieces = new Map<string, { pieces: number; price: number }>();
 
   for (const item of plan.items) {
     const product = products.get(item.productId);
@@ -70,6 +76,10 @@ export async function computeCost(planId: string, db: Database): Promise<CostRep
       const pieces = piecesPerProduct(comp, entry.unitsConsumedPerProduct);
       if (!Number.isFinite(pieces) || pieces <= 0) continue;
       packagingCost += comp.lastPurchasePriceNet * pieces;
+      const key = `${product.id}:${comp.id}`;
+      const acc = schemePieces.get(key) ?? { pieces: 0, price: comp.lastPurchasePriceNet };
+      acc.pieces += pieces * item.qtyUnits;
+      schemePieces.set(key, acc);
     }
 
     const laborCost = product.conversionLaborCost ?? 0;
@@ -85,6 +95,13 @@ export async function computeCost(planId: string, db: Database): Promise<CostRep
       laborCost,
       missingPriceItems: missing,
     });
+  }
+
+  // Round each (product, component) up to whole pieces and charge the
+  // remainder of the last, partially-filled piece per product.
+  for (const { pieces, price } of schemePieces.values()) {
+    if (pieces <= 0) continue;
+    totalPlanCost += (ceilPieces(pieces) - pieces) * price;
   }
 
   return {

@@ -80,6 +80,7 @@ export const IPC = {
   PLAN_DUPLICATE: 'plan:duplicate',
   PLAN_COMPUTE_SHORTAGES: 'plan:compute-shortages',
   PLAN_PREVIEW_EXPIRED: 'plan:preview-expired',
+  PLAN_PREVIEW_DEPENDENCY_SHORTAGES: 'plan:preview-dependency-shortages',
   PLAN_COMPUTE_COST: 'plan:compute-cost',
 
   // Shortage report history

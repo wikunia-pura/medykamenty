@@ -232,6 +232,7 @@ const Products: React.FC = () => {
                   const comp = components.find((c) => c.id === tt.componentId);
                   const unit = comp?.capacityUnit ?? 'units';
                   const unitLabel = unit === 'units' ? t.unitUnits : unit;
+                  const isMass = (comp?.packagingKind ?? 'product') === 'mass';
                   return (
                     <li key={`${tt.componentId}-${i}`}>
                       <span className="shortage-tooltip-name">
@@ -241,7 +242,12 @@ const Products: React.FC = () => {
                         )}
                       </span>
                       <span className="list-tooltip-amount">
-                        {(tt.consumption ?? 0).toLocaleString()} {unitLabel}/szt.
+                        {/* Mass packaging binds to bulk (per kg); product
+                            packaging binds to finished units — 'units'
+                            capacity is always exactly 1 slot per product. */}
+                        {isMass
+                          ? `${(tt.consumption ?? 0).toLocaleString()} ${unitLabel}/kg masy`
+                          : `${(unit === 'units' ? 1 : (tt.consumption ?? 0)).toLocaleString()} ${unitLabel}/szt.`}
                       </span>
                     </li>
                   );
