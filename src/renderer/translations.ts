@@ -172,6 +172,9 @@ export interface T {
   magazynStockSummaryIgnored: string;
   magazynStockSummaryCreated: string;
   magazynStockUnmatchedIntro: string;
+  // Banner above the stock-difference table pointing at the new-item section
+  // further down the same dialog, so it isn't missed when the table is long.
+  magazynStockUnmatchedNotice: string;
   magazynStockCreate: string;
   magazynStockIgnore: string;
   magazynStockCreateAll: string;
@@ -249,6 +252,8 @@ export interface T {
   depShortageDetailMax: string;
   depShortageSubstitute: string;
   depShortageSubstitutePick: string;
+  depShortagePanelHint: string;
+  depShortageSubstitutedWith: string;
   productTabBasics: string;
   componentDependencies: string;
   componentDependenciesHint: string;
@@ -402,6 +407,22 @@ export interface T {
   missingPricesTooltipHeader: string;
   missingPricesTooltipExplain: string;
   missingPricesAllPriced: string;
+  bulkPackagingCost: string;
+  costItems: string;
+  costItemsHint: string;
+  costItemQty: string;
+  costItemUnitPrice: string;
+  costItemCost: string;
+  costItemNoPrice: string;
+  costItemViaDependency: string;
+  // Price history
+  priceHistory: string;
+  priceHistoryEmpty: string;
+  priceHistoryCurrent: string;
+  priceSourceManual: string;
+  priceSourceImport: string;
+  priceEdit: string;
+  priceNotSet: string;
   // Settings
   settingsLanguage: string;
   settingsDarkMode: string;
@@ -879,7 +900,7 @@ const pl: T = {
   // Warehouse ("Magazyn") stock import
   magazynStockImport: 'Importuj stany z GD',
   magazynStockImportHint:
-    'Wczytuje stany z pliku magazynu (zakładka „Stan komponentów”). Dopasowuje tylko istniejące pozycje katalogu po nazwie — kolumna C (stan) i kolumna E (uwagi). Nowe pozycje z pliku są pomijane.',
+    'Wczytuje stany z pliku magazynu (zakładka „{tab}”). Dopasowuje pozycje katalogu po nazwie — kolumna C (stan) i kolumna E (uwagi). Nowe pozycje z pliku możesz utworzyć lub pominąć w oknie decyzji.',
   magazynStockImportFailed: 'Nie udało się zaimportować stanów z magazynu',
   magazynStockNoMatches: 'Nie dopasowano żadnej pozycji z pliku do katalogu.',
   magazynStockDiffTitle: 'Import stanów z magazynu',
@@ -900,6 +921,8 @@ const pl: T = {
   magazynStockSummaryCreated: 'Utworzono nowych: {n}.',
   magazynStockUnmatchedIntro:
     'W pliku jest {n} pozycji, których nie ma w katalogu. Zdecyduj, czy utworzyć je jako nowe pozycje, czy pominąć — pojedynczo lub zbiorczo.',
+  magazynStockUnmatchedNotice:
+    'Uwaga: w pliku jest też {n} nowych pozycji, których nie ma w katalogu — decyzja niżej w tym oknie.',
   magazynStockCreate: 'Utwórz',
   magazynStockIgnore: 'Pomiń',
   magazynStockCreateAll: 'Utwórz wszystkie',
@@ -907,7 +930,7 @@ const pl: T = {
   applyToAllLabel: 'Dla wszystkich:',
   // Warehouse raw-stock import (batches / expiry)
   rawStockImportHint:
-    'Wczytuje stany surowców z pliku magazynu (zakładka „Stan surowców”). Dopasowuje tylko istniejące surowce po nazwie. Stan może być rozbity na partie z różnymi datami ważności (kolumna F, a po reteście kolumna H). Nowe pozycje z pliku są pomijane.',
+    'Wczytuje stany surowców z pliku magazynu (zakładka „Stan surowców”). Dopasowuje surowce po nazwie. Stan może być rozbity na partie z różnymi datami ważności (kolumna F, a po reteście kolumna H). Nowe pozycje z pliku możesz utworzyć lub pominąć w oknie decyzji.',
   rawStockImportFailed: 'Nie udało się zaimportować stanów surowców',
   rawStockImportSummary: 'Zaimportowano surowców: {imported}, odrzucono: {rejected}.',
   rawStockDiffTitle: 'Import stanów surowców — niezgodne sumy',
@@ -983,6 +1006,9 @@ const pl: T = {
   depShortageDetailMax: 'stan {available} szt. — ogranicza produkcję do {maxUnits} szt.',
   depShortageSubstitute: 'Podmień',
   depShortageSubstitutePick: 'Wybierz zamiennik',
+  depShortagePanelHint:
+    'Poniżej Twoje decyzje o brakach opakowań zbiorczych z tego wyliczenia. Zmień je i przegeneruj raport.',
+  depShortageSubstitutedWith: 'podmieniono na „{name}"',
   productTabBasics: 'Podstawowe dane',
   componentDependencies: 'Zużywa',
   componentDependenciesHint:
@@ -1146,6 +1172,22 @@ const pl: T = {
     'Te surowce / komponenty są w recepturze, ale nie mają zapisanej ostatniej ceny zakupu netto. Koszt jednostkowy i łączny są zaniżone — uzupełnij ceny w widoku Surowce lub Komponenty (pole „Ostatnia cena zakupu") albo zaimportuj dostawę.',
   missingPricesAllPriced:
     'Wszystkie surowce i komponenty mają zapisaną cenę — koszt jest kompletny.',
+  bulkPackagingCost: 'Opakowania zbiorcze',
+  costItems: 'Składowe kosztu',
+  costItemsHint:
+    'Wszystko, co składa się na koszt 1 szt. produktu. Cenę można poprawić na miejscu — zapisuje się w katalogu surowców / komponentów i przelicza plan.',
+  costItemQty: 'Zużycie / szt.',
+  costItemUnitPrice: 'Cena jedn.',
+  costItemCost: 'Koszt / szt.',
+  costItemNoPrice: 'brak ceny',
+  costItemViaDependency: 'przez zużycie',
+  priceHistory: 'Historia zmian ceny',
+  priceHistoryEmpty: 'Brak zapisanych zmian ceny.',
+  priceHistoryCurrent: 'aktualna',
+  priceSourceManual: 'ręcznie',
+  priceSourceImport: 'import',
+  priceEdit: 'Edytuj cenę',
+  priceNotSet: 'brak ceny',
   settingsLanguage: 'Język aplikacji',
   settingsDarkMode: 'Ciemny motyw',
   settingsLightMode: 'Jasny motyw',
@@ -1635,7 +1677,7 @@ const en: T = {
   // Warehouse ("Magazyn") stock import
   magazynStockImport: 'Import stock from GD',
   magazynStockImportHint:
-    'Loads stock from the warehouse file ("Stan komponentów" tab). Matches existing catalog items by name only — column C (stock) and column E (notes). New items from the file are ignored.',
+    'Loads stock from the warehouse file ("{tab}" tab). Matches catalog items by name — column C (stock) and column E (notes). New items from the file can be created or skipped in the decision dialog.',
   magazynStockImportFailed: 'Failed to import warehouse stock',
   magazynStockNoMatches: 'No item from the file matched the catalog.',
   magazynStockDiffTitle: 'Import warehouse stock',
@@ -1655,6 +1697,8 @@ const en: T = {
   magazynStockSummaryCreated: 'Created new: {n}.',
   magazynStockUnmatchedIntro:
     'The file has {n} rows not in the catalog. Decide whether to create them as new entries or skip them — individually or in bulk.',
+  magazynStockUnmatchedNotice:
+    'Note: the file also has {n} new rows not in the catalog — decide on them further down this dialog.',
   magazynStockCreate: 'Create',
   magazynStockIgnore: 'Skip',
   magazynStockCreateAll: 'Create all',
@@ -1662,7 +1706,7 @@ const en: T = {
   applyToAllLabel: 'Apply to all:',
   // Warehouse raw-stock import (batches / expiry)
   rawStockImportHint:
-    'Loads raw-material stock from the warehouse file ("Stan surowców" tab). Matches existing materials by name only. Stock can be split into batches with different expiry dates (column F, or column H after a retest). New items from the file are ignored.',
+    'Loads raw-material stock from the warehouse file ("Stan surowców" tab). Matches materials by name. Stock can be split into batches with different expiry dates (column F, or column H after a retest). New items from the file can be created or skipped in the decision dialog.',
   rawStockImportFailed: 'Failed to import raw-material stock',
   rawStockImportSummary: 'Imported materials: {imported}, rejected: {rejected}.',
   rawStockDiffTitle: 'Import raw-material stock — sum mismatch',
@@ -1737,6 +1781,9 @@ const en: T = {
   depShortageDetailMax: 'stock {available} pcs — caps production at {maxUnits} units',
   depShortageSubstitute: 'Substitute',
   depShortageSubstitutePick: 'Pick a substitute',
+  depShortagePanelHint:
+    'Below are your secondary-packaging shortage decisions for this computation. Change them and regenerate the report.',
+  depShortageSubstitutedWith: 'substituted with "{name}"',
   productTabBasics: 'Basics',
   componentDependencies: 'Consumes',
   componentDependenciesHint:
@@ -1897,6 +1944,22 @@ const en: T = {
     'These raw materials / components are in the recipe but have no recorded last net purchase price. Unit and total cost are understated — fill in the price in Raw materials or Components (field "Last purchase price"), or import a delivery.',
   missingPricesAllPriced:
     'All raw materials and components have a recorded price — cost is complete.',
+  bulkPackagingCost: 'Shared packaging',
+  costItems: 'Cost breakdown',
+  costItemsHint:
+    'Everything that makes up the cost of 1 product unit. Prices can be edited here — the change is saved to the raw materials / components catalog and the plan is recomputed.',
+  costItemQty: 'Usage / unit',
+  costItemUnitPrice: 'Unit price',
+  costItemCost: 'Cost / unit',
+  costItemNoPrice: 'no price',
+  costItemViaDependency: 'via consumption',
+  priceHistory: 'Price change history',
+  priceHistoryEmpty: 'No recorded price changes.',
+  priceHistoryCurrent: 'current',
+  priceSourceManual: 'manual',
+  priceSourceImport: 'import',
+  priceEdit: 'Edit price',
+  priceNotSet: 'no price',
   settingsLanguage: 'App language',
   settingsDarkMode: 'Dark mode',
   settingsLightMode: 'Light mode',

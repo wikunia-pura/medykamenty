@@ -24,6 +24,22 @@ export interface Supplier {
   updatedAt: ISODate;
 }
 
+// One recorded change of an item's net purchase price. Written by the
+// database layer whenever `lastPurchasePriceNet` actually changes — manual
+// edits, imports and RFQ price entry alike — so the newest entry always
+// mirrors the current price and tells you since when it applies. Newest
+// first, capped at PRICE_HISTORY_LIMIT.
+export interface PriceHistoryEntry {
+  price: number;
+  currency?: string;
+  at: ISODate;
+  // Where the change came from, for the tooltip: a manual catalog edit or a
+  // file import (price list, stock file with prices).
+  source?: PriceChangeSource;
+}
+
+export type PriceChangeSource = 'manual' | 'import';
+
 export interface RawMaterial {
   id: UUID;
   name: string;
@@ -37,6 +53,9 @@ export interface RawMaterial {
   shelfLifeMonths?: number;
   lastPurchasePriceNet?: number;
   currency?: string;
+  // Last PRICE_HISTORY_LIMIT price changes, newest first. Maintained by the
+  // database layer — see recordPriceChange in main/database.ts.
+  priceHistory?: PriceHistoryEntry[];
   notes?: string;
   // Per-item overage ("naddatek") as a percentage on top of the bare
   // requirement (e.g. 5 == +5%). When undefined the item inherits the
@@ -126,6 +145,9 @@ export interface PackagingComponent {
   leadTimeDays?: number;
   lastPurchasePriceNet?: number;
   currency?: string;
+  // Last PRICE_HISTORY_LIMIT price changes, newest first. Maintained by the
+  // database layer — see recordPriceChange in main/database.ts.
+  priceHistory?: PriceHistoryEntry[];
   notes?: string;
   // Per-item overage ("naddatek") as a percentage on top of the bare
   // requirement (e.g. 5 == +5%). When undefined the component inherits the
@@ -426,11 +448,17 @@ export interface StockConflictResolution {
 
 // ---- "Magazyn" stock import (Components / Bulk packaging catalog) ----
 //
-// A targeted import of the warehouse spreadsheet's "Stan komponentów" sheet. It
-// only touches components that already exist in the catalog (matched by name);
-// anything extra in the file is ignored. Column C is the warehouse count,
-// column E a free-text note. Two-phase: analyze (parse + match, no writes) →
-// user resolves per-item quantity differences → commit.
+// A targeted import of the warehouse spreadsheet, scoped per catalog view:
+// 'primary' reads the "Stan komponentów" sheet and matches only primary
+// components; 'secondary' reads the "Opakowania zbiorcze" sheet and matches
+// only secondary (bulk-packaging) components — see isSecondaryComponent.
+// Components already in the catalog are matched by name; file rows with no
+// match are offered as new entries the user creates or skips (MagazynStockUnmatched).
+// Column C is the warehouse count, column E a free-text note. Two-phase:
+// analyze (parse + match, no writes) → user resolves per-item quantity
+// differences and the create/skip choices → commit.
+export type ComponentSection = 'primary' | 'secondary';
+
 export interface MagazynStockMatch {
   itemId: UUID;
   name: string; // catalog name
@@ -804,6 +832,11 @@ export interface DependencyShortageRef {
   // True when the user accepted this shortage for the run — the component was
   // excluded from the calculation.
   accepted: boolean;
+  // Set when the user substituted this component for the run ("podmiana") —
+  // the calculation ran with the substitute instead. Recorded so the report
+  // can show the decision and let the user revise it.
+  substitutedWithId?: UUID;
+  substitutedWithName?: string;
 }
 
 export interface ShortageReport {
@@ -838,14 +871,48 @@ export interface ShortageReportEntry {
   archived?: boolean;
 }
 
+// One catalog item feeding a product's unit cost. 'raw' — a recipe
+// ingredient; 'component' — primary packaging attached directly to the
+// product; 'bulkPackaging' — shared/shipping packaging reached through the
+// packing scheme (cartons, tape, barrels), consumed fractionally per unit.
+export type CostItemKind = 'raw' | 'component' | 'bulkPackaging';
+
+export interface CostItemLine {
+  kind: CostItemKind;
+  itemId: UUID;
+  itemName: string;
+  // How much of the item one finished product unit consumes, in `qtyUnit`:
+  // grams for raw materials, pieces for packaging (fractional for shared).
+  qtyPerUnit: number;
+  qtyUnit: string;
+  // Catalog price and the unit it is quoted in ('kg' / 'g' / piece).
+  // Undefined when the item has no purchase price — such a line costs 0 and
+  // is also reported in `missingPriceItems`.
+  unitPrice?: number;
+  priceUnit: string;
+  currency?: string;
+  // Share of the product's unit cost, i.e. qtyPerUnit × price-per-qtyUnit.
+  cost: number;
+  // Raw materials only — supplied by the factory rather than bought by us.
+  factorySupplied?: boolean;
+  // Bulk packaging only — reached solely through another component's
+  // 'dependencies' cascade (tape via carton), never as a direct scheme tier.
+  viaDependency?: boolean;
+}
+
 export interface CostBreakdownLine {
   productId: UUID;
   productName: string;
   unitCost: number;
   ingredientsCost: number;
+  // Primary packaging attached directly to the product.
   packagingCost: number;
+  // Shared/shipping packaging from the packing scheme, as the per-unit share.
+  bulkPackagingCost: number;
   laborCost: number;
   missingPriceItems: { itemId: UUID; itemName: string; kind: 'raw' | 'component' }[];
+  // Every catalog item behind the numbers above, for the drill-down table.
+  items: CostItemLine[];
 }
 
 export interface CostReport {

@@ -2078,7 +2078,8 @@ body.dark-mode .page-header-count {
   color: var(--muted, #6b7280);
   margin-left: 8px;
 }
-.expired-report-panel {
+.expired-report-panel,
+.dep-report-panel {
   border-color: var(--warning, #d97706);
 }
 tr:hover .stock-cell .stock-edit-btn {
@@ -2501,6 +2502,13 @@ body.dark-mode .modal-close:hover {
   padding: 20px 22px;
   overflow-y: auto;
   flex: 1;
+}
+/* Inside a modal the page-level cap (100vh - 260px) lets a single long table
+   fill the whole body, pushing anything below it out of sight — e.g. the "new
+   items" decisions under the stock-difference table in the GD import. Cap the
+   height here so the next section stays visible without scrolling. */
+.modal .table-wrap {
+  max-height: 45vh;
 }
 .modal-section {
   margin-top: 22px;
@@ -6722,4 +6730,122 @@ body.dark-mode .prices-loading-banner {
   color: var(--text-muted);
   opacity: 0.65;
   letter-spacing: 1px;
+}
+
+/* ===== Price history + inline price editing ===== */
+
+/* Clock affordance next to a price; reveals the change timeline on hover. */
+.price-history-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  cursor: help;
+}
+.price-history-icon:hover {
+  color: var(--primary);
+}
+
+.price-missing {
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.price-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 2px 2px;
+  max-width: 340px;
+}
+.price-history-list li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.price-history-list li:last-child {
+  border-bottom: none;
+}
+.price-history-price {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.price-history-date {
+  flex: 1;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.price-history-source {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+.price-history-empty {
+  padding: 6px 2px 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 320px;
+}
+
+/* ===== Cost calculator: per-product cost breakdown ===== */
+
+.cost-product-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cost-items-toggle {
+  padding: 2px 4px;
+  line-height: 0;
+  color: var(--text-muted);
+}
+.cost-items-toggle svg {
+  transition: transform 0.15s;
+}
+.cost-items-toggle.is-open svg {
+  transform: rotate(180deg);
+}
+
+.cost-items-row > td {
+  padding: 0 !important;
+  background: var(--bg);
+}
+.cost-items {
+  padding: 10px 12px 12px;
+}
+.cost-items-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.cost-items-hint {
+  margin: 2px 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* Group header row separating raw materials / components / shared packaging. */
+.cost-items-table .cost-items-group > td {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  padding-top: 10px;
+}
+.cost-item-tag {
+  margin-left: 6px;
+  font-size: 10px;
+  padding: 1px 6px;
+}
+/* The edit button hides until hover on normal rows; inside the breakdown the
+ * price is the point of the table, so keep the affordance always visible. */
+.cost-items-table .stock-cell .stock-edit-btn {
+  opacity: 1;
 }

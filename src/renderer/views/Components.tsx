@@ -23,6 +23,8 @@ import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
 import NumberInput from '../components/NumberInput';
 import StockCell from '../components/StockCell';
+import PriceCell from '../components/PriceCell';
+import { PriceHistoryList } from '../components/PriceHistory';
 import OverageCell from '../components/OverageCell';
 import ColumnPicker from '../components/ColumnPicker';
 import HoverTooltip from '../components/HoverTooltip';
@@ -79,6 +81,9 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   const defaultType: ComponentType = kind === 'secondary' ? 'outer_carton' : 'other';
   const heading = kind === 'secondary' ? t.outerPackaging : t.components;
   const prefsKey = kind === 'secondary' ? 'outerPackaging' : 'components';
+  // The Magazyn warehouse file's sheet name this view's stock import reads —
+  // see analyzeMagazynStock's `section` param.
+  const magazynSheetName = kind === 'secondary' ? 'Opakowania zbiorcze' : 'Stan komponentów';
   const [items, setItems] = useState<PackagingComponent[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [editing, setEditing] = useState<Partial<PackagingComponent> | null>(null);
@@ -312,9 +317,13 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         );
       case 'price':
         return (
-          <td key={id} className="num">
-            {c.lastPurchasePriceNet ?? ''}
-          </td>
+          <PriceCell
+            key={id}
+            price={c.lastPurchasePriceNet}
+            currency={c.currency}
+            history={c.priceHistory}
+            onCommit={(v) => onSetPrice(c.id, v)}
+          />
         );
       case 'overage':
         return (
@@ -422,6 +431,18 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     setError(null);
     try {
       await window.electronAPI.updateComponent(id, { overagePct: pct });
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  // Inline price edit from the grid. The catalog update records the change in
+  // the component's price history (see recordPriceChange in main/database.ts).
+  const onSetPrice = async (id: string, price: number | undefined) => {
+    setError(null);
+    try {
+      await window.electronAPI.updateComponent(id, { lastPurchasePriceNet: price });
       await reload();
     } catch (err) {
       setError((err as Error).message);
@@ -648,6 +669,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     try {
       const res = await window.electronAPI.commitMagazynStock({
         sourceFile: analysis.sourceFile,
+        section: kind,
         decisions,
         createItems,
       });
@@ -680,7 +702,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     setLoaderMessage(t.loaderImporting);
     let analysis: MagazynStockAnalysis | null = null;
     try {
-      const res = await window.electronAPI.analyzeMagazynStock();
+      const res = await window.electronAPI.analyzeMagazynStock(kind);
       // User canceled the OS file picker → ok:false with no error.
       if (!res.ok) {
         if (res.error) setError(`${t.magazynStockImportFailed}: ${res.error}`);
@@ -830,7 +852,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
               className="btn btn-import"
               onClick={onClickImportMagazyn}
               disabled={busy}
-              title={t.magazynStockImportHint}
+              title={t.magazynStockImportHint.replace('{tab}', magazynSheetName)}
             >
               <IconImport size={13} /> {t.magazynStockImport}
             </button>
@@ -1090,6 +1112,15 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
                       onChange={(v) => setEditing({ ...editing, lastPurchasePriceNet: v })}
                       disabled={editingReadOnly}
                     />
+                  </div>
+                  <div className="form-row" style={{ alignItems: 'flex-start' }}>
+                    <label>{t.priceHistory}</label>
+                    <div style={{ flex: 1 }}>
+                      <PriceHistoryList
+                        history={editing.priceHistory}
+                        fallbackCurrency={editing.currency}
+                      />
+                    </div>
                   </div>
                   <div className="form-row">
                     <label>{t.currency}</label>
@@ -1687,6 +1718,11 @@ const MagazynStockDiffModal: React.FC<MagazynStockDiffModalProps> = ({
               <div className="hint" style={{ marginBottom: 12 }}>
                 {t.magazynStockDiffIntro}
               </div>
+              {unmatched.length > 0 && (
+                <div className="warn-text" style={{ marginBottom: 12, fontSize: 12 }}>
+                  {t.magazynStockUnmatchedNotice.replace('{n}', String(unmatched.length))}
+                </div>
+              )}
               <div className="apply-all-row">
                 <span className="apply-all-label">{t.applyToAllLabel}</span>
                 <button type="button" className="btn btn-sm" onClick={() => setAll('keep')}>

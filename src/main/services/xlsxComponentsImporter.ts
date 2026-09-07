@@ -36,6 +36,7 @@ import type Database from '../database';
 import type {
   PackagingComponent,
   ComponentType,
+  ComponentSection,
   ComponentsImportSummary,
   RawMaterialsImportMode,
   Supplier,
@@ -128,8 +129,16 @@ function normalizeKey(s: string): string {
 // ---------- type inference ----------
 //
 // The components file has no type column. Map the leading words of the name to
-// a ComponentType. Order matters: the first matching rule wins.
-export function inferComponentType(name: string): ComponentType {
+// a ComponentType. Order matters: the first matching rule wins. `section`
+// only decides the fallback when no keyword matches — the Magazyn stock
+// importer passes it along so a row from the "Opakowania zbiorcze" sheet
+// never falls back to a primary type, even for a name this table doesn't
+// recognize; callers with no section concept (the components-catalog import)
+// keep the historical 'other' fallback.
+export function inferComponentType(
+  name: string,
+  section: ComponentSection = 'primary',
+): ComponentType {
   const n = normalizeKey(name);
   if (n.startsWith('atomizer') || n.startsWith('dozownik')) return 'pump';
   if (n.startsWith('beczka')) return 'barrel';
@@ -153,7 +162,7 @@ export function inferComponentType(name: string): ComponentType {
   if (n.startsWith('tuba')) return 'tube';
   if (n.startsWith('ulotka')) return 'leaflet';
   if (n.startsWith('worek')) return 'bag';
-  return 'other';
+  return section === 'secondary' ? 'confection' : 'other';
 }
 
 // ---------- header detection ----------

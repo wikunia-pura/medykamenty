@@ -204,7 +204,7 @@ export async function importRawMaterialsCsv(
     };
     const match = findByName(existing, name);
     if (match) {
-      await window.electronAPI.updateRawMaterial(match.id, payload);
+      await window.electronAPI.updateRawMaterial(match.id, payload, { priceSource: 'import' });
       stats.updated++;
     } else {
       const created = await window.electronAPI.createRawMaterial(payload);
@@ -318,7 +318,7 @@ export async function importComponentsCsv(
     };
     const match = findByName(existing, name);
     if (match) {
-      await window.electronAPI.updateComponent(match.id, payload);
+      await window.electronAPI.updateComponent(match.id, payload, { priceSource: 'import' });
       stats.updated++;
     } else {
       const created = await window.electronAPI.createComponent(payload);

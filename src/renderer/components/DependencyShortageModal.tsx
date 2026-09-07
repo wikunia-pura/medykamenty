@@ -70,7 +70,99 @@ interface Props {
   onConfirm: (decision: DependencyShortageDecision) => void;
 }
 
-type RowChoice = 'count' | 'accept' | 'substitute';
+export type DependencyRowChoice = 'count' | 'accept' | 'substitute';
+
+interface DecisionTableProps {
+  rows: DependencyShortageRow[];
+  choiceFor: (componentId: string) => DependencyRowChoice;
+  substituteFor: (componentId: string) => string;
+  onChoice: (row: DependencyShortageRow, choice: DependencyRowChoice) => void;
+  onSubstitute: (componentId: string, substituteId: string) => void;
+  disabled?: boolean;
+}
+
+// The decision table itself — shared by the pre-computation prompt (modal,
+// below) and the "change your mind" panel on an already generated report.
+// Fully controlled: the caller owns the choices.
+export const DependencyDecisionTable: React.FC<DecisionTableProps> = ({
+  rows,
+  choiceFor,
+  substituteFor,
+  onChoice,
+  onSubstitute,
+  disabled,
+}) => {
+  const t = useT();
+  return (
+    <div className="table-wrap">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>{t.name}</th>
+            <th>{t.depShortageConsumedBy}</th>
+            <th>{t.shortage}</th>
+            <th>{t.magazynStockColDecision}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const choice = choiceFor(r.componentId);
+            return (
+              <tr key={r.componentId}>
+                <td className="col-wrap">{r.name}</td>
+                <td className="col-wrap">
+                  {r.consumedBy.length > 0 ? (
+                    r.consumedBy.join(', ')
+                  ) : (
+                    <span className="hint">—</span>
+                  )}
+                </td>
+                <td className="col-wrap">
+                  <span className="hint">{r.detail}</span>
+                </td>
+                <td>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <SegmentedControl
+                      size="sm"
+                      ariaLabel={r.name}
+                      value={choice}
+                      onChange={(v) => onChoice(r, v)}
+                      disabled={disabled}
+                      options={[
+                        { value: 'count', label: t.depShortageCount, tone: 'neutral' },
+                        { value: 'accept', label: t.depShortageAccept, tone: 'success' },
+                        ...(r.candidates.length > 0
+                          ? [
+                              {
+                                value: 'substitute' as const,
+                                label: t.depShortageSubstitute,
+                                tone: 'warning' as const,
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                    {choice === 'substitute' && (
+                      <SearchableSelect
+                        options={r.candidates}
+                        value={substituteFor(r.componentId)}
+                        onChange={(val) => onSubstitute(r.componentId, val)}
+                        placeholder={t.depShortageSubstitutePick}
+                        disabled={disabled}
+                      />
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+type RowChoice = DependencyRowChoice;
 
 // Shown before a shortage report / max-producible computation when a
 // scheme-consumed packaging component would run short. Per-run decision, not
@@ -132,71 +224,13 @@ const DependencyShortageModal: React.FC<Props> = ({ rows, onCancel, onConfirm })
               {t.depShortageAccept}
             </button>
           </div>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t.name}</th>
-                  <th>{t.depShortageConsumedBy}</th>
-                  <th>{t.shortage}</th>
-                  <th>{t.magazynStockColDecision}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
-                  const choice = choiceFor(r.componentId);
-                  return (
-                    <tr key={r.componentId}>
-                      <td className="col-wrap">{r.name}</td>
-                      <td className="col-wrap">
-                        {r.consumedBy.length > 0 ? (
-                          r.consumedBy.join(', ')
-                        ) : (
-                          <span className="hint">—</span>
-                        )}
-                      </td>
-                      <td className="col-wrap">
-                        <span className="hint">{r.detail}</span>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          <SegmentedControl
-                            size="sm"
-                            ariaLabel={r.name}
-                            value={choice}
-                            onChange={(v) => setChoice(r, v)}
-                            options={[
-                              { value: 'count', label: t.depShortageCount, tone: 'neutral' },
-                              { value: 'accept', label: t.depShortageAccept, tone: 'success' },
-                              ...(r.candidates.length > 0
-                                ? [
-                                    {
-                                      value: 'substitute' as const,
-                                      label: t.depShortageSubstitute,
-                                      tone: 'warning' as const,
-                                    },
-                                  ]
-                                : []),
-                            ]}
-                          />
-                          {choice === 'substitute' && (
-                            <SearchableSelect
-                              options={r.candidates}
-                              value={substitutes[r.componentId] ?? ''}
-                              onChange={(val) =>
-                                setSubstitutes((prev) => ({ ...prev, [r.componentId]: val }))
-                              }
-                              placeholder={t.depShortageSubstitutePick}
-                            />
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <DependencyDecisionTable
+            rows={rows}
+            choiceFor={choiceFor}
+            substituteFor={(id) => substitutes[id] ?? ''}
+            onChoice={setChoice}
+            onSubstitute={(id, val) => setSubstitutes((prev) => ({ ...prev, [id]: val }))}
+          />
         </div>
         <div className="modal-footer">
           <button className="btn" onClick={onCancel}>

@@ -1,8 +1,15 @@
-// Import the warehouse spreadsheet ("Magazyn.xlsx"), first tab "Stan
-// komponentów", into the component / bulk-packaging catalog. Unlike the
-// components importer (xlsxComponentsImporter.ts) this NEVER creates catalog
-// entries: it only matches rows to components that already exist, by name, and
-// proposes their warehouse stock. Anything extra in the file is ignored.
+// Import the warehouse spreadsheet ("Magazyn.xlsx") into the component /
+// bulk-packaging catalog. The file carries the two catalogs in separate tabs
+// ("Stan komponentów" for primary components, "Opakowania zbiorcze" for
+// secondary/bulk packaging) so each analysis run is scoped to one
+// ComponentSection: it reads only that section's sheet and matches only
+// against catalog components of that section (see isSecondaryComponent) — a
+// run never sees rows or catalog entries from the other section. Rows with no
+// match are returned as `unmatched` create-candidates — the user decides per
+// row whether to create them (type inferred from the name, see
+// inferComponentType) or skip them; nothing is created without that decision.
+// Names matching >1 catalog entry are reported in `ambiguousNames` and
+// skipped, since there is no way to tell which entry the stock belongs to.
 //
 // The sheet layout (row 1 is the header):
 //   A  Nazwa                    → matched to a catalog component by name
@@ -15,18 +22,21 @@
 // E-column fallback — matching what the user described ("kolumna C", "kolumna E").
 //
 // Two-phase, like the recipe importer: analyzeMagazynStock() parses + matches
-// with no writes; the renderer resolves per-item quantity differences; then the
-// IPC layer applies the decisions.
+// with no writes; the renderer resolves per-item quantity differences and the
+// create/skip choice for unmatched rows; then the IPC layer applies the
+// decisions.
 
 import ExcelJS from 'exceljs';
 import path from 'path';
 import type Database from '../database';
 import type {
+  ComponentSection,
   MagazynStockAnalysis,
   MagazynStockMatch,
   MagazynStockUnmatched,
   PackagingComponent,
 } from '../../shared/types';
+import { isSecondaryComponent } from '../../shared/types';
 import { matchOne } from './matcher';
 import log from '../utils/logger';
 
@@ -64,9 +74,20 @@ function asNumber(v: unknown): number | undefined {
   return undefined;
 }
 
-// Pick the "Stan komponentów" sheet: the first non-archival worksheet whose
-// name mentions "komponent". Falls back to the first sheet.
-function findComponentsSheet(wb: ExcelJS.Workbook): ExcelJS.Worksheet | undefined {
+// Pick the sheet for the given catalog section. 'primary' looks for the first
+// non-archival worksheet whose name mentions "komponent" ("Stan komponentów"),
+// falling back to the first sheet for older files that don't name it that way.
+// 'secondary' looks for "Opakowania zbiorcze" (matched loosely on "zbiorcz")
+// with no fallback — that tab is new (see Magazyn-5.xlsx) and older files
+// don't have it, so silently reading the wrong sheet would be worse than
+// failing with a clear message.
+function findSheet(wb: ExcelJS.Workbook, section: ComponentSection): ExcelJS.Worksheet | undefined {
+  if (section === 'secondary') {
+    return wb.worksheets.find((ws) => {
+      const n = ws.name.toLowerCase();
+      return n.includes('zbiorcz') && !n.includes('archiw');
+    });
+  }
   const named = wb.worksheets.find((ws) => {
     const n = ws.name.toLowerCase();
     return n.includes('komponent') && !n.includes('archiw');
@@ -107,18 +128,27 @@ const QTY_EPS = 1e-6;
 export async function analyzeMagazynStock(
   filePath: string,
   db: Database,
+  section: ComponentSection = 'primary',
 ): Promise<MagazynStockAnalysis> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(filePath);
-  const ws = findComponentsSheet(wb);
-  if (!ws) throw new Error(`Brak arkusza w pliku ${path.basename(filePath)}.`);
+  const ws = findSheet(wb, section);
+  if (!ws) {
+    const sheetLabel = section === 'secondary' ? 'Opakowania zbiorcze' : 'Stan komponentów';
+    throw new Error(`Brak arkusza „${sheetLabel}” w pliku ${path.basename(filePath)}.`);
+  }
 
   const layout = findLayout(ws);
   if (!layout) {
-    throw new Error('Nie rozpoznano nagłówków arkusza "Stan komponentów" (wymagana kolumna "Nazwa").');
+    throw new Error(`Nie rozpoznano nagłówków arkusza "${ws.name}" (wymagana kolumna "Nazwa").`);
   }
 
-  const components = await db.listComponents();
+  // Scope matching to this section's catalog subset — a row from the
+  // "komponenty" sheet should never match a bulk-packaging entry and vice
+  // versa, even if two names were ever to collide.
+  const components = (await db.listComponents()).filter((c) =>
+    section === 'secondary' ? isSecondaryComponent(c.type) : !isSecondaryComponent(c.type),
+  );
   const candidates = components.map((c) => ({
     id: c.id,
     name: c.name,

@@ -19,6 +19,7 @@ import type {
   StockConflict,
   StockConflictResolution,
   StockSyncResult,
+  ComponentSection,
   MagazynStockDecision,
   MagazynStockCommitResult,
   MagazynStockUnmatched,
@@ -200,7 +201,9 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.RAW_LIST, () => db.listRawMaterials());
   ipcMain.handle(IPC.RAW_GET, (_e, id: string) => db.getRawMaterial(id));
   ipcMain.handle(IPC.RAW_CREATE, (_e, input) => db.createRawMaterial(input));
-  ipcMain.handle(IPC.RAW_UPDATE, (_e, id: string, patch) => db.updateRawMaterial(id, patch));
+  ipcMain.handle(IPC.RAW_UPDATE, (_e, id: string, patch, opts) =>
+    db.updateRawMaterial(id, patch, opts),
+  );
   ipcMain.handle(IPC.RAW_DELETE, (_e, id: string) => db.deleteRawMaterial(id));
   ipcMain.handle(IPC.RAW_DUPLICATE, (_e, id: string) => db.duplicateRawMaterial(id));
 
@@ -320,7 +323,9 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.COMP_LIST, () => db.listComponents());
   ipcMain.handle(IPC.COMP_GET, (_e, id: string) => db.getComponent(id));
   ipcMain.handle(IPC.COMP_CREATE, (_e, input) => db.createComponent(input));
-  ipcMain.handle(IPC.COMP_UPDATE, (_e, id: string, patch) => db.updateComponent(id, patch));
+  ipcMain.handle(IPC.COMP_UPDATE, (_e, id: string, patch, opts) =>
+    db.updateComponent(id, patch, opts),
+  );
   ipcMain.handle(IPC.COMP_DELETE, (_e, id: string) => db.deleteComponent(id));
   ipcMain.handle(IPC.COMP_DUPLICATE, (_e, id: string) => db.duplicateComponent(id));
 
@@ -342,20 +347,23 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     }
   });
 
-  // Warehouse stock import ("Magazyn.xlsx" → "Stan komponentów"). Two-phase:
-  // analyze shows the file picker + matches rows to existing components (no
-  // writes); the renderer resolves per-item quantity differences; commit
-  // applies them. Only matched components are touched — extra rows are ignored.
-  ipcMain.handle(IPC.COMP_MAGAZYN_STOCK_ANALYZE, async () => {
+  // Warehouse stock import ("Magazyn.xlsx"). Two-phase: analyze shows the file
+  // picker + matches rows to existing components (no writes); the renderer
+  // resolves per-item quantity differences; commit applies them. Only matched
+  // components are touched — extra rows are ignored. `section` scopes the
+  // whole run to one sheet/catalog subset: 'primary' → "Stan komponentów",
+  // 'secondary' → "Opakowania zbiorcze" — see magazynStockImporter.ts.
+  ipcMain.handle(IPC.COMP_MAGAZYN_STOCK_ANALYZE, async (_e, section: ComponentSection) => {
     const win = getMainWindow();
+    const sheetLabel = section === 'secondary' ? 'Opakowania zbiorcze' : 'Stan komponentów';
     const result = await dialog.showOpenDialog(win!, {
-      title: 'Wybierz plik magazynu (xlsx) — zakładka „Stan komponentów”',
+      title: `Wybierz plik magazynu (xlsx) — zakładka „${sheetLabel}”`,
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
       properties: ['openFile'],
     });
     if (result.canceled || result.filePaths.length === 0) return { ok: false };
     try {
-      const analysis = await analyzeMagazynStock(result.filePaths[0], db);
+      const analysis = await analyzeMagazynStock(result.filePaths[0], db, section);
       db.updateSettings({ lastImportDir: path.dirname(result.filePaths[0]) });
       return { ok: true, analysis };
     } catch (err) {
@@ -374,6 +382,9 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       _e,
       args: {
         sourceFile: string;
+        // Which catalog subset this run targeted — decides the fallback type
+        // for created rows below (see inferComponentType).
+        section: ComponentSection;
         decisions: MagazynStockDecision[];
         // Unmatched file rows the user chose to create as new components.
         createItems?: MagazynStockUnmatched[];
@@ -418,7 +429,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       for (const u of args.createItems ?? []) {
         await db.createComponent({
           name: u.name,
-          type: inferComponentType(u.name),
+          type: inferComponentType(u.name, args.section),
           supplierIds: [],
           stockQty: u.qty,
           stockSource: 'import',

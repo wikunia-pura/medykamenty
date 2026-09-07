@@ -494,7 +494,7 @@ export async function importRawMaterialsXlsx(
         // existing maps already point at the right entry; nothing to refresh.
         continue;
       }
-      const updated = await db.updateRawMaterial(existing.id, patch);
+      const updated = await db.updateRawMaterial(existing.id, patch, { priceSource: 'import' });
       rawByKey.set(normalizeKey(updated.name), updated);
       rawById.set(updated.id, updated);
       const smartKey = smartNormalize(updated.name);

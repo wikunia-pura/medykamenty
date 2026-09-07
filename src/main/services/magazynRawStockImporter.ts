@@ -1,7 +1,9 @@
 // Import the warehouse spreadsheet ("Magazyn.xlsx"), second tab "Stan
-// surowców", into the raw-materials catalog. Like the component stock import it
-// NEVER creates catalog entries — it only matches rows to materials that
-// already exist, by name (column A).
+// surowców", into the raw-materials catalog. Rows are matched to existing
+// materials by name (column A). Like the component stock import, rows with no
+// match come back as `unmatched` create-candidates the user creates or skips
+// per row (unit defaults to kg); names matching >1 material land in
+// `ambiguousNames` and are skipped.
 //
 // The twist: a material's stock can be split across several rows, one per
 // batch/lot, because each lot has its own expiry. So rows are grouped by the

@@ -4,9 +4,12 @@ import { HeaderNav } from '../navigation';
 import type {
   ProductionPlan,
   CostReport,
+  CostItemKind,
+  CostItemLine,
   Product,
   RawMaterial,
   PackagingComponent,
+  PriceHistoryEntry,
 } from '../../shared/types';
 import type { ViewKey } from './types';
 import NoPlansEmptyState from '../components/NoPlansEmptyState';
@@ -15,6 +18,7 @@ import MultiSelect from '../components/MultiSelect';
 import HoverTooltip from '../components/HoverTooltip';
 import PlanEditorModal from '../components/PlanEditorModal';
 import ProductEditorModal from '../components/ProductEditorModal';
+import PriceCell from '../components/PriceCell';
 import { IconRefresh, IconChevronDown } from '../components/Icons';
 
 interface Props {
@@ -31,9 +35,16 @@ interface PersistedState {
   planIds: string[];
   reports: CostReport[];
   expandedIds: string[];
+  // Product drill-downs left open, keyed `${planId}:${productId}`.
+  expandedItemKeys: string[];
 }
 
-const EMPTY_STATE: PersistedState = { planIds: [], reports: [], expandedIds: [] };
+const EMPTY_STATE: PersistedState = {
+  planIds: [],
+  reports: [],
+  expandedIds: [],
+  expandedItemKeys: [],
+};
 
 const loadState = (): PersistedState => {
   try {
@@ -48,7 +59,10 @@ const loadState = (): PersistedState => {
     const expandedIds = Array.isArray(parsed.expandedIds)
       ? parsed.expandedIds.filter((x: unknown): x is string => typeof x === 'string')
       : [];
-    return { planIds, reports, expandedIds };
+    const expandedItemKeys = Array.isArray(parsed.expandedItemKeys)
+      ? parsed.expandedItemKeys.filter((x: unknown): x is string => typeof x === 'string')
+      : [];
+    return { planIds, reports, expandedIds, expandedItemKeys };
   } catch {
     return EMPTY_STATE;
   }
@@ -73,6 +87,9 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
   const [planIds, setPlanIds] = useState<string[]>(() => loadState().planIds);
   const [reports, setReports] = useState<CostReport[]>(() => loadState().reports);
   const [expandedIds, setExpandedIds] = useState<string[]>(() => loadState().expandedIds);
+  const [expandedItemKeys, setExpandedItemKeys] = useState<string[]>(
+    () => loadState().expandedItemKeys,
+  );
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -166,8 +183,8 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
   };
 
   useEffect(() => {
-    saveState({ planIds, reports, expandedIds });
-  }, [planIds, reports, expandedIds]);
+    saveState({ planIds, reports, expandedIds, expandedItemKeys });
+  }, [planIds, reports, expandedIds, expandedItemKeys]);
 
   const planNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -181,6 +198,43 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
     );
   };
 
+  const itemKey = (planId: string, productId: string) => `${planId}:${productId}`;
+
+  const toggleItems = (planId: string, productId: string) => {
+    const key = itemKey(planId, productId);
+    setExpandedItemKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  };
+
+  // Current catalog price history for a cost line. Read live from the catalog
+  // rather than from the (persisted, possibly stale) report.
+  const historyFor = (line: CostItemLine): PriceHistoryEntry[] | undefined =>
+    line.kind === 'raw'
+      ? rawMaterials.find((r) => r.id === line.itemId)?.priceHistory
+      : components.find((c) => c.id === line.itemId)?.priceHistory;
+
+  // Saves a price straight into the raw materials / components catalog, then
+  // reloads and recomputes so every number on screen reflects the new price.
+  const setItemPrice = async (line: CostItemLine, price: number | undefined) => {
+    setError(null);
+    try {
+      if (line.kind === 'raw') {
+        await window.electronAPI.updateRawMaterial(line.itemId, {
+          lastPurchasePriceNet: price,
+        });
+      } else {
+        await window.electronAPI.updateComponent(line.itemId, {
+          lastPurchasePriceNet: price,
+        });
+      }
+      await reload();
+      await compute();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   const compute = async (ids?: string[]) => {
     const targetIds = ids ?? planIds;
     if (targetIds.length === 0) return;
@@ -188,9 +242,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
     setLoaderMessage(t.loaderComputing);
     setError(null);
     try {
-      const next = await Promise.all(
-        targetIds.map((id) => window.electronAPI.computeCost(id)),
-      );
+      const next = await Promise.all(targetIds.map((id) => window.electronAPI.computeCost(id)));
       setReports(next);
     } catch (err) {
       setError((err as Error).message);
@@ -202,6 +254,17 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
 
   const fmt = (n: number) =>
     n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Consumption per unit spans grams (50) and fractions of a carton (0.0417),
+  // so keep enough precision for the small end without padding the large one.
+  const fmtQty = (n: number) => n.toLocaleString(locale, { maximumFractionDigits: n < 1 ? 4 : 2 });
+
+  const KIND_LABEL: Record<CostItemKind, string> = {
+    raw: t.ingredients,
+    component: t.packaging,
+    bulkPackaging: t.bulkPackagingCost,
+  };
+  const KIND_ORDER: CostItemKind[] = ['raw', 'component', 'bulkPackaging'];
 
   if (plans.length === 0) {
     return (
@@ -340,9 +403,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
                     </span>
                   }
                 >
-                  <div className="shortage-tooltip-explain">
-                    {t.missingPricesTooltipExplain}
-                  </div>
+                  <div className="shortage-tooltip-explain">{t.missingPricesTooltipExplain}</div>
                 </HoverTooltip>
               )}
             </div>
@@ -358,76 +419,172 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
                         <th className="num">{t.unitCost}</th>
                         <th className="num">{t.ingredients}</th>
                         <th className="num">{t.packaging}</th>
+                        <th className="num">{t.bulkPackagingCost}</th>
                         <th className="num">{t.laborCost}</th>
                         <th>{t.missingPrices}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {report.perProduct.map((line) => (
-                        <tr key={line.productId}>
-                          <td>
-                            <button
-                              type="button"
-                              className="link-button"
-                              onClick={(ev) => {
-                                ev.stopPropagation();
-                                openProductPreview(line.productId);
-                              }}
-                              title={t.preview}
-                            >
-                              {line.productName}
-                            </button>
-                          </td>
-                          <td className="num">
-                            <strong>{fmt(line.unitCost)}</strong>
-                          </td>
-                          <td className="num">{fmt(line.ingredientsCost)}</td>
-                          <td className="num">{fmt(line.packagingCost)}</td>
-                          <td className="num">{fmt(line.laborCost)}</td>
-                          <td>
-                            {line.missingPriceItems.length === 0 ? (
-                              <HoverTooltip
-                                align="right"
-                                trigger={<span className="tag success">✓</span>}
-                              >
-                                <div className="shortage-tooltip-explain">
-                                  {t.missingPricesAllPriced}
+                      {report.perProduct.map((line) => {
+                        const itemsOpen = expandedItemKeys.includes(
+                          itemKey(report.planId, line.productId),
+                        );
+                        const hasItems = (line.items ?? []).length > 0;
+                        return (
+                          <React.Fragment key={line.productId}>
+                            <tr>
+                              <td>
+                                <div className="cost-product-cell">
+                                  {hasItems && (
+                                    <button
+                                      type="button"
+                                      className={`btn btn-sm cost-items-toggle${
+                                        itemsOpen ? ' is-open' : ''
+                                      }`}
+                                      onClick={(ev) => {
+                                        ev.stopPropagation();
+                                        toggleItems(report.planId, line.productId);
+                                      }}
+                                      title={itemsOpen ? t.maxProducibleHideDetails : t.costItems}
+                                    >
+                                      <IconChevronDown size={13} />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="link-button"
+                                    onClick={(ev) => {
+                                      ev.stopPropagation();
+                                      openProductPreview(line.productId);
+                                    }}
+                                    title={t.preview}
+                                  >
+                                    {line.productName}
+                                  </button>
                                 </div>
-                              </HoverTooltip>
-                            ) : (
-                              <HoverTooltip
-                                align="right"
-                                triggerClassName="count-bubble"
-                                trigger={
-                                  <span className="tag warn">
-                                    {line.missingPriceItems.length}
-                                  </span>
-                                }
-                              >
-                                <div className="shortage-tooltip-header">
-                                  {t.missingPricesTooltipHeader} —{' '}
-                                  {line.missingPriceItems.length}
-                                </div>
-                                <div className="shortage-tooltip-explain">
-                                  {t.missingPricesTooltipExplain}
-                                </div>
-                                <ul className="shortage-tooltip-list">
-                                  {line.missingPriceItems.map((m) => (
-                                    <li key={`${m.kind}-${m.itemId}`}>
-                                      <span className="shortage-tooltip-name">
-                                        {m.itemName}
+                              </td>
+                              <td className="num">
+                                <strong>{fmt(line.unitCost)}</strong>
+                              </td>
+                              <td className="num">{fmt(line.ingredientsCost)}</td>
+                              <td className="num">{fmt(line.packagingCost)}</td>
+                              <td className="num">{fmt(line.bulkPackagingCost ?? 0)}</td>
+                              <td className="num">{fmt(line.laborCost)}</td>
+                              <td>
+                                {line.missingPriceItems.length === 0 ? (
+                                  <HoverTooltip
+                                    align="right"
+                                    trigger={<span className="tag success">✓</span>}
+                                  >
+                                    <div className="shortage-tooltip-explain">
+                                      {t.missingPricesAllPriced}
+                                    </div>
+                                  </HoverTooltip>
+                                ) : (
+                                  <HoverTooltip
+                                    align="right"
+                                    triggerClassName="count-bubble"
+                                    trigger={
+                                      <span className="tag warn">
+                                        {line.missingPriceItems.length}
                                       </span>
-                                      <span className="tag">
-                                        {m.kind === 'raw' ? t.rawMaterials : t.components}
-                                      </span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </HoverTooltip>
+                                    }
+                                  >
+                                    <div className="shortage-tooltip-header">
+                                      {t.missingPricesTooltipHeader} —{' '}
+                                      {line.missingPriceItems.length}
+                                    </div>
+                                    <div className="shortage-tooltip-explain">
+                                      {t.missingPricesTooltipExplain}
+                                    </div>
+                                    <ul className="shortage-tooltip-list">
+                                      {line.missingPriceItems.map((m) => (
+                                        <li key={`${m.kind}-${m.itemId}`}>
+                                          <span className="shortage-tooltip-name">
+                                            {m.itemName}
+                                          </span>
+                                          <span className="tag">
+                                            {m.kind === 'raw' ? t.rawMaterials : t.components}
+                                          </span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </HoverTooltip>
+                                )}
+                              </td>
+                            </tr>
+                            {hasItems && itemsOpen && (
+                              <tr className="cost-items-row">
+                                <td colSpan={7}>
+                                  <div className="cost-items">
+                                    <div className="cost-items-title">{t.costItems}</div>
+                                    <div className="cost-items-hint">{t.costItemsHint}</div>
+                                    <table className="table cost-items-table">
+                                      <thead>
+                                        <tr>
+                                          <th>{t.name}</th>
+                                          <th className="num">{t.costItemQty}</th>
+                                          <th className="num">{t.costItemUnitPrice}</th>
+                                          <th className="num">{t.costItemCost}</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {KIND_ORDER.filter((kind) =>
+                                          line.items.some((it) => it.kind === kind),
+                                        ).map((kind) => (
+                                          <React.Fragment key={kind}>
+                                            <tr className="cost-items-group">
+                                              <td colSpan={4}>{KIND_LABEL[kind]}</td>
+                                            </tr>
+                                            {line.items
+                                              .filter((it) => it.kind === kind)
+                                              .map((it) => (
+                                                <tr key={`${it.kind}-${it.itemId}`}>
+                                                  <td className="col-wrap">
+                                                    {it.itemName}
+                                                    {it.factorySupplied && (
+                                                      <span className="tag cost-item-tag">
+                                                        {t.factorySupplied}
+                                                      </span>
+                                                    )}
+                                                    {it.viaDependency && (
+                                                      <span className="tag cost-item-tag">
+                                                        {t.costItemViaDependency}
+                                                      </span>
+                                                    )}
+                                                  </td>
+                                                  <td className="num">
+                                                    {fmtQty(it.qtyPerUnit)} {it.qtyUnit}
+                                                  </td>
+                                                  <PriceCell
+                                                    price={it.unitPrice}
+                                                    currency={it.currency}
+                                                    history={historyFor(it)}
+                                                    priceUnit={it.priceUnit}
+                                                    onCommit={(v) => setItemPrice(it, v)}
+                                                  />
+                                                  <td className="num">
+                                                    {it.unitPrice === undefined ? (
+                                                      <span className="tag warn">
+                                                        {t.costItemNoPrice}
+                                                      </span>
+                                                    ) : (
+                                                      fmt(it.cost)
+                                                    )}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                          </React.Fragment>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
                             )}
-                          </td>
-                        </tr>
-                      ))}
+                          </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

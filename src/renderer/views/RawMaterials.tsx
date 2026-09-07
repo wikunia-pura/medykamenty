@@ -20,6 +20,8 @@ import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
 import NumberInput from '../components/NumberInput';
 import StockCell from '../components/StockCell';
+import PriceCell from '../components/PriceCell';
+import { PriceHistoryList } from '../components/PriceHistory';
 import OverageCell from '../components/OverageCell';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
@@ -110,7 +112,7 @@ const RawMaterials: React.FC = () => {
       { id: 'moq', label: t.moq, defaultVisible: true },
       { id: 'leadTime', label: t.leadTime, defaultVisible: true },
       { id: 'shelfLife', label: t.shelfLife, defaultVisible: false },
-      { id: 'price', label: t.price, defaultVisible: false },
+      { id: 'price', label: t.price, defaultVisible: true },
       { id: 'overage', label: t.overage, defaultVisible: true },
       { id: 'currency', label: t.currency, defaultVisible: false },
       { id: 'factory', label: t.factorySupplied, defaultVisible: true },
@@ -267,9 +269,13 @@ const RawMaterials: React.FC = () => {
         );
       case 'price':
         return (
-          <td key={id} className="num">
-            {rm.lastPurchasePriceNet ?? ''}
-          </td>
+          <PriceCell
+            key={id}
+            price={rm.lastPurchasePriceNet}
+            currency={rm.currency}
+            history={rm.priceHistory}
+            onCommit={(v) => onSetPrice(rm.id, v)}
+          />
         );
       case 'overage':
         return (
@@ -328,6 +334,18 @@ const RawMaterials: React.FC = () => {
     setError(null);
     try {
       await window.electronAPI.updateRawMaterial(id, { overagePct: pct });
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  // Inline price edit from the grid. The catalog update records the change in
+  // the item's price history (see recordPriceChange in main/database.ts).
+  const onSetPrice = async (id: string, price: number | undefined) => {
+    setError(null);
+    try {
+      await window.electronAPI.updateRawMaterial(id, { lastPurchasePriceNet: price });
       await reload();
     } catch (err) {
       setError((err as Error).message);
@@ -1014,6 +1032,15 @@ const RawMaterials: React.FC = () => {
                   onChange={(v) => setEditing({ ...editing, lastPurchasePriceNet: v })}
                 />
               </div>
+              <div className="form-row" style={{ alignItems: 'flex-start' }}>
+                <label>{t.priceHistory}</label>
+                <div style={{ flex: 1 }}>
+                  <PriceHistoryList
+                    history={editing.priceHistory}
+                    fallbackCurrency={editing.currency}
+                  />
+                </div>
+              </div>
               <div className="form-row">
                 <label>{t.currency}</label>
                 <input
@@ -1524,6 +1551,11 @@ const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCance
               <div className="hint" style={{ marginBottom: 12 }}>
                 {t.rawStockDiffIntro}
               </div>
+              {unmatched.length > 0 && (
+                <div className="warn-text" style={{ marginBottom: 12, fontSize: 12 }}>
+                  {t.magazynStockUnmatchedNotice.replace('{n}', String(unmatched.length))}
+                </div>
+              )}
               <div className="apply-all-row">
                 <span className="apply-all-label">{t.applyToAllLabel}</span>
                 <button type="button" className="btn btn-sm" onClick={() => setAll('reject')}>

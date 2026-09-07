@@ -14,6 +14,7 @@ import type {
   RawMaterialsImportMode,
   RawMaterialsImportSummary,
   ComponentsImportSummary,
+  ComponentSection,
   MagazynStockAnalysis,
   MagazynStockDecision,
   MagazynStockCommitResult,
@@ -41,6 +42,7 @@ import type {
   WorkflowTemplate,
   TaskInstance,
   TaskTemplate,
+  PriceChangeSource,
 } from '../shared/types';
 
 export interface ElectronAPI {
@@ -58,7 +60,12 @@ export interface ElectronAPI {
   createRawMaterial(
     input: Omit<RawMaterial, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<RawMaterial>;
-  updateRawMaterial(id: string, patch: Partial<RawMaterial>): Promise<RawMaterial>;
+  updateRawMaterial(
+    id: string,
+    patch: Partial<RawMaterial>,
+    // Labels the price change in the item's history; defaults to 'manual'.
+    opts?: { priceSource?: PriceChangeSource },
+  ): Promise<RawMaterial>;
   deleteRawMaterial(id: string): Promise<{ ok: boolean; blockedBy?: string[] }>;
   duplicateRawMaterial(id: string): Promise<RawMaterial>;
   importRawMaterialsXlsx(mode: RawMaterialsImportMode): Promise<{
@@ -80,7 +87,11 @@ export interface ElectronAPI {
   createComponent(
     input: Omit<PackagingComponent, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<PackagingComponent>;
-  updateComponent(id: string, patch: Partial<PackagingComponent>): Promise<PackagingComponent>;
+  updateComponent(
+    id: string,
+    patch: Partial<PackagingComponent>,
+    opts?: { priceSource?: PriceChangeSource },
+  ): Promise<PackagingComponent>;
   deleteComponent(id: string): Promise<{ ok: boolean; blockedBy?: string[] }>;
   duplicateComponent(id: string): Promise<PackagingComponent>;
   importComponentsXlsx(mode: RawMaterialsImportMode): Promise<{
@@ -88,13 +99,14 @@ export interface ElectronAPI {
     summary?: ComponentsImportSummary;
     error?: string;
   }>;
-  analyzeMagazynStock(): Promise<{
+  analyzeMagazynStock(section: ComponentSection): Promise<{
     ok: boolean;
     analysis?: MagazynStockAnalysis;
     error?: string;
   }>;
   commitMagazynStock(args: {
     sourceFile: string;
+    section: ComponentSection;
     decisions: MagazynStockDecision[];
     createItems?: MagazynStockUnmatched[];
   }): Promise<MagazynStockCommitResult>;

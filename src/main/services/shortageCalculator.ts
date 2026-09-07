@@ -279,6 +279,36 @@ export async function computeShortages(
     });
   }
 
+  // Components the user swapped out for this run ("podmiana") vanish from the
+  // math — the substitute took their place — so nothing above records them.
+  // The report still has to carry that decision so the user can revise it, so
+  // recover each original's real numbers from a baseline run (nothing accepted,
+  // no swaps). The inner call gets an empty substitution map, so it never
+  // recurses any deeper.
+  if (Object.keys(substitutions).length > 0) {
+    const baseline = await computeShortages(planId, db, includeExpiredBatchIds, [], {});
+    const baseRefs = new Map(
+      (baseline.dependencyShortages ?? []).map((r) => [r.componentId, r]),
+    );
+    for (const [fromId, toId] of Object.entries(substitutions)) {
+      const from = baseComponents.get(fromId);
+      if (!from) continue;
+      const base = baseRefs.get(fromId);
+      dependencyShortages.push({
+        ...(base ?? {
+          componentId: fromId,
+          componentName: from.name,
+          origin: directComps.has(toId) ? 'tier' : 'cascade',
+          consumedBy: [],
+          available: from.stockQty ?? 0,
+        }),
+        accepted: false,
+        substitutedWithId: toId,
+        substitutedWithName: baseComponents.get(toId)?.name,
+      });
+    }
+  }
+
   const groups = groupBySupplier(rawLines, componentLines, rawMaterials, components, suppliers);
 
   rawLines.sort((a, b) => b.shortage - a.shortage || a.itemName.localeCompare(b.itemName));

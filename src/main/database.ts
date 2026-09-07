@@ -25,6 +25,8 @@ import type {
   TaskType,
   DateOnly,
   OrderStatus,
+  PriceHistoryEntry,
+  PriceChangeSource,
 } from '../shared/types';
 import {
   migrateLegacySecondaryPackaging,
@@ -41,6 +43,7 @@ import {
   STOCK_SNAPSHOT_RETENTION,
   SHORTAGE_REPORT_RETENTION,
   EMAIL_BATCH_RETENTION,
+  PRICE_HISTORY_LIMIT,
 } from '../shared/constants';
 import { newId, nowIso } from './utils/id';
 import { getSupabase } from './supabaseClient';
@@ -104,6 +107,52 @@ function splitId<T extends { id: string }>(entity: T): { id: string; rest: Omit<
 // Reconstruct an entity from a Supabase row { id, data }.
 function rebuild<T extends { id: string }>(row: { id: string; data: Record<string, unknown> }): T {
   return { ...row.data, id: row.id } as T;
+}
+
+// ===== Price history =====
+// Every price-carrying catalog entity (raw material, component) keeps its last
+// PRICE_HISTORY_LIMIT price changes. Recorded here, in the single write path
+// all callers funnel through — manual edits, file imports, RFQ answers — so no
+// caller can bypass it. The newest entry always mirrors the current price and
+// says since when it applies.
+
+interface Priced {
+  lastPurchasePriceNet?: number;
+  currency?: string;
+  priceHistory?: PriceHistoryEntry[];
+}
+
+// Returns the history to store, or undefined when nothing changed (the caller
+// then leaves the existing history alone). Clearing a price records nothing —
+// only actual prices make it into the timeline.
+function recordPriceChange(
+  existing: Priced,
+  patch: Partial<Priced>,
+  at: string,
+  source: PriceChangeSource,
+): PriceHistoryEntry[] | undefined {
+  // An explicit priceHistory in the patch wins (used by imports/restores that
+  // carry their own history).
+  if (patch.priceHistory !== undefined) return undefined;
+  if (!('lastPurchasePriceNet' in patch)) return undefined;
+  const next = patch.lastPurchasePriceNet;
+  if (typeof next !== 'number' || !Number.isFinite(next)) return undefined;
+  if (next === existing.lastPurchasePriceNet) return undefined;
+  const entry: PriceHistoryEntry = {
+    price: next,
+    currency: patch.currency ?? existing.currency,
+    at,
+    source,
+  };
+  return [entry, ...(existing.priceHistory ?? [])].slice(0, PRICE_HISTORY_LIMIT);
+}
+
+// Seeds the history of a freshly created entity that already carries a price.
+function initialPriceHistory(input: Priced, at: string): PriceHistoryEntry[] | undefined {
+  if (input.priceHistory !== undefined) return input.priceHistory;
+  const price = input.lastPurchasePriceNet;
+  if (typeof price !== 'number' || !Number.isFinite(price)) return undefined;
+  return [{ price, currency: input.currency, at, source: 'manual' }];
 }
 
 // ===== Workflow task date math =====
@@ -320,7 +369,13 @@ export default class Database {
     input: Omit<RawMaterial, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<RawMaterial> {
     const now = nowIso();
-    const rm: RawMaterial = { ...input, id: newId(), createdAt: now, updatedAt: now };
+    const rm: RawMaterial = {
+      ...input,
+      priceHistory: initialPriceHistory(input, now),
+      id: newId(),
+      createdAt: now,
+      updatedAt: now,
+    };
     const { rest } = splitId(rm);
     const { error } = await getSupabase()
       .from('raw_materials')
@@ -332,10 +387,19 @@ export default class Database {
   async updateRawMaterial(
     id: string,
     patch: Partial<Omit<RawMaterial, 'id' | 'createdAt'>>,
+    opts?: { priceSource?: PriceChangeSource },
   ): Promise<RawMaterial> {
     const existing = await this.getRawMaterial(id);
     if (!existing) throw new Error(`RawMaterial ${id} not found`);
-    const updated: RawMaterial = { ...existing, ...patch, id, updatedAt: nowIso() };
+    const at = nowIso();
+    const priceHistory = recordPriceChange(existing, patch, at, opts?.priceSource ?? 'manual');
+    const updated: RawMaterial = {
+      ...existing,
+      ...patch,
+      ...(priceHistory ? { priceHistory } : {}),
+      id,
+      updatedAt: at,
+    };
     const { rest } = splitId(updated);
     const { error } = await getSupabase()
       .from('raw_materials')
@@ -367,10 +431,11 @@ export default class Database {
   async setRawMaterialLastPrice(id: string, price: number, currency?: string): Promise<void> {
     const existing = await this.getRawMaterial(id);
     if (!existing) return;
-    await this.updateRawMaterial(id, {
-      lastPurchasePriceNet: price,
-      currency: currency ?? existing.currency,
-    });
+    await this.updateRawMaterial(
+      id,
+      { lastPurchasePriceNet: price, currency: currency ?? existing.currency },
+      { priceSource: 'import' },
+    );
   }
 
   // ============================== Components ==============================
@@ -397,7 +462,13 @@ export default class Database {
     input: Omit<PackagingComponent, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<PackagingComponent> {
     const now = nowIso();
-    const c: PackagingComponent = { ...input, id: newId(), createdAt: now, updatedAt: now };
+    const c: PackagingComponent = {
+      ...input,
+      priceHistory: initialPriceHistory(input, now),
+      id: newId(),
+      createdAt: now,
+      updatedAt: now,
+    };
     const { rest } = splitId(c);
     const { error } = await getSupabase()
       .from('components')
@@ -409,10 +480,19 @@ export default class Database {
   async updateComponent(
     id: string,
     patch: Partial<Omit<PackagingComponent, 'id' | 'createdAt'>>,
+    opts?: { priceSource?: PriceChangeSource },
   ): Promise<PackagingComponent> {
     const existing = await this.getComponent(id);
     if (!existing) throw new Error(`Component ${id} not found`);
-    const updated: PackagingComponent = { ...existing, ...patch, id, updatedAt: nowIso() };
+    const at = nowIso();
+    const priceHistory = recordPriceChange(existing, patch, at, opts?.priceSource ?? 'manual');
+    const updated: PackagingComponent = {
+      ...existing,
+      ...patch,
+      ...(priceHistory ? { priceHistory } : {}),
+      id,
+      updatedAt: at,
+    };
     const { rest } = splitId(updated);
     const { error } = await getSupabase()
       .from('components')
@@ -459,10 +539,11 @@ export default class Database {
   async setComponentLastPrice(id: string, price: number, currency?: string): Promise<void> {
     const existing = await this.getComponent(id);
     if (!existing) return;
-    await this.updateComponent(id, {
-      lastPurchasePriceNet: price,
-      currency: currency ?? existing.currency,
-    });
+    await this.updateComponent(
+      id,
+      { lastPurchasePriceNet: price, currency: currency ?? existing.currency },
+      { priceSource: 'import' },
+    );
   }
 
   // ============================ Catalog stock ============================

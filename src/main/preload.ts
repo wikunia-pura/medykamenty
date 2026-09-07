@@ -162,7 +162,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listRawMaterials: () => ipcRenderer.invoke(CH.RAW_LIST),
   getRawMaterial: (id: string) => ipcRenderer.invoke(CH.RAW_GET, id),
   createRawMaterial: (input: any) => ipcRenderer.invoke(CH.RAW_CREATE, input),
-  updateRawMaterial: (id: string, patch: any) => ipcRenderer.invoke(CH.RAW_UPDATE, id, patch),
+  updateRawMaterial: (id: string, patch: any, opts?: any) =>
+    ipcRenderer.invoke(CH.RAW_UPDATE, id, patch, opts),
   deleteRawMaterial: (id: string) => ipcRenderer.invoke(CH.RAW_DELETE, id),
   duplicateRawMaterial: (id: string) => ipcRenderer.invoke(CH.RAW_DUPLICATE, id),
   importRawMaterialsXlsx: (mode: 'merge' | 'overwrite') =>
@@ -179,14 +180,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listComponents: () => ipcRenderer.invoke(CH.COMP_LIST),
   getComponent: (id: string) => ipcRenderer.invoke(CH.COMP_GET, id),
   createComponent: (input: any) => ipcRenderer.invoke(CH.COMP_CREATE, input),
-  updateComponent: (id: string, patch: any) => ipcRenderer.invoke(CH.COMP_UPDATE, id, patch),
+  updateComponent: (id: string, patch: any, opts?: any) =>
+    ipcRenderer.invoke(CH.COMP_UPDATE, id, patch, opts),
   deleteComponent: (id: string) => ipcRenderer.invoke(CH.COMP_DELETE, id),
   duplicateComponent: (id: string) => ipcRenderer.invoke(CH.COMP_DUPLICATE, id),
   importComponentsXlsx: (mode: 'merge' | 'overwrite') =>
     ipcRenderer.invoke(CH.COMP_XLSX_IMPORT, mode),
-  analyzeMagazynStock: () => ipcRenderer.invoke(CH.COMP_MAGAZYN_STOCK_ANALYZE),
-  commitMagazynStock: (args: { sourceFile: string; decisions: any[]; createItems?: any[] }) =>
-    ipcRenderer.invoke(CH.COMP_MAGAZYN_STOCK_COMMIT, args),
+  analyzeMagazynStock: (section: 'primary' | 'secondary') =>
+    ipcRenderer.invoke(CH.COMP_MAGAZYN_STOCK_ANALYZE, section),
+  commitMagazynStock: (args: {
+    sourceFile: string;
+    section: 'primary' | 'secondary';
+    decisions: any[];
+    createItems?: any[];
+  }) => ipcRenderer.invoke(CH.COMP_MAGAZYN_STOCK_COMMIT, args),
 
   // Products
   listProducts: () => ipcRenderer.invoke(CH.PRODUCTS_LIST),

@@ -19,7 +19,9 @@ import type {
 import type { ViewKey } from './types';
 import ExpiredStockModal from '../components/ExpiredStockModal';
 import DependencyShortageModal, {
+  DependencyDecisionTable,
   buildSubstituteCandidates,
+  type DependencyRowChoice,
 } from '../components/DependencyShortageModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
@@ -140,11 +142,37 @@ const ShortageReportView: React.FC<Props> = ({
   // generated report, so the user can change their mind and regenerate. Synced
   // from the report's own `included` flags whenever a fresh report loads.
   const [expiredDraft, setExpiredDraft] = useState<Set<string>>(new Set());
+  // Same idea for the packaging decisions (licz brak / zaakceptuj / podmień):
+  // an editable copy of what the report was computed with, so the user can
+  // change their mind on the generated report and regenerate.
+  const [depDraft, setDepDraft] = useState<Record<string, DependencyRowChoice>>({});
+  const [depSubDraft, setDepSubDraft] = useState<Record<string, string>>({});
 
   // Re-seed the expired-batch draft from whichever report is in focus.
   useEffect(() => {
     const eb = focus?.report?.expiredBatches ?? [];
     setExpiredDraft(new Set(eb.filter((b) => b.included).map((b) => b.batchId)));
+  }, [focus?.report?.computedAt, focus?.entryId]);
+
+  // Re-seed the packaging-decision draft the same way. This also refreshes the
+  // ids in-place recomputes use (supplier reassign), so opening an older report
+  // and reassigning a supplier no longer silently drops its decisions.
+  useEffect(() => {
+    const refs = focus?.report?.dependencyShortages ?? [];
+    const choices: Record<string, DependencyRowChoice> = {};
+    const subs: Record<string, string> = {};
+    for (const r of refs) {
+      if (r.substitutedWithId) {
+        choices[r.componentId] = 'substitute';
+        subs[r.componentId] = r.substitutedWithId;
+      } else {
+        choices[r.componentId] = r.accepted ? 'accept' : 'count';
+      }
+    }
+    setDepDraft(choices);
+    setDepSubDraft(subs);
+    setAcceptedDepIds(refs.filter((r) => r.accepted).map((r) => r.componentId));
+    setDepSubstitutions(subs);
   }, [focus?.report?.computedAt, focus?.entryId]);
 
   const openPlanModal = (planId: string) => {
@@ -666,6 +694,42 @@ const ShortageReportView: React.FC<Props> = ({
     const focusOrderId = focusedEntry?.orderId;
     const linkedOrder = focusOrderId ? orders.find((o) => o.id === focusOrderId) : null;
     const orderMissing = dataLoaded && !!focusOrderId && !linkedOrder;
+
+    // Packaging decisions carried on the report (see the panel below).
+    const depRefs = report.dependencyShortages ?? [];
+    const depRows = depRefs.map((r) => ({
+      componentId: r.componentId,
+      name: r.componentName,
+      consumedBy: r.consumedBy,
+      detail:
+        r.required != null
+          ? t.depShortageDetailReport
+              .replace('{required}', r.required.toLocaleString())
+              .replace('{available}', r.available.toLocaleString())
+              .replace('{shortage}', (r.shortage ?? 0).toLocaleString())
+          : t.depShortageSubstitutedWith.replace('{name}', r.substitutedWithName ?? '—'),
+      candidates: buildSubstituteCandidates(components, r.componentId),
+    }));
+    const depChoiceFor = (id: string): DependencyRowChoice => depDraft[id] ?? 'count';
+    const regenerateWithDepDecisions = () => {
+      const acceptedIds: string[] = [];
+      const subs: Record<string, string> = {};
+      for (const r of depRefs) {
+        const choice = depChoiceFor(r.componentId);
+        if (choice === 'accept') acceptedIds.push(r.componentId);
+        else if (choice === 'substitute' && depSubDraft[r.componentId]) {
+          subs[r.componentId] = depSubDraft[r.componentId];
+        }
+      }
+      // The expired-batch draft rides along so a decision ticked in the panel
+      // above isn't lost by regenerating from here.
+      const expiredIds = [...expiredDraft];
+      setExpiredIncludeIds(expiredIds);
+      setAcceptedDepIds(acceptedIds);
+      setDepSubstitutions(subs);
+      void runCompute(focus.planId, expiredIds, acceptedIds, subs);
+    };
+
     return (
       <div className="main">
         <div className="focus-bar">
@@ -924,6 +988,42 @@ const ShortageReportView: React.FC<Props> = ({
                   setExpiredIncludeIds(ids);
                   void runCompute(focus.planId, ids, acceptedDepIds, depSubstitutions);
                 }}
+                title={t.expiredReportRegenerate}
+              >
+                {t.expiredReportRegenerate}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {depRows.length > 0 && (
+          <div className="card dep-report-panel">
+            <strong className="warn-text">{t.depShortageTitle}</strong>
+            <div className="hint" style={{ margin: '4px 0 10px' }}>
+              {t.depShortagePanelHint}
+            </div>
+            <DependencyDecisionTable
+              rows={depRows}
+              choiceFor={depChoiceFor}
+              substituteFor={(id) => depSubDraft[id] ?? ''}
+              onChoice={(row, choice) => {
+                setDepDraft((prev) => ({ ...prev, [row.componentId]: choice }));
+                if (choice === 'substitute' && !depSubDraft[row.componentId] && row.candidates[0]) {
+                  setDepSubDraft((prev) => ({
+                    ...prev,
+                    [row.componentId]: row.candidates[0].value,
+                  }));
+                }
+              }}
+              onSubstitute={(id, val) => setDepSubDraft((prev) => ({ ...prev, [id]: val }))}
+              disabled={planMissing}
+            />
+            <div className="row" style={{ marginTop: 10 }}>
+              <div className="spacer" />
+              <button
+                className="btn primary-filled"
+                disabled={busy || planMissing}
+                onClick={regenerateWithDepDecisions}
                 title={t.expiredReportRegenerate}
               >
                 {t.expiredReportRegenerate}
