@@ -3,6 +3,7 @@ import { useT, useLang } from '../i18n';
 import NumberInput from './NumberInput';
 import { PriceHistoryTooltip } from './PriceHistory';
 import { IconEdit, IconCheck, IconClose } from './Icons';
+import IconButton from './IconButton';
 import type { PriceHistoryEntry } from '../../shared/types';
 
 interface Props {
@@ -70,24 +71,20 @@ const PriceCell: React.FC<Props> = ({
           onChange={setDraft}
           disabled={saving}
         />
-        <button
-          type="button"
-          className="btn btn-sm soft-success"
+        <IconButton
+          className="btn-sm soft-success"
+          icon={<IconCheck size={12} />}
+          label={t.save}
           onClick={() => void commit()}
           disabled={saving}
-          title={t.save}
-        >
-          <IconCheck size={12} />
-        </button>
-        <button
-          type="button"
-          className="btn btn-sm"
+        />
+        <IconButton
+          className="btn-sm"
+          icon={<IconClose size={12} />}
+          label={t.cancel}
           onClick={() => setEditing(false)}
           disabled={saving}
-          title={t.cancel}
-        >
-          <IconClose size={12} />
-        </button>
+        />
       </div>,
     );
   }
@@ -104,14 +101,12 @@ const PriceCell: React.FC<Props> = ({
       </span>
       <PriceHistoryTooltip history={history} fallbackCurrency={currency} />
       {!disabled && (
-        <button
-          type="button"
-          className="btn btn-sm soft-edit stock-edit-btn"
+        <IconButton
+          className="btn-sm soft-edit stock-edit-btn"
+          icon={<IconEdit size={12} />}
+          label={t.priceEdit}
           onClick={startEdit}
-          title={t.priceEdit}
-        >
-          <IconEdit size={12} />
-        </button>
+        />
       )}
     </div>,
   );

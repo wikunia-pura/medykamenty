@@ -7227,8 +7227,31 @@ body.dark-mode .prices-loading-banner {
   font-size: 10px;
   padding: 1px 6px;
 }
-/* The edit button hides until hover on normal rows; inside the breakdown the
- * price is the point of the table, so keep the affordance always visible. */
-.cost-items-table .stock-cell .stock-edit-btn {
+/* The breakdown sits inside a row of the outer cost table: hovering any of
+   its rows hovered that outer row too and lit the whole block, so single rows
+   didn't stand out. The outer holder keeps its colour; inner rows highlight
+   one at a time (and show their price edit button on hover, as elsewhere).
+   Group header rows aren't data rows — no highlight. */
+.table tr.cost-items-row:hover > td {
+  background: var(--bg);
+}
+/* `.table tr:hover td` reaches nested cells too: hovering the outer holder
+   row lit every cell of the inner table. Clear them, then light only the
+   inner row actually under the cursor. */
+.cost-items-row:hover .cost-items-table td {
+  background: transparent;
+}
+.cost-items-row .cost-items-table tr:hover > td {
+  background: var(--bg-hover);
+}
+.cost-items-row .cost-items-table tr.cost-items-group:hover > td {
+  background: transparent;
+}
+/* Same nesting issue for the hover-only price edit button: hovering the
+   outer holder row must not reveal every button in the breakdown. */
+.cost-items-row:hover .stock-cell .stock-edit-btn {
+  opacity: 0;
+}
+.cost-items-row .cost-items-table tr:hover .stock-cell .stock-edit-btn {
   opacity: 1;
 }
