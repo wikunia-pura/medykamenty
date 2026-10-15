@@ -9,8 +9,35 @@ function getClient(): Anthropic | null {
   if (cachedClient) return cachedClient;
   const apiKey = getApiKey();
   if (!apiKey) return null;
-  cachedClient = new Anthropic({ apiKey });
+  // withRetry below owns the retries; the SDK's own (2 retries, 10 min timeout)
+  // would multiply them into minutes of blocking per email.
+  cachedClient = new Anthropic({ apiKey, timeout: 60_000, maxRetries: 0 });
   return cachedClient;
+}
+
+// Haiku 5.5 thinks by default and its thinking counts toward max_tokens; these
+// are short rewriting/matching tasks, so keep effort low.
+const LLM_OUTPUT_CONFIG = { effort: 'low' } as const;
+
+function textOf(response: Anthropic.Message): string | null {
+  // A refusal or a cut-off answer must not be mistaken for a finished one.
+  if (response.stop_reason === 'refusal' || response.stop_reason === 'max_tokens') {
+    throw new Error(`AI stopped early (${response.stop_reason})`);
+  }
+  const block = response.content.find((b) => b.type === 'text');
+  return block && block.type === 'text' ? block.text.trim() : null;
+}
+
+// Every number of the draft (quantities, MOQ, dates) must survive the rewrite
+// unchanged — the email goes to a supplier as an order request.
+function numberTokens(text: string): string[] {
+  return (text.match(/\d+(?:[.,]\d+)*/g) ?? []).map((n) => n.replace(',', '.')).sort();
+}
+
+function sameNumbers(draft: string, rewritten: string): boolean {
+  const a = numberTokens(draft);
+  const b = numberTokens(rewritten);
+  return a.length === b.length && a.every((n, i) => n === b[i]);
 }
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
@@ -60,23 +87,20 @@ export async function rewriteEmail(
   const response = await withRetry(() =>
     client.messages.create({
       model: getModel(),
-      max_tokens: 1500,
-      // Cache the system prompt across requests in the same 5-minute window.
-      // Saves ~90% on cache hits when the user refines several emails in a row.
-      system: [
-        {
-          type: 'text',
-          text: systemPrompt,
-          cache_control: { type: 'ephemeral' },
-        },
-      ],
+      max_tokens: 4000,
+      output_config: LLM_OUTPUT_CONFIG,
+      // No cache_control: the prompt is far below the minimum cacheable size.
+      system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     }),
   );
 
-  const block = response.content.find((b) => b.type === 'text');
-  if (!block || block.type !== 'text') throw new Error('AI returned no text');
-  return block.text.trim();
+  const text = textOf(response);
+  if (!text) throw new Error('AI returned no text');
+  if (!sameNumbers(draftBody, text)) {
+    throw new Error('AI rewrite changed the numbers of the draft');
+  }
+  return text;
 }
 
 export async function suggestMatch(
@@ -98,18 +122,22 @@ export async function suggestMatch(
   const response = await withRetry(() =>
     client.messages.create({
       model: getModel(),
-      max_tokens: 200,
-      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+      max_tokens: 1000,
+      output_config: LLM_OUTPUT_CONFIG,
+      system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     }),
   );
 
-  const block = response.content.find((b) => b.type === 'text');
-  if (!block || block.type !== 'text') return null;
+  const text = textOf(response);
+  if (!text) return null;
   try {
-    const parsed = JSON.parse(block.text.trim());
+    // Tolerate a ```json fence around the object.
+    const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
     if (!parsed.id) return null;
-    return { id: String(parsed.id), confidence: Number(parsed.confidence) || 0 };
+    const id = String(parsed.id);
+    if (!candidateNames.some((c) => c.id === id)) return null;
+    return { id, confidence: Number(parsed.confidence) || 0 };
   } catch {
     return null;
   }

@@ -48,7 +48,7 @@ import { reconcileStock } from '../services/stockReconciler';
 import { computeCost } from '../services/costCalculator';
 import { generateEmailsForReport, regenerateBatchEmail } from '../services/rfqGenerator';
 import { maxProducible } from '../services/reverseCalculator';
-import { isAiAvailable, getModel } from '../aiConfig';
+import { isAiAvailable, getModel, loadCloudAiKey } from '../aiConfig';
 import { rewriteEmail, suggestMatch } from '../services/llmClient';
 import { seedDemo } from '../services/demoSeed';
 import * as authService from '../authService';
@@ -1199,10 +1199,15 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   );
 
   // ---- LLM ----
-  ipcMain.handle(IPC.LLM_IS_AVAILABLE, () => ({
-    available: isAiAvailable(),
-    model: isAiAvailable() ? getModel() : undefined,
-  }));
+  // The renderer asks right after a session is established — the moment the
+  // cloud key (app_config, signed-in read only) becomes readable.
+  ipcMain.handle(IPC.LLM_IS_AVAILABLE, async () => {
+    await loadCloudAiKey(db);
+    return {
+      available: isAiAvailable(),
+      model: isAiAvailable() ? getModel() : undefined,
+    };
+  });
   ipcMain.handle(
     IPC.LLM_REWRITE_EMAIL,
     async (_e, draftBody: string, language: Lang, ctx?: { supplierName?: string }) =>

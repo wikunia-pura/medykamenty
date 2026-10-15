@@ -3,7 +3,14 @@ import path from 'path';
 import yaml from 'js-yaml';
 import { app } from 'electron';
 import log from './utils/logger';
+import type Database from './database';
 import { DEFAULT_AI_MODEL } from '../shared/constants';
+
+// Where the Anthropic key comes from. The release binaries are publicly
+// downloadable, so no key is bundled into them: production reads it at runtime
+// from the Supabase `app_config` table (readable only by signed-in users). A
+// local config/ai-config.yml or ANTHROPIC_API_KEY is a developer override and
+// always wins over the cloud key.
 
 interface AiConfigFile {
   ai?: {
@@ -74,4 +81,36 @@ export function getApiKey(): string | undefined {
 
 export function getModel(): string {
   return loadAiConfig().model;
+}
+
+let cloudFetch: Promise<void> | null = null;
+
+/**
+ * Fetch the Anthropic key from the shared `app_config` table unless a key is
+ * already loaded. Needs a signed-in Supabase session; a failure is logged and
+ * not remembered, so the next call retries. Concurrent callers share one fetch.
+ */
+export function loadCloudAiKey(db: Database): Promise<void> {
+  if (isAiAvailable()) return Promise.resolve();
+  if (!cloudFetch) {
+    cloudFetch = (async () => {
+      try {
+        const key = (await db.getAppConfigValue('anthropic_api_key'))?.trim();
+        if (!key) {
+          log.warn('[aiConfig] no anthropic_api_key row in app_config — AI features disabled');
+          return;
+        }
+        if (isAiAvailable()) return; // a local override appeared meanwhile
+        cached = { available: true, apiKey: key, model: getModel() };
+        log.info('[aiConfig] Anthropic key loaded from Supabase app_config');
+      } catch (err) {
+        log.warn(
+          `[aiConfig] cloud key fetch failed: ${err instanceof Error ? err.message : err}`,
+        );
+      } finally {
+        cloudFetch = null;
+      }
+    })();
+  }
+  return cloudFetch;
 }

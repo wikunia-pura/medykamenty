@@ -79,6 +79,19 @@ create table if not exists public.workflow_templates (
   updated_at  timestamptz not null default now()
 );
 
+-- Application-level configuration shared by all installations. Holds secrets
+-- that must NOT ship inside the (publicly downloadable) release binaries —
+-- e.g. the Anthropic API key. Signed-in users can only READ; writes happen
+-- exclusively from the Supabase dashboard (SQL editor / table editor):
+--
+--   insert into public.app_config (key, value) values ('anthropic_api_key', 'sk-ant-…')
+--     on conflict (key) do update set value = excluded.value, updated_at = now();
+create table if not exists public.app_config (
+  key         text        primary key,
+  value       text        not null,
+  updated_at  timestamptz not null default now()
+);
+
 -- Link reports / email batches to an order. Nullable: legacy rows + reports
 -- generated outside an order context have no order. Set null on order delete
 -- so history survives the order's removal.
@@ -153,6 +166,7 @@ create index if not exists idx_component_aliases_target
 -- Anonymous users have no access.
 -- ============================================================
 
+alter table public.app_config            enable row level security;
 alter table public.suppliers             enable row level security;
 alter table public.raw_materials         enable row level security;
 alter table public.components            enable row level security;
@@ -165,6 +179,12 @@ alter table public.raw_material_aliases  enable row level security;
 alter table public.component_aliases     enable row level security;
 alter table public.orders                enable row level security;
 alter table public.workflow_templates    enable row level security;
+
+-- app_config: read-only for signed-in users; no insert/update/delete policy,
+-- so the anon/authenticated roles can never modify secrets.
+drop policy if exists "authenticated_read" on public.app_config;
+create policy "authenticated_read" on public.app_config
+  for select to authenticated using (true);
 
 drop policy if exists "authenticated_all" on public.suppliers;
 drop policy if exists "authenticated_all" on public.raw_materials;

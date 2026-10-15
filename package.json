@@ -34,10 +34,6 @@
     ],
     "extraResources": [
       {
-        "from": "config/ai-config.yml",
-        "to": "ai-config.yml"
-      },
-      {
         "from": "resources/icon.png",
         "to": "icon.png"
       },

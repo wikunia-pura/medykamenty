@@ -13,9 +13,11 @@ npm run dev
 `npm run dev` builds the main process, starts the Vite dev server on port 3000, and launches
 Electron once the dev server is ready.
 
-To enable AI-assisted features locally, copy `config/ai-config.template.yml` to
-`config/ai-config.yml` and add your Anthropic API key. The runtime file is gitignored. In CI,
-the file is generated from a GitHub Actions secret before packaging.
+AI-assisted features read the Anthropic API key at runtime from the Supabase `app_config`
+table (row `anthropic_api_key`, readable only by signed-in users), so no key ships inside the
+publicly downloadable installers. To use your own key locally, copy
+`config/ai-config.template.yml` to `config/ai-config.yml` and fill it in; a local key wins over
+the cloud one. The file is gitignored and never packaged.
 
 ## Building installers locally
 

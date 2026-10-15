@@ -9,7 +9,7 @@ export const DEFAULT_WASTE_FACTOR = 1.05;
 export const DEFAULT_OVERAGE_PCT = 5;
 export const DEFAULT_CURRENCY = 'PLN';
 export const DEFAULT_LANGUAGE: 'pl' | 'en' = 'pl';
-export const DEFAULT_AI_MODEL = 'claude-sonnet-4-6';
+export const DEFAULT_AI_MODEL = 'claude-haiku-5-5';
 
 export const STOCK_SNAPSHOT_RETENTION = 10;
 export const FUZZY_MATCH_THRESHOLD = 0.85;
