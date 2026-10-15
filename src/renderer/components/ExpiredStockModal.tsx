@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useT } from '../i18n';
 import ModalHeader from './ModalHeader';
 import SegmentedControl from './SegmentedControl';
-import { IconClose } from './Icons';
+import { IconHistory } from './Icons';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import type { ExpiredBatchRef } from '../../shared/types';
 
@@ -43,8 +43,8 @@ const ExpiredStockModal: React.FC<Props> = ({ batches, onCancel, onConfirm }) =>
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
         <ModalHeader
-          icon={<IconClose size={18} />}
-          tone="add"
+          icon={<IconHistory size={18} />}
+          tone="warning"
           title={t.expiredStockTitle}
           onClose={onCancel}
         />

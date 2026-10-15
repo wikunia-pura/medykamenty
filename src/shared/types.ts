@@ -623,6 +623,9 @@ export interface AppSettings {
   defaultCurrency: string;
   lastImportDir?: string;
   defaultEmailLanguage: Lang;
+  // Recipient of the "prepare for day X" pick-list mail sent from a shortage
+  // report. Local to this machine like the rest of the settings.
+  warehouseEmail?: string;
   llm: {
     useByDefault: boolean;
   };
@@ -869,6 +872,9 @@ export interface ShortageReportEntry {
   // Archived reports are hidden from the default list view and cascade
   // their archived flag to any email batches generated from them.
   archived?: boolean;
+  // Set when the user marks the warehouse pick-list mail ("przygotujcie na
+  // dzień X") as sent: the day the warehouse was asked to have it ready.
+  warehouseNotice?: { prepareFor: DateOnly; sentAt: ISODate };
 }
 
 // One catalog item feeding a product's unit cost. 'raw' — a recipe

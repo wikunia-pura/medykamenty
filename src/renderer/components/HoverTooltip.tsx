@@ -38,8 +38,20 @@ const HoverTooltip: React.FC<Props> = ({
       const vw = window.innerWidth;
       const fitsBelow = trect.bottom + ttHeight + margin <= vh;
       const placeBelow = fitsBelow || trect.top < ttHeight + margin;
+      // Keep the tooltip inside the page's content column (the .main area
+      // minus its padding, i.e. flush with the cards) rather than letting a
+      // wide one slide all the way to the window edge.
+      const content = trig.closest('.main');
+      let minLeft = 8;
+      let maxRight = vw - 8;
+      if (content) {
+        const crect = content.getBoundingClientRect();
+        const cs = window.getComputedStyle(content);
+        minLeft = Math.max(minLeft, crect.left + parseFloat(cs.paddingLeft || '0'));
+        maxRight = Math.min(maxRight, crect.right - parseFloat(cs.paddingRight || '0'));
+      }
       let left = align === 'right' ? trect.right - ttWidth : trect.left;
-      left = Math.max(8, Math.min(left, vw - ttWidth - 8));
+      left = Math.max(minLeft, Math.min(left, maxRight - ttWidth));
       const top = placeBelow
         ? trect.bottom + margin
         : Math.max(8, trect.top - ttHeight - margin);

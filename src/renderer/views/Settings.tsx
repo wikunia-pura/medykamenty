@@ -15,6 +15,9 @@ const SettingsView: React.FC<Props> = ({ settings, onChange }) => {
   const t = useT();
   const [busy, setBusy] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  // Typed locally and saved on blur — a per-keystroke async save would drop
+  // characters while typing a whole address.
+  const [warehouseEmailDraft, setWarehouseEmailDraft] = useState(settings.warehouseEmail ?? '');
 
   const update = async (patch: Partial<AppSettings>) => {
     const next = await window.electronAPI.updateSettings(patch);
@@ -81,6 +84,24 @@ const SettingsView: React.FC<Props> = ({ settings, onChange }) => {
             value={settings.defaultEmailLanguage}
             onChange={(val) => update({ defaultEmailLanguage: val as Lang })}
           />
+        </div>
+        <div className="form-row">
+          <label>{t.warehouseEmail}</label>
+          <div>
+            <input
+              type="email"
+              className="input"
+              value={warehouseEmailDraft}
+              onChange={(e) => setWarehouseEmailDraft(e.target.value)}
+              onBlur={() => {
+                const next = warehouseEmailDraft.trim();
+                if (next !== (settings.warehouseEmail ?? '')) void update({ warehouseEmail: next });
+              }}
+            />
+            <div className="hint" style={{ marginTop: 4 }}>
+              {t.warehouseEmailHint}
+            </div>
+          </div>
         </div>
       </div>
 

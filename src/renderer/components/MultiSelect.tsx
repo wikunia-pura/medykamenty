@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
-import { IconCheck, IconSearch, IconClose } from './Icons';
+import { IconCheck, IconChevronDown, IconSearch, IconClose } from './Icons';
 
 export interface MultiSelectOption {
   value: string;
@@ -169,7 +169,7 @@ const MultiSelect: React.FC<Props> = ({
           )}
         </span>
         <span className="searchable-select-caret" aria-hidden>
-          ▾
+          <IconChevronDown size={14} />
         </span>
       </button>
       {open &&

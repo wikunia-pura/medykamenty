@@ -1,19 +1,66 @@
 :root {
-  --bg: #f5f7fb;
-  --bg-elev: #ffffff;
+  /* Surfaces — soft off-whites in neutral grey (no blue cast), layered:
+     page < card; inputs sit a step below the card, hover a step above. */
+  --bg: #f1f2f5;
+  --bg-elev: #fcfcfd;
+  --bg-sunken: #eef0f3;
+  --bg-hover: #f3f4f7;
   --bg-sidebar: #1f2330;
-  --text: #1d2230;
-  --text-muted: #6b7280;
+  /* Text — three levels; muted is dark enough for body-size hints. */
+  --text: #1a1c22;
+  --text-muted: #555a65;
+  --text-subtle: #80848e;
   --text-inverse: #f3f4f6;
-  --border: #e2e6ee;
-  --primary: #4f6df0;
+  /* Older rules read --muted; keep it as an alias. */
+  --muted: var(--text-muted);
+  --border: #e3e5ea;
+  --border-strong: #d0d3d9;
+  /* Accent — the same indigo, a touch deeper for contrast on white. --primary
+     colours text/outlines, --primary-fill backs filled buttons (white text). */
+  --primary: #4560e2;
   --primary-hover: #3953d0;
-  --danger: #d94f4f;
-  --warning: #c08a16;
-  --success: #2e8b57;
+  --primary-fill: #4357dc;
+  --primary-fill-hover: #4a5fe4;
+  /* Filled buttons: a deep indigo → violet gradient (brand family) with a top
+     highlight, instead of a flat light periwinkle. */
+  --primary-fill-bg: linear-gradient(135deg, #4357dc 0%, #6449dc 100%);
+  /* Hover deepens rather than lightens, so the label's contrast only rises. */
+  --primary-fill-bg-hover: linear-gradient(135deg, #3b4ed2 0%, #5a3fd2 100%);
+  --primary-fill-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 2px rgba(16, 24, 40, 0.18);
+  /* Label on the gradient: a soft lavender-white, not stark #fff (≥ 4.8:1). */
+  --primary-fill-text: #eef0fd;
+  --primary-subtle: #f0f3fe;
+  --primary-border: #d3daf8;
+  --primary-ring: rgba(69, 96, 226, 0.18);
+  /* Semantic tonal pairs: text colour + tinted background + border, tuned
+     per theme (the dark values are below). */
+  --success: #1f6b43;
+  --success-bg: #eaf4ee;
+  --success-border: #c4ddce;
+  --danger: #c22d35;
+  --danger-hover: #a32830;
+  --danger-bg: #fcf0f1;
+  --danger-border: #f1c6c9;
+  --warning: #a34b08;
+  --warning-bg: #faf1de;
+  --warning-border: #eed3a0;
+  --neutral-bg: #eef0f3;
+  --neutral-border: #dcdfe5;
+  /* Modal header / footer band, a step off the modal body. */
+  --modal-chrome-bg: #f5f6f8;
+  /* Brand gradient (focus bar border, hero banners) and the faint wash of it
+     the banners carry in their top-left corner. */
+  --brand-gradient: linear-gradient(135deg, #4f6df0 0%, #8b5cf6 100%);
+  --hero-wash: linear-gradient(
+    120deg,
+    rgba(79, 109, 240, 0.07) 0%,
+    rgba(139, 92, 246, 0.04) 40%,
+    rgba(139, 92, 246, 0) 75%
+  );
   --radius: 8px;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.08);
+  /* Elevation — layered and light rather than one heavy blur. */
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-2: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 12px rgba(16, 24, 40, 0.06);
   font-family:
     system-ui,
     -apple-system,
@@ -36,15 +83,52 @@ textarea {
 }
 
 body.dark-mode {
-  --bg: #161922;
-  --bg-elev: #20232f;
-  --bg-sidebar: #0e1019;
-  --text: #e9ecf2;
-  --text-muted: #9aa3b2;
+  /* Neutral greys instead of the old blue-tinted navy. */
+  --bg: #111317;
+  --bg-elev: #191b21;
+  --bg-sunken: #14161a;
+  --bg-hover: #22252c;
+  --bg-sidebar: #0d0e12;
+  --text: #e8eaee;
+  --text-muted: #a7abb5;
+  --text-subtle: #7a7f8c;
   --text-inverse: #f3f4f6;
-  --border: #2a2e3c;
-  --primary: #647ef5;
-  --primary-hover: #8094ff;
+  --border: #2a2d35;
+  --border-strong: #363a45;
+  --primary: #7d90f7;
+  --primary-hover: #95a5ff;
+  /* A light indigo reads well as text but white on it does not — filled
+     buttons use a deeper fill. */
+  --primary-fill: #4b5dd8;
+  --primary-fill-hover: #5466e0;
+  --primary-fill-bg: linear-gradient(135deg, #4b5dd8 0%, #6a4cd4 100%);
+  --primary-fill-bg-hover: linear-gradient(135deg, #4354cf 0%, #6044cb 100%);
+  --primary-fill-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --primary-subtle: #1d2244;
+  --primary-border: #313b78;
+  --primary-ring: rgba(125, 144, 247, 0.25);
+  --success: #74c194;
+  --success-bg: #15261c;
+  --success-border: #264330;
+  --danger: #e8737a;
+  --danger-hover: #f08a90;
+  --danger-bg: #2a1518;
+  --danger-border: #4a2227;
+  --warning: #dda14a;
+  --warning-bg: #271e12;
+  --warning-border: #43341c;
+  --neutral-bg: #22252c;
+  --neutral-border: #333741;
+  --modal-chrome-bg: #15171c;
+  --brand-gradient: linear-gradient(135deg, #5b74f2 0%, #9a6cf6 100%);
+  --hero-wash: linear-gradient(
+    120deg,
+    rgba(91, 116, 242, 0.11) 0%,
+    rgba(154, 108, 246, 0.06) 40%,
+    rgba(154, 108, 246, 0) 75%
+  );
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.35);
   /* Tell the browser to use dark-themed native UI (date pickers,
      calendar dropdowns, scrollbars) instead of the default light chrome. */
   color-scheme: dark;
@@ -321,6 +405,14 @@ a:hover {
 .nav-group-dashboard .nav-item-dashboard .nav-label {
   flex: 0 0 auto;
 }
+/* The Pulpit button reads as text when the sidebar is open; collapsed, it
+   shows the home glyph like the other items. */
+.nav-group-dashboard .nav-item-dashboard .nav-icon {
+  display: none;
+}
+.sidebar-slot.sidebar-collapsed:not(:hover) .nav-group-dashboard .nav-item-dashboard .nav-icon {
+  display: inline-block;
+}
 .nav-group-dashboard .nav-item-dashboard.active {
   background: rgba(79, 109, 240, 0.28);
   color: #fff;
@@ -471,42 +563,34 @@ a:hover {
     border-color 0.12s;
 }
 .btn:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.04);
-}
-body.dark-mode .btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
 }
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Every coloured variant draws from the theme's tonal tokens (text + tinted
+   bg + border), so the dark theme needs no per-variant overrides. */
 .btn.primary {
   background: transparent;
   border-color: var(--primary);
   color: var(--primary);
 }
 .btn.primary:hover:not(:disabled) {
-  background: rgba(79, 109, 240, 0.1);
+  background: var(--primary-subtle);
   border-color: var(--primary);
   color: var(--primary);
 }
-body.dark-mode .btn.primary {
-  color: #aab8ff;
-  border-color: #6e85f0;
-}
-body.dark-mode .btn.primary:hover:not(:disabled) {
-  background: rgba(110, 133, 240, 0.18);
-  color: #c2cdff;
-  border-color: #8094ff;
-}
 .btn.primary-filled {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
+  background: var(--primary-fill-bg);
+  border-color: transparent;
+  color: var(--primary-fill-text);
+  box-shadow: var(--primary-fill-shadow);
 }
 .btn.primary-filled:hover:not(:disabled) {
-  background: var(--primary-hover);
-  border-color: var(--primary-hover);
+  background: var(--primary-fill-bg-hover);
+  border-color: transparent;
 }
 .btn.danger {
   background: transparent;
@@ -514,16 +598,8 @@ body.dark-mode .btn.primary:hover:not(:disabled) {
   color: var(--danger);
 }
 .btn.danger:hover:not(:disabled) {
-  background: rgba(217, 79, 79, 0.1);
+  background: var(--danger-bg);
   border-color: var(--danger);
-}
-body.dark-mode .btn.danger {
-  color: #ff8d8d;
-  border-color: #e07070;
-}
-body.dark-mode .btn.danger:hover:not(:disabled) {
-  background: rgba(255, 141, 141, 0.15);
-  color: #ffa0a0;
 }
 .btn.danger-filled {
   background: var(--danger);
@@ -531,8 +607,16 @@ body.dark-mode .btn.danger:hover:not(:disabled) {
   color: #fff;
 }
 .btn.danger-filled:hover:not(:disabled) {
-  background: #b53e3e;
-  border-color: #b53e3e;
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+body.dark-mode .btn.danger-filled {
+  background: #b8333b;
+  border-color: #b8333b;
+}
+body.dark-mode .btn.danger-filled:hover:not(:disabled) {
+  background: #c93d45;
+  border-color: #c93d45;
 }
 .btn.success {
   background: transparent;
@@ -540,14 +624,7 @@ body.dark-mode .btn.danger:hover:not(:disabled) {
   color: var(--success);
 }
 .btn.success:hover:not(:disabled) {
-  background: rgba(46, 139, 87, 0.1);
-}
-body.dark-mode .btn.success {
-  color: #8fdcae;
-  border-color: #5fbd87;
-}
-body.dark-mode .btn.success:hover:not(:disabled) {
-  background: rgba(143, 220, 174, 0.15);
+  background: var(--success-bg);
 }
 .btn.warn {
   background: transparent;
@@ -555,165 +632,106 @@ body.dark-mode .btn.success:hover:not(:disabled) {
   color: var(--warning);
 }
 .btn.warn:hover:not(:disabled) {
-  background: rgba(192, 138, 22, 0.1);
+  background: var(--warning-bg);
 }
-body.dark-mode .btn.warn {
-  color: #f0ca73;
-  border-color: #d6a542;
-}
-body.dark-mode .btn.warn:hover:not(:disabled) {
-  background: rgba(240, 202, 115, 0.15);
-}
-/* Soft variants — colored text on a tinted background, used for inline row actions */
+/* Soft variants — coloured text on a tinted background, used for inline row actions */
 .btn.soft-edit {
-  background: rgba(79, 109, 240, 0.1);
-  border-color: rgba(79, 109, 240, 0.25);
+  background: var(--primary-subtle);
+  border-color: var(--primary-border);
   color: var(--primary);
 }
 .btn.soft-edit:hover:not(:disabled) {
-  background: rgba(79, 109, 240, 0.18);
+  background: var(--primary-subtle);
   border-color: var(--primary);
 }
 .btn.soft-danger {
-  background: rgba(217, 79, 79, 0.1);
-  border-color: rgba(217, 79, 79, 0.25);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
   color: var(--danger);
 }
 .btn.soft-danger:hover:not(:disabled) {
-  background: rgba(217, 79, 79, 0.18);
+  background: var(--danger-bg);
   border-color: var(--danger);
 }
 .btn.soft-success {
-  background: rgba(46, 139, 87, 0.1);
-  border-color: rgba(46, 139, 87, 0.25);
+  background: var(--success-bg);
+  border-color: var(--success-border);
   color: var(--success);
 }
 .btn.soft-success:hover:not(:disabled) {
-  background: rgba(46, 139, 87, 0.18);
+  background: var(--success-bg);
   border-color: var(--success);
 }
 .btn.soft-warn {
-  background: rgba(192, 138, 22, 0.1);
-  border-color: rgba(192, 138, 22, 0.25);
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
   color: var(--warning);
 }
 .btn.soft-warn:hover:not(:disabled) {
-  background: rgba(192, 138, 22, 0.18);
+  background: var(--warning-bg);
   border-color: var(--warning);
 }
 .btn.soft-neutral {
-  background: rgba(120, 120, 120, 0.1);
-  border-color: rgba(120, 120, 120, 0.25);
+  background: var(--neutral-bg);
+  border-color: var(--neutral-border);
   color: var(--text-muted);
 }
 .btn.soft-neutral:hover:not(:disabled) {
-  background: rgba(120, 120, 120, 0.18);
-  border-color: var(--text-muted);
+  background: var(--neutral-bg);
+  border-color: var(--text-subtle);
 }
 .btn.soft-neutral.active {
-  background: rgba(120, 120, 120, 0.22);
+  background: var(--neutral-bg);
   border-color: var(--text-muted);
-  color: var(--text);
-}
-body.dark-mode .btn.soft-edit {
-  background: rgba(100, 126, 245, 0.18);
-  border-color: rgba(100, 126, 245, 0.4);
-  color: #aab8ff;
-}
-body.dark-mode .btn.soft-danger {
-  background: rgba(217, 79, 79, 0.2);
-  border-color: rgba(217, 79, 79, 0.45);
-  color: #ff8d8d;
-}
-body.dark-mode .btn.soft-success {
-  background: rgba(46, 139, 87, 0.22);
-  border-color: rgba(46, 139, 87, 0.45);
-  color: #8fdcae;
-}
-body.dark-mode .btn.soft-warn {
-  background: rgba(192, 138, 22, 0.22);
-  border-color: rgba(192, 138, 22, 0.45);
-  color: #f0ca73;
-}
-body.dark-mode .btn.soft-neutral {
-  background: rgba(170, 178, 195, 0.15);
-  border-color: rgba(170, 178, 195, 0.35);
-  color: var(--text-muted);
-}
-body.dark-mode .btn.soft-neutral:hover:not(:disabled) {
-  background: rgba(170, 178, 195, 0.22);
-  border-color: var(--text-muted);
-}
-body.dark-mode .btn.soft-neutral.active {
-  background: rgba(170, 178, 195, 0.3);
-  border-color: var(--text);
   color: var(--text);
 }
 .btn.ghost {
   background: transparent;
   border-color: transparent;
 }
-.btn.columns-toggle {
-  background: transparent;
-  border-color: #7e57c2;
-  color: #7e57c2;
-}
-.btn.columns-toggle:hover:not(:disabled) {
-  background: rgba(126, 87, 194, 0.1);
-  border-color: #7e57c2;
-  color: #7e57c2;
-}
-body.dark-mode .btn.columns-toggle {
-  color: #b69cdc;
-  border-color: #9579cf;
-}
-body.dark-mode .btn.columns-toggle:hover:not(:disabled) {
-  background: rgba(182, 156, 220, 0.18);
-  color: #c9b4e6;
-  border-color: #a98bd9;
-}
-.btn.btn-export {
-  background: transparent;
-  border-color: #0e9c9c;
-  color: #0e9c9c;
-}
-.btn.btn-export:hover:not(:disabled) {
-  background: rgba(14, 156, 156, 0.1);
-  border-color: #0e9c9c;
-  color: #0e9c9c;
-}
-body.dark-mode .btn.btn-export {
-  color: #5dd0d0;
-  border-color: #2bb5b5;
-}
-body.dark-mode .btn.btn-export:hover:not(:disabled) {
-  background: rgba(93, 208, 208, 0.18);
-  color: #7cdede;
-  border-color: #4cc7c7;
-}
+/* Secondary toolbar actions (Eksport / Import / Kolumny) are neutral — the
+   accent is left to the primary action (Dodaj) instead of a teal / orange /
+   purple row. The icon is muted so the label leads. */
+.btn.columns-toggle,
+.btn.btn-export,
 .btn.btn-import {
-  background: transparent;
-  border-color: #d97706;
-  color: #d97706;
+  background: var(--bg-elev);
+  border-color: var(--border);
+  color: var(--text);
 }
+.btn.columns-toggle:hover:not(:disabled),
+.btn.btn-export:hover:not(:disabled),
 .btn.btn-import:hover:not(:disabled) {
-  background: rgba(217, 119, 6, 0.1);
-  border-color: #d97706;
-  color: #d97706;
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
 }
-body.dark-mode .btn.btn-import {
-  color: #f0a052;
-  border-color: #e08833;
-}
-body.dark-mode .btn.btn-import:hover:not(:disabled) {
-  background: rgba(240, 160, 82, 0.18);
-  color: #f6b574;
-  border-color: #f0995f;
+.btn.columns-toggle svg,
+.btn.btn-export svg,
+.btn.btn-import svg {
+  color: var(--text-muted);
 }
 .btn-row {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+/* A button whose label switches between two texts (e.g. "Mail do magazynu" /
+   "Wysłano do magazynu"): both sit in one grid cell and the inactive one is
+   hidden, so the button is always as wide as the longer one and rows of
+   actions stay aligned. */
+.swap-label {
+  display: inline-grid;
+}
+.swap-label > * {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.swap-label > .is-hidden {
+  visibility: hidden;
 }
 .btn-sm {
   padding: 4px 10px;
@@ -875,18 +893,30 @@ textarea {
   padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #f3f5fa;
+  /* background-color, not the shorthand: the select chevron below is a
+     background-image and must survive these rules. */
+  background-color: var(--bg-sunken);
   color: var(--text);
   font: inherit;
   transition:
     border-color 0.12s,
     box-shadow 0.12s,
-    background 0.12s;
+    background-color 0.12s;
 }
-body.dark-mode .input,
-body.dark-mode select,
-body.dark-mode textarea {
-  background: rgba(255, 255, 255, 0.04);
+/* Native selects get the same 14px chevron as the searchable dropdowns
+   (IconChevronDown) instead of the browser's larger arrow. An SVG data URI
+   can't use currentColor, hence one stroke colour per theme (--text-muted). */
+select:not([multiple]) {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23555a65' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px 14px;
+}
+body.dark-mode select:not([multiple]) {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a7abb5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
 }
 textarea {
   resize: vertical;
@@ -896,23 +926,20 @@ textarea {
 .input:hover:not(:focus),
 select:hover:not(:focus),
 textarea:hover:not(:focus) {
-  border-color: var(--text-muted);
+  border-color: var(--border-strong);
 }
 .input:focus,
 select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--primary);
-  background: var(--bg-elev);
-  box-shadow: 0 0 0 3px rgba(79, 109, 240, 0.18);
-}
-body.dark-mode .input:focus,
-body.dark-mode select:focus,
-body.dark-mode textarea:focus {
-  background: rgba(255, 255, 255, 0.07);
+  background-color: var(--bg-elev);
+  box-shadow: 0 0 0 3px var(--primary-ring);
 }
 
-/* Read-only modal: damp the input chrome so fields read as static text. */
+/* Read-only (preview) modal: the same form as edit, locked. Fields keep their
+   box — a hairline outline on the body colour instead of the sunken fill —
+   so the layout reads like the editor while clearly not inviting input. */
 .modal-readonly .input,
 .modal-readonly select,
 .modal-readonly textarea,
@@ -920,7 +947,7 @@ body.dark-mode textarea:focus {
 .modal-readonly select:hover,
 .modal-readonly textarea:hover {
   background: transparent;
-  border-color: transparent;
+  border-color: var(--border-strong);
   color: var(--text);
   cursor: default;
   box-shadow: none;
@@ -934,12 +961,45 @@ body.dark-mode textarea:focus {
 .modal-readonly .searchable-select-trigger,
 .modal-readonly .searchable-select-trigger:hover {
   background: transparent;
-  border-color: transparent;
+  border-color: var(--border-strong);
   cursor: default;
   box-shadow: none;
 }
-.modal-readonly .searchable-select-caret {
+/* Nothing to open or remove in a preview: no chevrons, no chip ×. */
+.modal-readonly .searchable-select-caret,
+.modal-readonly .supplier-chip-remove {
   display: none;
+}
+.modal-readonly select:not([multiple]),
+body.dark-mode .modal-readonly select:not([multiple]) {
+  background-image: none;
+}
+/* Tables in a read-only modal (recipe, packaging) — the disabled controls in
+   the cells drop their own padding/height, so rows are compact and values
+   line up with the column headers. */
+.modal-readonly .table td .input,
+.modal-readonly .table td select,
+.modal-readonly .table td .searchable-select-trigger {
+  padding: 0;
+  min-height: 0;
+  height: auto;
+  border: 0;
+  background: transparent;
+}
+/* A disabled picker is dimmed to 60% elsewhere; in a preview its value is
+   content, so full contrast — and in a table cell it wraps instead of being
+   cut off with an ellipsis. */
+.modal-readonly .searchable-select-trigger:disabled {
+  opacity: 1;
+}
+.modal-readonly .table td .searchable-select-value {
+  white-space: normal;
+  overflow: visible;
+  font-size: inherit;
+}
+.modal-readonly .table td {
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 /* Hide native spinner arrows on number inputs — we use plain text-style number entry */
@@ -966,6 +1026,30 @@ input[type='number'] {
   overflow: auto;
   max-height: calc(100vh - 260px);
   border-radius: var(--radius);
+}
+/* List pages: the card holding the main table fills the rest of the view and
+   only the table scrolls — one scrollbar, sticky header intact. The fixed
+   max-height above guessed the chrome around it and came out a little too
+   tall, so the whole page scrolled as well. On a very short window the card
+   keeps a usable minimum and the page scrolls instead. */
+.main:has(> .card-fill) {
+  display: flex;
+  flex-direction: column;
+}
+.main:has(> .card-fill) > * {
+  flex-shrink: 0;
+}
+.main > .card-fill {
+  flex: 1 1 auto;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+.card-fill > .table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 .table {
   width: 100%;
@@ -1017,10 +1101,7 @@ input[type='number'] {
   word-break: break-word;
 }
 .table tr:hover td {
-  background: rgba(0, 0, 0, 0.02);
-}
-body.dark-mode .table tr:hover td {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-hover);
 }
 .num {
   text-align: left;
@@ -1070,16 +1151,57 @@ th.resizable-th {
     width 0.12s ease,
     height 0.12s ease;
 }
-/* Hovering anywhere on the header hints which columns are draggable. */
-.resizable-th:hover .col-resizer::after {
+/* Hovering anywhere on the header hints which columns are draggable. Hover
+   hints are off while a drag runs: the cursor can pass over other headers. */
+body:not(.col-resizing) .resizable-th:hover .col-resizer::after {
   background: var(--text-muted);
 }
-/* Hovering the handle itself (or actively dragging) shows the accent grip. */
-.col-resizer:hover::after,
-body.col-resizing .col-resizer:hover::after {
+/* Hovering the handle shows the accent grip; during a drag only the grip of
+   the column being resized keeps it (useColumnResize sets .is-active). */
+body:not(.col-resizing) .col-resizer:hover::after,
+.col-resizer.is-active::after {
   background: var(--primary);
   width: 3px;
   height: 74%;
+}
+/* Trailing auto-width cell that soaks up the table's spare width, so sized
+   columns render at exactly their width and a dragged border follows the
+   cursor 1:1 (without it the slack is spread over every sized column). */
+.table th.col-filler,
+.table td.col-filler {
+  width: auto;
+  padding: 0;
+}
+/* Header-click sort (useColumnResize with a SortControl). */
+.table th.sortable-th {
+  cursor: pointer;
+  user-select: none;
+}
+.table th.sortable-th:hover {
+  color: var(--text);
+}
+.table th.is-sorted {
+  color: var(--text);
+}
+.sort-indicator {
+  display: inline-flex;
+  margin-left: 4px;
+  vertical-align: middle;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+.sortable-th:hover .sort-indicator:not(.is-asc):not(.is-desc) {
+  opacity: 0.4;
+}
+.sort-indicator.is-asc,
+.sort-indicator.is-desc {
+  opacity: 1;
+  color: var(--primary);
+}
+.sort-indicator.is-asc {
+  transform: rotate(180deg);
 }
 /* While dragging, kill selection/hover flicker across the whole page. */
 body.col-resizing {
@@ -1144,19 +1266,19 @@ body.col-resizing * {
   line-height: 1;
 }
 .match-badge.success {
-  background: rgba(46, 139, 87, 0.15);
+  background: var(--success-bg);
   color: var(--success);
-  border-color: rgba(46, 139, 87, 0.4);
+  border-color: var(--success-border);
 }
 .match-badge.warn {
-  background: rgba(192, 138, 22, 0.18);
+  background: var(--warning-bg);
   color: var(--warning);
-  border-color: rgba(192, 138, 22, 0.45);
+  border-color: var(--warning-border);
 }
 .match-badge.danger {
-  background: rgba(217, 79, 79, 0.15);
+  background: var(--danger-bg);
   color: var(--danger);
-  border-color: rgba(217, 79, 79, 0.4);
+  border-color: var(--danger-border);
 }
 .match-badge.as-button {
   cursor: pointer;
@@ -1166,34 +1288,36 @@ body.col-resizing * {
     transform 0.12s;
 }
 .match-badge.as-button:hover:not(:disabled) {
-  background: rgba(217, 79, 79, 0.25);
+  background: var(--danger-border);
   transform: scale(1.08);
 }
 .match-badge.as-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-body.dark-mode .match-badge.success {
-  color: #8fdcae;
-}
-body.dark-mode .match-badge.warn {
-  color: #f0ca73;
-}
-body.dark-mode .match-badge.danger {
-  color: #ff8d8d;
-}
+
 
 /* Sticky right column for action buttons — keeps Edit/Delete visible while
    the rest of the table scrolls horizontally. Hover bg is repainted via the
    sticky cell's own background so it stays opaque over scrolled content. */
+/* Sticky actions column. Content that scrolls under it fades out through a
+   short gradient on its left edge (row colour ← transparent) — invisible
+   when nothing is underneath, so no line or shadow when it isn't needed.
+   --sticky-bg follows the row (hover included) so the fade always matches. */
 .table-wrap .actions-sticky {
   position: sticky;
   right: 0;
-  background: var(--bg-elev);
-  box-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.15);
+  background: var(--sticky-bg, var(--bg-elev));
 }
-body.dark-mode .table-wrap .actions-sticky {
-  box-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.5);
+.table-wrap .actions-sticky::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 1px;
+  left: -32px;
+  width: 32px;
+  background: linear-gradient(to right, transparent, var(--sticky-bg, var(--bg-elev)));
+  pointer-events: none;
 }
 .table-wrap thead th.actions-sticky {
   z-index: 3;
@@ -1202,10 +1326,7 @@ body.dark-mode .table-wrap .actions-sticky {
   z-index: 1;
 }
 .table-wrap tbody tr:hover td.actions-sticky {
-  background: #f7f8fc;
-}
-body.dark-mode .table-wrap tbody tr:hover td.actions-sticky {
-  background: #262a37;
+  --sticky-bg: var(--bg-hover);
 }
 
 /* Shortage report table — fixed layout so columns line up across supplier cards */
@@ -1484,7 +1605,7 @@ body.dark-mode .column-picker-row.drag-over {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #f3f5fa;
+  background: var(--bg-sunken);
   color: var(--text);
   font: inherit;
   cursor: pointer;
@@ -1494,17 +1615,14 @@ body.dark-mode .column-picker-row.drag-over {
     box-shadow 0.12s,
     background 0.12s;
 }
-body.dark-mode .searchable-select-trigger {
-  background: rgba(255, 255, 255, 0.04);
-}
 .searchable-select-trigger:hover:not(:disabled) {
-  border-color: var(--text-muted);
+  border-color: var(--border-strong);
 }
 .searchable-select-trigger:focus {
   outline: none;
   border-color: var(--primary);
   background: var(--bg-elev);
-  box-shadow: 0 0 0 3px rgba(79, 109, 240, 0.18);
+  box-shadow: 0 0 0 3px var(--primary-ring);
 }
 .searchable-select-trigger:disabled {
   opacity: 0.6;
@@ -1526,8 +1644,8 @@ body.dark-mode .searchable-select-trigger {
   font-size: 12px;
 }
 .searchable-select-caret {
+  display: inline-flex;
   color: var(--text-muted);
-  font-size: 11px;
   flex-shrink: 0;
 }
 .searchable-select-popover {
@@ -1742,22 +1860,19 @@ body.dark-mode .supplier-picker-star.active {
   background: var(--border);
   color: var(--text);
   font-size: 12px;
+  /* A chip is one line: in a squeezed .col-wrap cell its name would otherwise
+     break letter by letter into a round blob. Chips still wrap as a group. */
+  white-space: nowrap;
 }
 .supplier-chip.preferred {
-  background: rgba(192, 138, 22, 0.18);
-  color: #7d4f00;
+  background: var(--warning-bg);
+  color: var(--warning);
+  box-shadow: inset 0 0 0 1px var(--warning-border);
   font-weight: 600;
 }
-body.dark-mode .supplier-chip.preferred {
-  background: rgba(240, 202, 115, 0.22);
-  color: #f0ca73;
-}
 .supplier-chip-star {
-  color: #c08a16;
+  color: var(--warning);
   display: inline-flex;
-}
-body.dark-mode .supplier-chip-star {
-  color: #f0ca73;
 }
 .supplier-chip.removable {
   padding: 2px 3px 2px 8px;
@@ -1790,12 +1905,8 @@ body.dark-mode .supplier-chip-remove:hover {
   background: rgba(255, 255, 255, 0.14);
 }
 .supplier-chip.preferred .supplier-chip-remove:hover {
-  background: rgba(192, 138, 22, 0.3);
-  color: #7d4f00;
-}
-body.dark-mode .supplier-chip.preferred .supplier-chip-remove:hover {
-  background: rgba(240, 202, 115, 0.32);
-  color: #f0ca73;
+  background: var(--warning-border);
+  color: var(--warning);
 }
 
 /* Page header — title with count */
@@ -1859,16 +1970,17 @@ body.dark-mode .header-nav-btn:active:not(:disabled) {
   letter-spacing: -0.01em;
 }
 .page-header-count {
+  /* The header aligns on the text baseline; the smaller pill would hang below
+     the title's middle, so it centres itself instead. */
+  align-self: center;
   color: var(--text-muted);
   font-size: 16px;
   font-weight: 500;
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
   padding: 2px 10px;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--neutral-bg);
   border-radius: 999px;
-}
-body.dark-mode .page-header-count {
-  background: rgba(255, 255, 255, 0.06);
 }
 .page-header-subtitle {
   width: 100%;
@@ -1918,20 +2030,25 @@ body.dark-mode .page-header-count {
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 12px;
-  background: var(--border);
+  background: var(--neutral-bg);
   color: var(--text-muted);
+  /* Hairline in the tone's border colour — inset, so tags keep their size. */
+  box-shadow: inset 0 0 0 1px var(--neutral-border);
 }
 .tag.warn {
-  background: #fde7c2;
-  color: #7d4f00;
+  background: var(--warning-bg);
+  color: var(--warning);
+  box-shadow: inset 0 0 0 1px var(--warning-border);
 }
 .tag.danger {
-  background: #fbd2d2;
-  color: #7d2222;
+  background: var(--danger-bg);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px var(--danger-border);
 }
 .tag.success {
-  background: #cdebda;
-  color: #1f5b3a;
+  background: var(--success-bg);
+  color: var(--success);
+  box-shadow: inset 0 0 0 1px var(--success-border);
 }
 .stock-cell {
   display: inline-flex;
@@ -1954,8 +2071,7 @@ body.dark-mode .page-header-count {
   display: inline-flex;
   align-items: center;
   margin-left: 6px;
-  color: var(--accent, #3b82f6);
-  cursor: help;
+  color: var(--primary);
 }
 .stock-note-text {
   white-space: pre-wrap;
@@ -1968,22 +2084,114 @@ body.dark-mode .page-header-count {
   color: var(--danger, #dc2626);
 }
 
-/* Raw-material stock split into expiry batches: "1.37/2.9  4.27 kg" */
-.stock-split {
+/* Stock cell (components/StockCell.tsx): "82,8 kg · 2 partie" — the total,
+   then the batch count, red when a batch is expired and amber when one is
+   close; details are in the tooltip. */
+.stock-summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  color: var(--muted, #6b7280);
+}
+.stock-summary .stock-qty {
+  font-weight: 600;
+}
+.stock-batches-count {
   font-size: 12px;
+  color: var(--text-muted);
 }
-.stock-split-sep {
-  margin: 0 2px;
-  opacity: 0.5;
+.stock-batches-count::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--text-subtle);
 }
-.stock-split-expired {
-  color: var(--danger, #dc2626);
+.stock-batches-count.is-expired {
+  color: var(--danger);
   font-weight: 600;
 }
-.stock-qty-total {
+.stock-batches-count.is-soon {
+  color: var(--warning);
   font-weight: 600;
+}
+.stock-note-mark {
+  align-self: center;
+  color: var(--text-muted);
+}
+/* Tooltip: batches as a small table — quantity | expiry | status — with the
+   total underneath, then the note and where the value came from. */
+.hover-tooltip.stock-tip-tooltip {
+  min-width: 0;
+  max-width: 440px;
+}
+.stock-tip-grid {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.stock-tip-grid > span {
+  padding: 6px 14px 6px 0;
+}
+.stock-tip-grid > span.num {
+  text-align: right;
+}
+.stock-tip-head {
+  padding-top: 2px !important;
+  padding-bottom: 4px !important;
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+.stock-tip-qty,
+.stock-tip-date,
+.stock-tip-status {
+  border-top: 1px solid var(--border);
+}
+.stock-tip-qty {
+  font-weight: 600;
+}
+.stock-tip-qty.is-expired {
+  color: var(--danger);
+}
+.stock-tip-date {
+  color: var(--text-muted);
+}
+.stock-tip-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+.stock-tip-status .tag {
+  font-size: 11px;
+  padding: 1px 7px;
+}
+.stock-tip-note {
+  grid-column: 1 / -1;
+  padding-top: 0 !important;
+  margin-top: -2px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.stock-tip-total {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.stock-tip-total strong {
+  color: var(--text);
+}
+.stock-tip-meta {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+.stock-tip .shortage-tooltip-header + .stock-note-text {
+  padding-top: 2px;
+}
+.stock-tip .stock-tip-grid + .shortage-tooltip-header {
+  margin-top: 10px;
 }
 .stock-batch-list {
   margin: 0;
@@ -2094,12 +2302,14 @@ tr:hover .stock-cell .stock-edit-btn {
 .stock-edit .stock-edit-input {
   width: 90px;
 }
+/* A tag that opens something (plan status → its reports). No underline —
+   badges stay clean; the pointer and a hover lift say it's clickable. */
 .tag.tag-clickable {
   cursor: pointer;
-  text-decoration-line: underline;
-  text-decoration-style: dotted;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
+  transition: filter 0.12s;
+}
+.tag.tag-clickable:hover {
+  filter: brightness(1.15);
 }
 .tag.tag-clickable:hover {
   filter: brightness(0.97);
@@ -2404,6 +2614,17 @@ tr:hover .stock-cell .stock-edit-btn {
 .modal.modal-lg {
   width: 860px;
 }
+/* utils/useModalAutoWidth widens a modal whose content would otherwise scroll
+   sideways. It opens at the fitted width (no animation); growth after that —
+   e.g. switching to a wider tab — eases instead of jumping. */
+.modal[data-autowidth] {
+  transition: width 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+/* Modals with tabs keep one fixed height, so switching tabs never resizes the
+   dialog — a short tab leaves room below, a long one scrolls in .modal-body. */
+.modal.modal-tabbed {
+  height: min(90vh, 900px);
+}
 .modal.modal-xl {
   width: 1080px;
 }
@@ -2412,8 +2633,9 @@ tr:hover .stock-cell .stock-edit-btn {
   flex-direction: column;
   gap: 4px;
   padding: 16px 20px;
+  /* Same chrome as .modal-footer: a tinted band + hairline frames the body. */
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: var(--modal-chrome-bg);
 }
 .modal-header-row {
   display: flex;
@@ -2424,6 +2646,8 @@ tr:hover .stock-cell .stock-edit-btn {
 .modal-header-row > .modal-title {
   flex: 1;
 }
+/* Modal header icon keeps its tinted tile, in the tone of the action. (The
+   hero banners are the ones with bare icons.) */
 .modal-header-icon {
   flex-shrink: 0;
   display: inline-flex;
@@ -2432,35 +2656,24 @@ tr:hover .stock-cell .stock-edit-btn {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--neutral-bg);
   color: var(--text-muted);
 }
-body.dark-mode .modal-header-icon {
-  background: rgba(255, 255, 255, 0.06);
-}
 .modal-header-icon-edit {
-  background: rgba(79, 109, 240, 0.12);
+  background: var(--primary-subtle);
   color: var(--primary);
 }
-body.dark-mode .modal-header-icon-edit {
-  background: rgba(100, 126, 245, 0.2);
-  color: #aab8ff;
-}
 .modal-header-icon-add {
-  background: rgba(46, 139, 87, 0.14);
+  background: var(--success-bg);
   color: var(--success);
 }
-body.dark-mode .modal-header-icon-add {
-  background: rgba(46, 139, 87, 0.24);
-  color: #8fdcae;
-}
 .modal-header-icon-danger {
-  background: rgba(217, 79, 79, 0.14);
+  background: var(--danger-bg);
   color: var(--danger);
 }
-body.dark-mode .modal-header-icon-danger {
-  background: rgba(217, 79, 79, 0.22);
-  color: #ff8d8d;
+.modal-header-icon-warning {
+  background: var(--warning-bg);
+  color: var(--warning);
 }
 .modal-title {
   margin: 0;
@@ -2473,6 +2686,8 @@ body.dark-mode .modal-header-icon-danger {
 .modal-subtitle {
   margin: 0;
   min-width: 0;
+  /* Starts under the title, past the 36px icon tile + 14px gap. */
+  padding-left: 50px;
   font-size: 13px;
   color: var(--text-muted);
 }
@@ -2510,6 +2725,27 @@ body.dark-mode .modal-close:hover {
 .modal .table-wrap {
   max-height: 45vh;
 }
+/* Modal tables: the hovered row reads as a soft rounded bar inside the
+   content instead of a square band that stops short of the dialog edges.
+   Separate borders so the end cells can round, and
+   the hovered row drops its bottom rule so the bar isn't cut by a line. */
+.modal-body .table {
+  border-collapse: separate;
+  /* 3px between rows: the rounded hover bar keeps a little distance from the
+     rule above it — the header's included — instead of touching it. */
+  border-spacing: 0 3px;
+}
+.modal-body .table tbody tr:hover td {
+  border-bottom-color: transparent;
+}
+.modal-body .table tbody tr:hover td:first-child {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+.modal-body .table tbody tr:hover td:last-child {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
 .modal-section {
   margin-top: 22px;
 }
@@ -2539,10 +2775,7 @@ body.dark-mode .modal-close:hover {
   gap: 8px;
   padding: 14px 22px;
   border-top: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.015);
-}
-body.dark-mode .modal-footer {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--modal-chrome-bg);
 }
 
 /* Blocked-by dialog: shown when an item can't be deleted because other rows
@@ -2641,48 +2874,52 @@ body.dark-mode .blocked-by-group-count {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 22px;
+  padding: 12px 22px 12px 20px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #2a3776 0%, #3a4ca3 100%);
-  color: #fff;
-  border: none;
+  /* Same family as the hero banners: card surface, brand-gradient hairline
+     and a faint wash of it; a plain neutral shadow lifts it off the page. */
+  border: 1.5px solid transparent;
+  background:
+    var(--hero-wash) padding-box,
+    linear-gradient(var(--bg-elev), var(--bg-elev)) padding-box,
+    var(--brand-gradient) border-box;
+  color: var(--text);
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow:
-    0 6px 20px rgba(20, 28, 60, 0.35),
-    0 2px 6px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-2);
   transition:
     transform 0.15s,
     box-shadow 0.15s;
 }
-body.dark-mode .floating-next {
-  background: linear-gradient(135deg, #232c5a 0%, #2f3d85 100%);
-}
 .floating-next:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow:
-    0 10px 28px rgba(20, 28, 60, 0.45),
-    0 4px 8px rgba(0, 0, 0, 0.18);
+    var(--shadow-2),
+    0 8px 20px rgba(16, 24, 40, 0.12);
 }
 .floating-next:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* The step number on its own (no circle), filled with the brand gradient. */
 .floating-next-step {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.22);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1;
+  background: var(--brand-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 .floating-next-arrow {
   font-size: 18px;
   line-height: 1;
+  color: var(--primary);
+  transition: transform 0.15s;
+}
+.floating-next:hover:not(:disabled) .floating-next-arrow {
+  transform: translateX(3px);
 }
 .floating-next-text {
   display: flex;
@@ -2693,7 +2930,7 @@ body.dark-mode .floating-next {
 .floating-next-hint {
   font-size: 11px;
   font-weight: 500;
-  opacity: 0.85;
+  color: var(--text-muted);
 }
 
 /* Highlight callout for user attention */
@@ -2768,15 +3005,11 @@ body.dark-mode .callout-hint {
   font-weight: 500;
   color: var(--text);
 }
-.settings-toggle-row input[type='checkbox'] {
-  margin: 0;
-  cursor: pointer;
-}
+/* One hover feel everywhere — lists, modal tables, plan rows: the neutral
+   --bg-hover. A clickable row says so with the pointer and its accent-coloured
+   name, not with a different tint. */
 .row-clickable:hover td {
-  background: rgba(79, 109, 240, 0.08) !important;
-}
-body.dark-mode .row-clickable:hover td {
-  background: rgba(100, 126, 245, 0.12) !important;
+  background: var(--bg-hover) !important;
 }
 .row-clickable td.col-name,
 .table td.col-name.clickable {
@@ -2785,8 +3018,16 @@ body.dark-mode .row-clickable:hover td {
 .table td.col-name.clickable {
   cursor: pointer;
 }
-.row-clickable:hover td.col-name,
+/* Hover underline for a clickable row's name. An underline on the cell would
+   also run through any badge / tag / status pill next to the name (it
+   propagates into flex items and can't be cancelled on the child), so cells
+   holding one underline just the name text instead. */
+.row-clickable:hover td.col-name:not(:has(.tag, .badge, .status-inline-select)),
 .table td.col-name.clickable:hover {
+  text-decoration: underline;
+}
+.row-clickable:hover td.col-name .col-name-text,
+.row-clickable:hover td.col-name .orders-name-text {
   text-decoration: underline;
 }
 
@@ -2826,13 +3067,16 @@ body.dark-mode .searchable-select-footer-action:hover {
   padding: 20px 24px;
   margin-bottom: 16px;
   border-radius: 14px;
-  background: linear-gradient(135deg, #2a3776 0%, #3a4ca3 100%);
-  color: #fff;
-  box-shadow: 0 4px 14px rgba(20, 28, 60, 0.25);
-}
-body.dark-mode .compute-hero {
-  background: linear-gradient(135deg, #232c5a 0%, #2f3d85 100%);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  /* Hero banner in the focus bar's family: brand-gradient hairline and a
+     faint wash of it over the card surface (same for .dashboard-hero and
+     .bsx-banner). */
+  border: 1.5px solid transparent;
+  background:
+    var(--hero-wash) padding-box,
+    linear-gradient(var(--bg-elev), var(--bg-elev)) padding-box,
+    var(--brand-gradient) border-box;
+  color: var(--text);
+  box-shadow: var(--shadow-2);
 }
 .compute-hero-icon {
   flex: 0 0 auto;
@@ -2842,12 +3086,14 @@ body.dark-mode .compute-hero {
   align-items: center;
   justify-content: center;
   align-self: center;
-  background: rgba(255, 255, 255, 0.18);
-  border-radius: 14px;
-  color: #fff;
-  font-size: 28px;
+  color: var(--primary);
+  font-size: 36px;
   line-height: 1;
   text-align: center;
+}
+/* ✉ draws smaller than $ ∞ ⚠ at the same font size — bump it to match. */
+.compute-hero-icon.compute-hero-icon-mail {
+  font-size: 46px;
 }
 .compute-hero-text {
   flex: 1;
@@ -2860,7 +3106,7 @@ body.dark-mode .compute-hero {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  opacity: 0.85;
+  color: var(--primary);
 }
 .compute-hero-title {
   font-size: 22px;
@@ -2870,12 +3116,13 @@ body.dark-mode .compute-hero {
 }
 .compute-hero-hint {
   font-size: 13px;
-  opacity: 0.88;
+  color: var(--text-muted);
   margin-top: 4px;
 }
 .compute-hero-controls {
   display: flex;
-  align-items: center;
+  /* Stretch, so the buttons take exactly the picker's height. */
+  align-items: stretch;
   gap: 10px;
   flex-wrap: nowrap;
   margin-top: 12px;
@@ -2883,24 +3130,27 @@ body.dark-mode .compute-hero {
 .compute-hero-controls .searchable-select-trigger {
   flex: 1 1 240px;
   min-width: 200px;
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.25);
-  color: #fff;
+  min-height: 40px;
+  background: var(--bg-elev);
+}
+.compute-hero-controls .compute-hero-cta,
+.compute-hero-controls .compute-hero-secondary {
+  padding-top: 0;
+  padding-bottom: 0;
 }
 .compute-hero-controls .compute-hero-cta {
   margin-left: auto;
   flex-shrink: 0;
 }
-.compute-hero-controls .searchable-select-trigger:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.5);
-  background: rgba(255, 255, 255, 0.22);
+/* Secondary banner action (Odśwież) sits just before the main one. */
+.compute-hero-controls .compute-hero-secondary {
+  margin-left: auto;
+  flex-shrink: 0;
 }
-.compute-hero-controls .searchable-select-value.placeholder {
-  color: rgba(255, 255, 255, 0.75);
+.compute-hero-controls .compute-hero-secondary + .compute-hero-cta {
+  margin-left: 0;
 }
-.compute-hero-controls .searchable-select-caret {
-  color: #fff;
-}
+
 .compute-hero-cta {
   display: inline-flex;
   align-items: center;
@@ -2908,8 +3158,9 @@ body.dark-mode .compute-hero {
   padding: 10px 18px;
   border: none;
   border-radius: var(--radius);
-  background: #fff;
-  color: var(--primary);
+  background: var(--primary-fill-bg);
+  box-shadow: var(--primary-fill-shadow);
+  color: var(--primary-fill-text);
   font: inherit;
   font-size: 14px;
   font-weight: 700;
@@ -2920,7 +3171,8 @@ body.dark-mode .compute-hero {
 }
 .compute-hero-cta:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
+  background: var(--primary-fill-bg-hover);
+  box-shadow: var(--primary-fill-shadow), var(--shadow-2);
 }
 .compute-hero-cta:disabled {
   opacity: 0.55;
@@ -2928,8 +3180,9 @@ body.dark-mode .compute-hero {
 }
 .compute-hero-error {
   margin-top: 10px;
-  background: rgba(0, 0, 0, 0.18);
-  color: #fff;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
   padding: 8px 12px;
   border-radius: var(--radius);
   font-size: 13px;
@@ -2949,18 +3202,23 @@ body.dark-mode .compute-hero {
   border-radius: var(--radius);
   background:
     linear-gradient(var(--bg-elev), var(--bg-elev)) padding-box,
-    linear-gradient(135deg, #4f6df0 0%, #8b5cf6 100%) border-box;
+    var(--brand-gradient) border-box;
   box-shadow: var(--shadow-1);
 }
+/* Title + meta wrap onto a second line when the bar gets narrow, instead of
+   the meta being clipped mid-word next to the buttons. */
 .focus-bar-text {
   flex: 1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 4px 12px;
   min-width: 0;
 }
 .focus-bar-title {
   margin: 0;
+  max-width: 100%;
+  min-width: 0;
   font-size: 18px;
   font-weight: 600;
   overflow: hidden;
@@ -2991,9 +3249,11 @@ body.dark-mode .focus-bar-title-editable:hover {
   transition: opacity 0.12s;
 }
 /* Shortage list summary cell — count + hover tooltip with quick preview */
+/* Badges / count pills next to text centre on it (not on the baseline): with
+   baseline the pill hung off the first line once the text wrapped. */
 .shortage-summary {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 .shortage-count {
@@ -3003,15 +3263,12 @@ body.dark-mode .focus-bar-title-editable:hover {
   min-width: 28px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(217, 79, 79, 0.15);
+  background: var(--danger-bg);
   color: var(--danger);
+  box-shadow: inset 0 0 0 1px var(--danger-border);
   font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-}
-body.dark-mode .shortage-count {
-  background: rgba(255, 141, 141, 0.18);
-  color: #ff8d8d;
 }
 
 .cell-hover-wrap {
@@ -3031,6 +3288,24 @@ body.dark-mode .shortage-count {
   border-radius: 10px;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
   pointer-events: none;
+}
+/* One-line label for an icon-only button (components/IconButton.tsx) */
+.hover-tooltip.hover-tooltip-compact {
+  min-width: 0;
+  max-width: 280px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* Stretches with its flex row so the icon button matches the height of the
+   text buttons beside it. */
+.icon-button-trigger {
+  display: inline-flex;
+}
+.focus-bar .btn-icon-only {
+  padding-left: 10px;
+  padding-right: 10px;
 }
 .cell-hover-tooltip {
   position: absolute;
@@ -3090,7 +3365,7 @@ body.dark-mode .shortage-count {
 }
 .shortage-tooltip-list li {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
   font-size: 13px;
 }
@@ -3184,7 +3459,7 @@ body.dark-mode .shortage-tooltip-amount {
   min-width: 36px;
   padding: 4px 12px;
   border-radius: 999px;
-  background: rgba(79, 109, 240, 0.12);
+  background: var(--primary-subtle);
   color: var(--primary);
   font-size: 13px;
   font-weight: 700;
@@ -3193,14 +3468,7 @@ body.dark-mode .shortage-tooltip-amount {
   transition: background 0.12s ease;
 }
 .count-bubble:hover {
-  background: rgba(79, 109, 240, 0.22);
-}
-body.dark-mode .count-bubble {
-  background: rgba(140, 170, 255, 0.18);
-  color: #b9c9ff;
-}
-body.dark-mode .count-bubble:hover {
-  background: rgba(140, 170, 255, 0.28);
+  background: var(--primary-border);
 }
 
 /* Email batch list & focus view */
@@ -3452,24 +3720,25 @@ body.dark-mode .backup-toast.ok .backup-toast-mark {
   width: 100%;
   padding: 20px 24px;
   margin: 24px 0 8px;
-  border: none;
   border-radius: 14px;
-  background: linear-gradient(135deg, #2a3776 0%, #3a4ca3 100%);
-  color: #fff;
+  border: 1.5px solid transparent;
+  background:
+    var(--hero-wash) padding-box,
+    linear-gradient(var(--bg-elev), var(--bg-elev)) padding-box,
+    var(--brand-gradient) border-box;
+  color: var(--text);
+  box-shadow: var(--shadow-2);
   cursor: pointer;
   text-align: left;
-  box-shadow: 0 4px 14px rgba(20, 28, 60, 0.25);
   transition:
     transform 0.15s ease,
     box-shadow 0.15s ease;
 }
-body.dark-mode .dashboard-hero {
-  background: linear-gradient(135deg, #232c5a 0%, #2f3d85 100%);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-}
 .dashboard-hero:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(20, 28, 60, 0.35);
+  box-shadow:
+    var(--shadow-2),
+    0 8px 24px -10px rgba(99, 102, 241, 0.45);
 }
 .dashboard-hero:active {
   transform: translateY(0);
@@ -3482,9 +3751,9 @@ body.dark-mode .dashboard-hero {
   align-items: center;
   justify-content: center;
   align-self: center;
-  background: rgba(255, 255, 255, 0.18);
-  border-radius: 14px;
-  color: #fff;
+  color: var(--primary);
+  /* The view's sidebar glyph (viewIcons.ts). */
+  font-size: 36px;
   line-height: 1;
 }
 .dashboard-hero-text {
@@ -3499,7 +3768,7 @@ body.dark-mode .dashboard-hero {
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  opacity: 0.85;
+  color: var(--primary);
 }
 .dashboard-hero-title {
   font-size: 22px;
@@ -3508,13 +3777,14 @@ body.dark-mode .dashboard-hero {
 }
 .dashboard-hero-hint {
   font-size: 13px;
-  opacity: 0.88;
+  color: var(--text-muted);
   margin-top: 2px;
 }
 .dashboard-hero-arrow {
   flex: 0 0 auto;
   font-size: 28px;
   font-weight: 300;
+  color: var(--primary);
   opacity: 0.85;
   transition: transform 0.15s ease;
 }
@@ -3526,13 +3796,13 @@ body.dark-mode .dashboard-hero {
   0%,
   100% {
     box-shadow:
-      0 4px 14px rgba(20, 28, 60, 0.25),
-      0 0 0 0 rgba(58, 76, 163, 0.45);
+      0 1px 2px rgba(16, 24, 40, 0.06),
+      0 0 0 0 rgba(69, 96, 226, 0.35);
   }
   50% {
     box-shadow:
-      0 4px 14px rgba(20, 28, 60, 0.25),
-      0 0 0 12px rgba(58, 76, 163, 0);
+      0 1px 2px rgba(16, 24, 40, 0.06),
+      0 0 0 12px rgba(69, 96, 226, 0);
   }
 }
 .dashboard-hero-pulse {
@@ -3541,7 +3811,7 @@ body.dark-mode .dashboard-hero {
 
 .dashboard-section-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin: 28px 0 12px !important;
@@ -3602,7 +3872,7 @@ body.dark-mode .dashboard-hero {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: var(--tile-accent-bg, rgba(79, 109, 240, 0.12));
+  background: var(--tile-accent-bg, var(--primary-subtle));
   color: var(--tile-accent, var(--primary));
   font-size: 18px;
   line-height: 1;
@@ -3664,6 +3934,10 @@ body.dark-mode .dashboard-tile-cyan {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* A grid item sizes to its min-content by default — a long supplier name
+     (nowrap) pushed the tile past its column instead of ellipsizing. */
+  min-width: 0;
+  overflow: hidden;
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-left: 4px solid var(--danger);
@@ -4169,24 +4443,6 @@ body.dark-mode .dashboard-welcome-image {
   background: var(--bg-elev);
 }
 
-.dashboard-section-loader {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
-  border: 1px dashed var(--border);
-  border-radius: 12px;
-  background: var(--bg-elev);
-  color: var(--text-muted);
-}
-.dashboard-section-loader .loading-spinner {
-  width: 22px;
-  height: 22px;
-  border-width: 2px;
-}
-.dashboard-section-loader-text {
-  font-size: 13px;
-}
 
 .dashboard-tile-skeleton {
   cursor: default;
@@ -4195,7 +4451,10 @@ body.dark-mode .dashboard-welcome-image {
 .dashboard-tile-skeleton::before {
   background: rgba(127, 127, 127, 0.18);
 }
-.skeleton-block {
+/* Loading placeholders (dashboard tiles, components/SkeletonRows): one shared
+   shimmer, neutral grey, readable in both themes. */
+.skeleton-block,
+.skeleton-bar {
   background: linear-gradient(
     90deg,
     rgba(127, 127, 127, 0.1) 0%,
@@ -4225,6 +4484,71 @@ body.dark-mode .dashboard-welcome-image {
     background-position: -200% 0;
   }
 }
+/* Table placeholder rows: a bar per cell, a button-sized block in the actions
+   column. No hover — they aren't rows yet. */
+.skeleton-bar {
+  display: block;
+  height: 12px;
+}
+.skeleton-row td {
+  padding-top: 15px;
+  padding-bottom: 15px;
+}
+.table tr.skeleton-row:hover td {
+  background: transparent !important;
+}
+.skeleton-bar.skeleton-actions {
+  width: 104px;
+  height: 26px;
+  margin-left: auto;
+  border-radius: 8px;
+}
+/* Dashboard section placeholders shaped like the order / shortage tiles. */
+.dashboard-skeleton-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elev);
+  min-height: 120px;
+}
+.dashboard-skeleton-tile .skeleton-line-wide {
+  height: 22px;
+  width: 100%;
+  border-radius: 6px;
+}
+/* Real rows replacing the placeholder fade in, lightly staggered. */
+@keyframes rows-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rows-enter > tr,
+.stagger-enter > * {
+  /* backwards, not both: the end state isn't held, so hover transforms on
+     tiles keep working once the entrance is over. */
+  animation: rows-enter 0.2s cubic-bezier(0.2, 0, 0, 1) backwards;
+}
+.stagger-enter > :nth-child(2) { animation-delay: 20ms; }
+.stagger-enter > :nth-child(3) { animation-delay: 40ms; }
+.stagger-enter > :nth-child(4) { animation-delay: 60ms; }
+.stagger-enter > :nth-child(5) { animation-delay: 80ms; }
+.stagger-enter > :nth-child(n + 6) { animation-delay: 100ms; }
+.rows-enter > tr:nth-child(2) { animation-delay: 12ms; }
+.rows-enter > tr:nth-child(3) { animation-delay: 24ms; }
+.rows-enter > tr:nth-child(4) { animation-delay: 36ms; }
+.rows-enter > tr:nth-child(5) { animation-delay: 48ms; }
+.rows-enter > tr:nth-child(6) { animation-delay: 60ms; }
+.rows-enter > tr:nth-child(7) { animation-delay: 72ms; }
+.rows-enter > tr:nth-child(8) { animation-delay: 84ms; }
+.rows-enter > tr:nth-child(n + 9) { animation-delay: 96ms; }
 .dashboard-empty-icon {
   flex: 0 0 auto;
   width: 44px;
@@ -4233,13 +4557,13 @@ body.dark-mode .dashboard-welcome-image {
   align-items: center;
   justify-content: center;
   border-radius: 12px;
-  background: rgba(192, 138, 22, 0.14);
+  background: var(--warning-bg);
   color: var(--warning);
   font-size: 20px;
   font-weight: 700;
 }
 .dashboard-empty-success .dashboard-empty-icon {
-  background: rgba(46, 139, 87, 0.14);
+  background: var(--success-bg);
   color: var(--success);
 }
 .dashboard-empty-title {
@@ -4484,33 +4808,6 @@ body.dark-mode * {
   .maxprod-stats {
     grid-template-columns: 1fr;
   }
-}
-
-/* Max producible — results header bar with refresh button.
-   Sits between the compute hero and the per-product result cards. */
-.maxprod-results-header {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-/* Highlighted refresh button — primary-filled with extra prominence
-   (bolder label, larger padding, soft glow) so it reads as the main
-   recompute action even when sitting alone in the results header. */
-.maxprod-refresh-btn {
-  padding: 10px 18px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 35%, transparent);
-}
-.maxprod-refresh-btn:hover:not(:disabled) {
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 50%, transparent);
-  transform: translateY(-1px);
-}
-.maxprod-refresh-btn:active:not(:disabled) {
-  transform: translateY(0);
 }
 
 @keyframes maxprod-spin {
@@ -4798,7 +5095,7 @@ body.dark-mode .plan-reports-item:hover {
 /* Inline meta beside focus-bar title (e.g. linked plan / report) */
 .focus-bar-meta {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 4px;
   font-size: 13px;
   white-space: nowrap;
@@ -4811,11 +5108,56 @@ body.dark-mode .plan-reports-item:hover {
 }
 
 /* Compact language picker in email focus card header */
-.email-lang-select {
+select.email-lang-select {
   width: 72px;
-  padding: 4px 8px;
+  padding: 4px 24px 4px 8px;
   font-size: 13px;
   text-align: center;
+  background-position: right 6px center;
+  background-size: 12px 12px;
+}
+
+/* Shortage report sections: "Braki wg dostawców" and "Pełne zapotrzebowanie"
+   get their own headings, and the full-requirement table sits below a divider,
+   so it doesn't read as one more supplier card. */
+.report-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 10px;
+}
+.report-section-header.is-separated {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 2px solid var(--border);
+}
+.report-section-header h2 {
+  margin: 0 0 2px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Warehouse pick-list mail ("Mail do magazynu") from a shortage report */
+.warehouse-status {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.warehouse-status.is-complete {
+  border-left-color: var(--success);
+}
+.warehouse-mail-date,
+.warehouse-mail-date::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+}
+.warehouse-mail-body {
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.4;
 }
 
 /* Hover-tooltip trigger for ingredient sum % display */
@@ -4833,12 +5175,10 @@ body.dark-mode .plan-reports-item:hover {
   padding: 8px 22px;
   font-size: 12px;
   color: var(--text-muted);
-  background: rgba(0, 0, 0, 0.02);
+  /* Continues the header band it sits under. */
+  background: var(--modal-chrome-bg);
   border-bottom: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
-}
-body.dark-mode .modal-meta-strip {
-  background: rgba(255, 255, 255, 0.025);
 }
 /* Modal tabs (used in plan editor) */
 .modal-tabs {
@@ -4938,22 +5278,21 @@ body.dark-mode .modal-tab.active .modal-tab-count {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: rgba(0, 0, 0, 0.015);
+  background: transparent;
   transition:
     background 0.12s,
     border-color 0.12s;
 }
-body.dark-mode .plan-row {
-  background: rgba(255, 255, 255, 0.02);
-}
 .plan-row:hover {
-  border-color: var(--text-muted);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
 }
-.modal-readonly .plan-row {
-  background: transparent;
-}
+/* In a preview the fields already carry an outline — a frame around the row
+   on top of that read as a box in a box, so the row frame goes; on hover the
+   row gets the same rounded neutral bar as modal table rows. */
+.modal-readonly .plan-row,
 .modal-readonly .plan-row:hover {
-  border-color: var(--border);
+  border-color: transparent;
 }
 .plan-row-product {
   display: flex;
@@ -5546,13 +5885,13 @@ body.dark-mode .workflow-section-divider {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
 }
 
 .workflow-task-name-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   min-width: 0;
   flex-wrap: wrap;
@@ -5655,45 +5994,37 @@ body.dark-mode .workflow-task-row.instance.status-done:hover {
   font-size: 11px;
   font-weight: 500;
   line-height: 1.5;
-  background: rgba(127, 127, 127, 0.15);
+  background: var(--neutral-bg);
   color: var(--text);
   vertical-align: middle;
   white-space: nowrap;
 }
 
-.badge.task-status-todo {
-  background: rgba(120, 120, 120, 0.15);
-  color: var(--muted);
+.badge.task-status-todo,
+.badge.order-status-draft {
+  background: var(--neutral-bg);
+  color: var(--text-muted);
 }
 
 .badge.task-status-in_progress {
-  background: rgba(79, 124, 255, 0.15);
-  color: var(--primary, #4f7cff);
-}
-
-.badge.task-status-done {
-  background: rgba(56, 161, 105, 0.18);
-  color: #2f855a;
-}
-
-.badge.order-status-draft {
-  background: rgba(120, 120, 120, 0.15);
-  color: var(--muted);
+  background: var(--primary-subtle);
+  color: var(--primary);
 }
 
 .badge.order-status-in_progress {
-  background: rgba(192, 138, 22, 0.18);
-  color: var(--warning, #c08a16);
+  background: var(--warning-bg);
+  color: var(--warning);
 }
 
+.badge.task-status-done,
 .badge.order-status-completed {
-  background: rgba(56, 161, 105, 0.18);
-  color: #2f855a;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .badge.order-status-cancelled {
-  background: rgba(220, 53, 69, 0.15);
-  color: #c53030;
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 /* Order details card layout */
@@ -5925,7 +6256,7 @@ body.dark-mode .picker-item:hover {
   border: 0;
   padding: 0;
   border-radius: 4px;
-  background: rgba(127, 127, 127, 0.18);
+  background: var(--neutral-bg);
   transition:
     background 0.15s,
     transform 0.1s,
@@ -5957,7 +6288,7 @@ button.task-progress-seg:hover {
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   min-width: 0;
@@ -5975,28 +6306,26 @@ button.task-progress-seg:hover {
   min-width: 0;
 }
 
-/* On the muted (todo) segment, use the regular text colour so the label is
-   legible against the light grey background. */
-.task-progress-seg-todo .task-progress-seg-label {
-  color: var(--text);
-}
-
-body.dark-mode .task-progress-seg-todo .task-progress-seg-label {
-  color: var(--text);
-}
-
+/* Labelled (md) segments use the theme's tonal pairs — coloured label on a
+   tinted fill with a hairline — instead of saturated fills with white text.
+   The thin label-less (sm) bar keeps solid fills further down, or an 8px
+   strip would be too faint to read. */
 .task-progress-seg-todo {
-  background: rgba(127, 127, 127, 0.22);
+  background: var(--neutral-bg);
+  box-shadow: inset 0 0 0 1px var(--neutral-border);
 }
-
-body.dark-mode .task-progress-seg-todo {
-  background: rgba(255, 255, 255, 0.12);
+.task-progress-seg-todo .task-progress-seg-label {
+  color: var(--text-muted);
 }
 
 .task-progress-seg-in_progress {
-  background: var(--primary, #4f7cff);
+  background: var(--primary-subtle);
+  box-shadow: inset 0 0 0 1px var(--primary-border);
   position: relative;
   overflow: hidden;
+}
+.task-progress-seg-in_progress .task-progress-seg-label {
+  color: var(--primary);
 }
 
 .task-progress-seg-in_progress::after {
@@ -6005,9 +6334,9 @@ body.dark-mode .task-progress-seg-todo {
   inset: 0;
   background: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.4) 50%,
-    rgba(255, 255, 255, 0) 100%
+    rgba(125, 144, 247, 0) 0%,
+    rgba(125, 144, 247, 0.16) 50%,
+    rgba(125, 144, 247, 0) 100%
   );
   animation: task-progress-shimmer 1.6s linear infinite;
 }
@@ -6022,11 +6351,24 @@ body.dark-mode .task-progress-seg-todo {
 }
 
 .task-progress-seg-done {
-  background: #38a169;
+  background: var(--success-bg);
+  box-shadow: inset 0 0 0 1px var(--success-border);
+}
+.task-progress-seg-done .task-progress-seg-label {
+  color: var(--success);
 }
 
-body.dark-mode .task-progress-seg-done {
-  background: #48bb78;
+.task-progress-sm .task-progress-seg-todo {
+  background: var(--border-strong);
+  box-shadow: none;
+}
+.task-progress-sm .task-progress-seg-in_progress {
+  background: var(--primary);
+  box-shadow: none;
+}
+.task-progress-sm .task-progress-seg-done {
+  background: var(--success);
+  box-shadow: none;
 }
 
 .task-progress-seg.is-open {
@@ -6243,61 +6585,76 @@ body.dark-mode .task-note-modal-task {
    used in the orders table and the order header view. */
 
 .status-inline-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   font-weight: 500;
-  padding: 3px 22px 3px 10px;
+  line-height: 1.4;
+  padding: 3px 8px 3px 10px;
   border-radius: 999px;
   border: 1px solid transparent;
-  background-color: rgba(127, 127, 127, 0.15);
+  background-color: var(--neutral-bg);
   color: var(--text);
+  white-space: nowrap;
   cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' fill='none' stroke='currentColor' stroke-width='1.5'><polyline points='2 4 5 7 8 4'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 6px center;
-  width: auto;
+}
+
+/* components/BadgeSelect.tsx: the native select sits invisibly over the pill,
+   so the pill sizes to the current label while the dropdown stays native. */
+.status-inline-select > select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.status-inline-select.is-disabled {
+  opacity: 0.6;
+}
+.status-inline-select.is-disabled,
+.status-inline-select.is-disabled > select {
+  cursor: default;
 }
 
 .status-inline-select:hover {
   filter: brightness(1.05);
 }
 
-.status-inline-select:focus {
+.status-inline-select:focus-within {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
 
 .status-inline-select.order-status-draft {
-  background-color: rgba(127, 127, 127, 0.15);
+  background-color: var(--neutral-bg);
+  border-color: var(--neutral-border);
   color: var(--text-muted);
 }
 
 .status-inline-select.order-status-in_progress {
-  background-color: rgba(192, 138, 22, 0.2);
-  color: var(--warning, #c08a16);
-}
-
-body.dark-mode .status-inline-select.order-status-in_progress {
-  color: #e6b34a;
+  background-color: var(--warning-bg);
+  border-color: var(--warning-border);
+  color: var(--warning);
 }
 
 .status-inline-select.order-status-completed {
-  background-color: rgba(56, 161, 105, 0.2);
-  color: #2f855a;
-}
-
-body.dark-mode .status-inline-select.order-status-completed {
-  color: #6ddc97;
+  background-color: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success);
 }
 
 .status-inline-select.order-status-cancelled {
-  background-color: rgba(220, 53, 69, 0.18);
-  color: #c53030;
-}
-
-body.dark-mode .status-inline-select.order-status-cancelled {
-  color: #f87171;
+  background-color: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger);
 }
 
 .order-header-status {
@@ -6482,12 +6839,16 @@ body.dark-mode .clickable-row:hover {
  * BSX integration as the primary stock source; xlsx upload sits below as a
  * secondary fallback. */
 .bsx-banner {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
-  color: #fff;
+  border: 1.5px solid transparent;
+  background:
+    var(--hero-wash) padding-box,
+    linear-gradient(var(--bg-elev), var(--bg-elev)) padding-box,
+    var(--brand-gradient) border-box;
+  color: var(--text);
+  box-shadow: var(--shadow-2);
   border-radius: var(--radius);
   padding: 24px 28px;
   margin-bottom: 16px;
-  box-shadow: var(--shadow-2);
   display: flex;
   align-items: center;
   gap: 24px;
@@ -6497,8 +6858,7 @@ body.dark-mode .clickable-row:hover {
 .bsx-banner-icon {
   width: 64px;
   height: 64px;
-  background: rgba(255, 255, 255, 0.18);
-  border-radius: 50%;
+  color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6519,31 +6879,54 @@ body.dark-mode .clickable-row:hover {
 
 .bsx-banner-subtitle {
   font-size: 13px;
-  opacity: 0.9;
+  color: var(--text-muted);
   margin: 0;
   line-height: 1.5;
 }
 
 .bsx-banner-meta {
   font-size: 12px;
-  opacity: 0.8;
+  color: var(--text-subtle);
   margin-top: 8px;
 }
 
 .bsx-banner-action {
   flex-shrink: 0;
+  /* Step 1 (fetch) and step 2 (save to catalog), same height side by side. */
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+/* Step 2 is the tonal partner of the filled step-1 CTA — the plain .btn
+   surface matched the banner and read as an empty box. While a fetched
+   snapshot awaits saving, the full-strength border marks it as the next step. */
+.btn.bsx-banner-secondary {
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--primary-subtle);
+  border-color: var(--primary-border);
+  color: var(--primary);
+}
+.btn.bsx-banner-secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-fill) 22%, var(--bg-elev));
+  border-color: var(--primary);
+}
+.btn.bsx-banner-secondary.pending {
+  border-color: var(--primary);
 }
 
 .bsx-banner-cta {
-  background: #fff;
-  color: var(--primary);
+  background: var(--primary-fill-bg);
+  color: var(--primary-fill-text);
   border: none;
   border-radius: var(--radius);
   padding: 14px 24px;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--primary-fill-shadow);
   transition:
     transform 0.08s ease,
     box-shadow 0.08s ease;
@@ -6554,7 +6937,8 @@ body.dark-mode .clickable-row:hover {
 
 .bsx-banner-cta:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+  background: var(--primary-fill-bg-hover);
+  box-shadow: var(--primary-fill-shadow), var(--shadow-2);
 }
 
 .bsx-banner-cta:disabled {
@@ -6563,7 +6947,9 @@ body.dark-mode .clickable-row:hover {
 }
 
 .bsx-banner-warning {
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning);
   border-radius: 6px;
   padding: 6px 10px;
   margin-top: 10px;
@@ -6591,10 +6977,7 @@ body.dark-mode .clickable-row:hover {
 .xlsx-banner-icon {
   width: 40px;
   height: 40px;
-  background: var(--bg);
-  border: 1px solid var(--border);
   color: var(--text-muted);
-  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;

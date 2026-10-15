@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
+import { VIEW_ICONS } from '../viewIcons';
+import { useMinimumLoading } from '../utils/useMinimumLoading';
 import type { ViewKey } from './types';
 import type {
   Order,
@@ -8,7 +10,6 @@ import type {
   ShortageReportEntry,
   TaskInstance,
 } from '../../shared/types';
-import { IconImport } from '../components/Icons';
 import TaskNoteDialog from '../components/TaskNoteDialog';
 import TaskProgressBar, { type TaskAction } from '../components/TaskProgressBar';
 import drugsUrl from '../assets/drugs2.webp';
@@ -50,12 +51,14 @@ const Dashboard: React.FC<Props> = ({
   const [counts, setCounts] = useState<Counts | null>(null);
   const [latestReport, setLatestReport] = useState<ShortageReportEntry | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Skeletons belong to the first load only (later reloads keep the data on
+  // screen); held for a minimum time so a fast load still eases in.
+  const [firstLoad, setFirstLoad] = useState(true);
+  const showSkeleton = useMinimumLoading(firstLoad);
   const [editingNote, setEditingNote] =
     useState<{ orderId: string; task: TaskInstance } | null>(null);
 
   const reload = async () => {
-    setLoading(true);
     try {
       const [products, rawMaterials, components, suppliers, plans, reports, orderList] =
         await Promise.all([
@@ -77,7 +80,7 @@ const Dashboard: React.FC<Props> = ({
       setLatestReport(reports[0] ?? null);
       setOrders(orderList);
     } finally {
-      setLoading(false);
+      setFirstLoad(false);
     }
   };
 
@@ -203,7 +206,7 @@ const Dashboard: React.FC<Props> = ({
       <h2 className="dashboard-section-head" style={{ marginTop: 8 }}>
         {t.dashboardYourData}
       </h2>
-      {loading && !counts ? (
+      {showSkeleton ? (
         <div className="dashboard-grid">
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} className="dashboard-tile dashboard-tile-skeleton" aria-hidden>
@@ -214,7 +217,7 @@ const Dashboard: React.FC<Props> = ({
           ))}
         </div>
       ) : (
-        <div className="dashboard-grid">
+        <div className="dashboard-grid stagger-enter">
           {dataTiles.map((tile) => (
             <button
               key={tile.key}
@@ -234,10 +237,15 @@ const Dashboard: React.FC<Props> = ({
         <span className="dashboard-section-hint">{t.dashboardActiveOrdersHint}</span>
       </h2>
 
-      {loading && orders.length === 0 ? (
-        <div className="dashboard-section-loader" role="status" aria-live="polite">
-          <div className="loading-spinner" aria-hidden />
-          <span className="dashboard-section-loader-text">{t.loading}</span>
+      {showSkeleton ? (
+        <div className="dashboard-orders-grid" aria-hidden>
+          {[0, 1].map((i) => (
+            <div key={i} className="dashboard-skeleton-tile">
+              <span className="skeleton-block skeleton-line" />
+              <span className="skeleton-block skeleton-line-sm" />
+              <span className="skeleton-block skeleton-line-wide" />
+            </div>
+          ))}
         </div>
       ) : activeOrders.length === 0 ? (
         <div className="dashboard-empty">
@@ -251,7 +259,7 @@ const Dashboard: React.FC<Props> = ({
         </div>
       ) : (
         <>
-          <div className="dashboard-orders-grid">
+          <div className="dashboard-orders-grid stagger-enter">
             {activeOrders.map((o) => {
               const tasks = o.workflow?.tasks ?? [];
               const endDate =
@@ -311,14 +319,19 @@ const Dashboard: React.FC<Props> = ({
         )}
       </h2>
 
-      {loading && !latestReport && (
-        <div className="dashboard-section-loader" role="status" aria-live="polite">
-          <div className="loading-spinner" aria-hidden />
-          <span className="dashboard-section-loader-text">{t.loading}</span>
+      {showSkeleton && (
+        <div className="dashboard-grid dashboard-grid-shortage" aria-hidden>
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="dashboard-skeleton-tile">
+              <span className="skeleton-block skeleton-line-sm" />
+              <span className="skeleton-block skeleton-line" />
+              <span className="skeleton-block skeleton-line-lg" />
+            </div>
+          ))}
         </div>
       )}
 
-      {!loading && !latestReport && (
+      {!showSkeleton && !latestReport && (
         <div className="dashboard-empty">
           <span className="dashboard-empty-icon">⚠</span>
           <div>
@@ -330,16 +343,16 @@ const Dashboard: React.FC<Props> = ({
         </div>
       )}
 
-      {latestReport && topShortages.length === 0 && (
+      {!showSkeleton && latestReport && topShortages.length === 0 && (
         <div className="dashboard-empty dashboard-empty-success">
           <span className="dashboard-empty-icon">✓</span>
           <div className="dashboard-empty-title">{t.dashboardNoMissing}</div>
         </div>
       )}
 
-      {topShortages.length > 0 && (
+      {!showSkeleton && topShortages.length > 0 && (
         <>
-          <div className="dashboard-grid dashboard-grid-shortage">
+          <div className="dashboard-grid dashboard-grid-shortage stagger-enter">
             {topShortages.map((line) => {
               const supplier =
                 latestReport!.report.groups.find(
@@ -408,8 +421,8 @@ const Dashboard: React.FC<Props> = ({
         className={`dashboard-hero ${isEmpty ? 'dashboard-hero-pulse' : ''}`}
         onClick={() => onNavigate('stockImport')}
       >
-        <span className="dashboard-hero-icon">
-          <IconImport size={28} />
+        <span className="dashboard-hero-icon" aria-hidden>
+          {VIEW_ICONS.stockImport}
         </span>
         <span className="dashboard-hero-text">
           <span className="dashboard-hero-step">{t.dashboardStartStep}</span>

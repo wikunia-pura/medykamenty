@@ -18,6 +18,8 @@ import { isSecondaryComponent, SECONDARY_COMPONENT_TYPES } from '../../shared/ty
 import ConfirmDialog from '../components/ConfirmDialog';
 import BlockedByDialog from '../components/BlockedByDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
+import SkeletonRows from '../components/SkeletonRows';
+import { useMinimumLoading } from '../utils/useMinimumLoading';
 import SupplierMultiPicker from '../components/SupplierMultiPicker';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
@@ -30,6 +32,7 @@ import ColumnPicker from '../components/ColumnPicker';
 import HoverTooltip from '../components/HoverTooltip';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
 import { useColumnResize } from '../utils/useColumnResize';
+import { sortRows, type SortValue } from '../utils/sortRows';
 import {
   IconEdit,
   IconTrash,
@@ -42,6 +45,7 @@ import {
   IconInfo,
   IconSettings,
 } from '../components/Icons';
+import IconButton from '../components/IconButton';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
 import SegmentedControl from '../components/SegmentedControl';
@@ -92,6 +96,8 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   const [confirmDelete, setConfirmDelete] = useState<PackagingComponent | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const showSkeleton = useMinimumLoading(initialLoading);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -163,10 +169,12 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     widths,
     setWidth,
     resetWidth,
+    sort,
+    toggleSort,
     orderedColumns,
     orderedVisibleIds,
   } = useColumnPrefs(prefsKey, COLUMNS);
-  const { decorateHeader } = useColumnResize(setWidth);
+  const { decorateHeader } = useColumnResize(setWidth, { sort, toggleSort });
 
   const headerFor = (id: string): React.ReactNode => {
     switch (id) {
@@ -490,11 +498,13 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
 
   useEffect(() => {
     void (async () => {
-      setLoaderMessage(t.loading);
+      // First load shows skeleton rows in the table (see SkeletonRows), not a
+      // blocking overlay.
+      setInitialLoading(true);
       try {
         await reload();
       } finally {
-        setLoaderMessage(null);
+        setInitialLoading(false);
       }
     })();
   }, [kind]);
@@ -510,6 +520,56 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       return matchesQuery({ ...c, supplierNames }, query);
     });
   }, [items, suppliers, query]);
+
+  // Header-click sort key per column: what the cell shows, numeric where the
+  // column is.
+  const sortValueFor = (id: string, c: PackagingComponent): SortValue => {
+    switch (id) {
+      case 'name':
+        return c.name;
+      case 'symbol':
+        return c.mpFirmaSymbol;
+      case 'type':
+        return c.type;
+      case 'stock':
+        return c.stockQty;
+      case 'suppliers': {
+        // The first chip shown: the preferred supplier, else the first one.
+        const ids = c.supplierIds ?? [];
+        const first =
+          c.preferredSupplierId && ids.includes(c.preferredSupplierId)
+            ? c.preferredSupplierId
+            : ids[0];
+        return first ? suppliers.find((s) => s.id === first)?.name : undefined;
+      }
+      case 'moq':
+        return c.moq;
+      case 'leadTime':
+        return c.leadTimeDays;
+      case 'price':
+        return c.lastPurchasePriceNet;
+      case 'overage':
+        return c.overagePct ?? defaultOveragePct;
+      case 'packagingKind':
+        return (c.packagingKind ?? 'product') === 'product'
+          ? t.packagingKindProduct
+          : t.packagingKindMass;
+      case 'capacity':
+        return c.capacity;
+      case 'consumes':
+        return (c.dependencies ?? []).length;
+      case 'currency':
+        return c.currency;
+      case 'notes':
+        return c.notes;
+      default:
+        return undefined;
+    }
+  };
+  const sorted = useMemo(
+    () => sortRows(filtered, sort, sortValueFor),
+    [filtered, sort, suppliers, defaultOveragePct, t],
+  );
 
   const onAdd = () =>
     setEditing({
@@ -557,11 +617,23 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     if (!editing || !editing.name?.trim()) return;
     setError(null);
     const payload = buildEditingPayload(editing);
+    // A stock change goes through the same path as the inline list edit
+    // (setManualStock → source 'manual' + date), and only when it changed, so
+    // saving other fields never overwrites import-sourced stock.
+    const original = editing.id ? items.find((c) => c.id === editing.id) : undefined;
+    const stockChanged =
+      editing.stockQty !== undefined && editing.stockQty !== original?.stockQty;
     try {
       if (editing.id) {
         await window.electronAPI.updateComponent(editing.id, payload);
+        if (stockChanged) {
+          await window.electronAPI.setManualStock('component', editing.id, editing.stockQty ?? 0);
+        }
       } else {
-        await window.electronAPI.createComponent(payload);
+        const created = await window.electronAPI.createComponent(payload);
+        if (stockChanged) {
+          await window.electronAPI.setManualStock('component', created.id, editing.stockQty ?? 0);
+        }
       }
       setEditing(null);
       await reload();
@@ -836,7 +908,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         </button>
       </div>
 
-      <div className="card">
+      <div className="card card-fill">
         <div className="toolbar">
           <div className="toolbar-actions">
             <ExportImportButtons format="csv" onExport={onExport} onImport={onImport} busy={busy} />
@@ -896,50 +968,56 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
             <thead>
               <tr>
                 {orderedVisibleIds.map((id) => decorateHeader(headerFor(id), id, widths[id]))}
+                <th className="col-filler" aria-hidden />
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={orderedVisibleIds.length + 1} className="hint">
-                    {query ? '—' : t.noData}
-                  </td>
-                </tr>
+            <tbody
+              key={showSkeleton ? 'loading' : 'ready'}
+              className={showSkeleton ? undefined : 'rows-enter'}
+            >
+              {showSkeleton ? (
+                <SkeletonRows cells={orderedVisibleIds.length} filler actions />
+              ) : (
+                sorted.length === 0 && (
+                  <tr>
+                    <td colSpan={orderedVisibleIds.length + 2} className="hint">
+                      {query ? '—' : t.noData}
+                    </td>
+                  </tr>
+                )
               )}
-              {filtered.map((c) => (
+              {!showSkeleton && sorted.map((c) => (
                 <tr key={c.id}>
                   {orderedVisibleIds.map((id) => cellFor(id, c))}
+                  <td className="col-filler" />
                   <td className="actions actions-sticky">
                     <div className="btn-row">
-                      <button
-                        className="btn btn-sm soft-edit"
+                      <IconButton
+                        className="btn-sm soft-danger"
+                        icon={<IconTrash size={14} />}
+                        label={t.delete}
+                        onClick={() => setConfirmDelete(c)}
+                      />
+                      <IconButton
+                        className="btn-sm soft-edit"
+                        icon={<IconEdit size={14} />}
+                        label={t.edit}
                         onClick={() => {
                           setEditingReadOnly(false);
                           setModalTab('basics');
                           setEditing(c);
                         }}
-                        title={t.edit}
-                      >
-                        <IconEdit size={13} /> {t.edit}
-                      </button>
-                      <button
-                        className="btn btn-sm soft-success"
+                      />
+                      <IconButton
+                        className="btn-sm soft-success"
+                        icon={<IconDuplicate size={14} />}
+                        label={t.duplicate}
                         onClick={async () => {
                           await window.electronAPI.duplicateComponent(c.id);
                           await reload();
                         }}
-                        title={t.duplicate}
-                      >
-                        <IconDuplicate size={13} /> {t.duplicate}
-                      </button>
-                      <button
-                        className="btn btn-sm soft-danger"
-                        onClick={() => setConfirmDelete(c)}
-                        title={t.delete}
-                      >
-                        <IconTrash size={13} /> {t.delete}
-                      </button>
+                      />
                     </div>
                   </td>
                 </tr>
@@ -952,7 +1030,9 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       {editing && (
         <div className="modal-overlay" onClick={closeEditor}>
           <div
-            className={`modal modal-md${editingReadOnly ? ' modal-readonly' : ''}`}
+            className={`modal ${kind === 'secondary' ? 'modal-lg modal-tabbed' : 'modal-md'}${
+              editingReadOnly ? ' modal-readonly' : ''
+            }`}
             onClick={(e) => e.stopPropagation()}
           >
             <ModalHeader
@@ -1100,6 +1180,18 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
                       className="input"
                       value={editing.leadTimeDays}
                       onChange={(v) => setEditing({ ...editing, leadTimeDays: v })}
+                      disabled={editingReadOnly}
+                    />
+                  </div>
+                  {/* Stock is editable inline on the list, so it is here too. */}
+                  <div className="form-row">
+                    <label>
+                      {t.stock} ({t.unitUnits})
+                    </label>
+                    <NumberInput
+                      className="input"
+                      value={editing.stockQty}
+                      onChange={(v) => setEditing({ ...editing, stockQty: v })}
                       disabled={editingReadOnly}
                     />
                   </div>

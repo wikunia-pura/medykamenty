@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
-import { IconCheck, IconSearch, IconClose } from './Icons';
+import { IconCheck, IconChevronDown, IconSearch, IconClose } from './Icons';
 
 export interface SearchableSelectOption {
   value: string;
@@ -45,6 +45,10 @@ const SearchableSelect: React.FC<Props> = ({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
+  // Only keyboard moves, opening and typing scroll the active row into view —
+  // not a mouse hover: hovering a half-visible last row would scroll the list,
+  // put the next row under the cursor, make that one active, and so on.
+  const scrollToActive = useRef(true);
   const [coords, setCoords] = useState<{ left: number; top: number; width: number } | null>(
     null,
   );
@@ -68,6 +72,7 @@ const SearchableSelect: React.FC<Props> = ({
         0,
         options.findIndex((o) => o.value === value),
       );
+      scrollToActive.current = true;
       setActiveIdx(idx);
       setTimeout(() => inputRef.current?.focus(), 0);
     }
@@ -114,7 +119,7 @@ const SearchableSelect: React.FC<Props> = ({
 
   // Keep the active row scrolled into view.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !scrollToActive.current) return;
     const list = listRef.current;
     const child = list?.children[activeIdx] as HTMLElement | undefined;
     if (!list || !child) return;
@@ -136,9 +141,11 @@ const SearchableSelect: React.FC<Props> = ({
       setOpen(false);
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
+      scrollToActive.current = true;
       setActiveIdx((i) => Math.min(i + 1, filtered.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      scrollToActive.current = true;
       setActiveIdx((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
@@ -179,7 +186,7 @@ const SearchableSelect: React.FC<Props> = ({
           )}
         </span>
         <span className="searchable-select-caret" aria-hidden>
-          ▾
+          <IconChevronDown size={14} />
         </span>
       </button>
       {open &&
@@ -206,6 +213,7 @@ const SearchableSelect: React.FC<Props> = ({
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
+                  scrollToActive.current = true;
                   setActiveIdx(0);
                 }}
                 onKeyDown={onInputKey}
@@ -237,7 +245,10 @@ const SearchableSelect: React.FC<Props> = ({
                     className={`searchable-select-row${isSel ? ' selected' : ''}${
                       isActive ? ' active' : ''
                     }`}
-                    onMouseEnter={() => setActiveIdx(idx)}
+                    onMouseEnter={() => {
+                      scrollToActive.current = false;
+                      setActiveIdx(idx);
+                    }}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => pick(o.value)}
                   >

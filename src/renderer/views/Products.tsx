@@ -12,10 +12,13 @@ import type {
 } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
+import SkeletonRows from '../components/SkeletonRows';
+import { useMinimumLoading } from '../utils/useMinimumLoading';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
 import { useColumnResize } from '../utils/useColumnResize';
+import { sortRows, type SortValue } from '../utils/sortRows';
 import {
   IconEdit,
   IconTrash,
@@ -24,6 +27,7 @@ import {
   IconExport,
   IconImport,
 } from '../components/Icons';
+import IconButton from '../components/IconButton';
 import HoverTooltip from '../components/HoverTooltip';
 import ModalHeader from '../components/ModalHeader';
 import ProductEditorModal from '../components/ProductEditorModal';
@@ -47,6 +51,8 @@ const Products: React.FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<Product | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const showSkeleton = useMinimumLoading(initialLoading);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,10 +99,12 @@ const Products: React.FC = () => {
     widths,
     setWidth,
     resetWidth,
+    sort,
+    toggleSort,
     orderedColumns,
     orderedVisibleIds,
   } = useColumnPrefs('products', COLUMNS);
-  const { decorateHeader } = useColumnResize(setWidth);
+  const { decorateHeader } = useColumnResize(setWidth, { sort, toggleSort });
 
   const headerFor = (id: string): React.ReactNode => {
     switch (id) {
@@ -269,6 +277,36 @@ const Products: React.FC = () => {
     [items, query],
   );
 
+  // Header-click sort key per column: what the cell shows — the count columns
+  // sort by their count.
+  const sortValueFor = (id: string, p: Product): SortValue => {
+    switch (id) {
+      case 'name':
+        return p.name;
+      case 'sku':
+        return p.sku;
+      case 'capacity':
+        return p.capacityMl;
+      case 'density':
+        return p.densityGPerMl;
+      case 'labor':
+        return p.conversionLaborCost;
+      case 'moq':
+        return p.moqUnits;
+      case 'ingredients':
+        return (p.ingredients ?? []).length;
+      case 'packaging':
+        return (p.packaging ?? []).length;
+      case 'packingScheme':
+        return (p.packingScheme?.tiers ?? []).length;
+      case 'notes':
+        return p.notes;
+      default:
+        return undefined;
+    }
+  };
+  const sorted = useMemo(() => sortRows(filtered, sort, sortValueFor), [filtered, sort]);
+
   const reload = async () => {
     const [list, rms, cs] = await Promise.all([
       window.electronAPI.listProducts(),
@@ -282,11 +320,13 @@ const Products: React.FC = () => {
 
   useEffect(() => {
     void (async () => {
-      setLoaderMessage(t.loading);
+      // First load shows skeleton rows in the table (see SkeletonRows), not a
+      // blocking overlay.
+      setInitialLoading(true);
       try {
         await reload();
       } finally {
-        setLoaderMessage(null);
+        setInitialLoading(false);
       }
     })();
   }, []);
@@ -532,7 +572,7 @@ const Products: React.FC = () => {
         <span className="page-header-count">{items.length}</span>
       </div>
 
-      <div className="card">
+      <div className="card card-fill">
         <div className="toolbar">
           <div className="toolbar-actions">
             <button
@@ -599,18 +639,26 @@ const Products: React.FC = () => {
             <thead>
               <tr>
                 {orderedVisibleIds.map((id) => decorateHeader(headerFor(id), id, widths[id]))}
+                <th className="col-filler" aria-hidden />
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={orderedVisibleIds.length + 1} className="hint">
-                    {query ? '—' : t.noData}
-                  </td>
-                </tr>
+            <tbody
+              key={showSkeleton ? 'loading' : 'ready'}
+              className={showSkeleton ? undefined : 'rows-enter'}
+            >
+              {showSkeleton ? (
+                <SkeletonRows cells={orderedVisibleIds.length} filler actions />
+              ) : (
+                sorted.length === 0 && (
+                  <tr>
+                    <td colSpan={orderedVisibleIds.length + 2} className="hint">
+                      {query ? '—' : t.noData}
+                    </td>
+                  </tr>
+                )
               )}
-              {filtered.map((p) => (
+              {!showSkeleton && sorted.map((p) => (
                 <tr
                   key={p.id}
                   className="row-clickable"
@@ -618,35 +666,33 @@ const Products: React.FC = () => {
                   title={t.preview}
                 >
                   {orderedVisibleIds.map((id) => cellFor(id, p))}
+                  <td className="col-filler" />
                   <td
                     className="actions actions-sticky"
                     onClick={(ev) => ev.stopPropagation()}
                   >
                     <div className="btn-row">
-                      <button
-                        className="btn btn-sm soft-edit"
+                      <IconButton
+                        className="btn-sm soft-danger"
+                        icon={<IconTrash size={14} />}
+                        label={t.delete}
+                        onClick={() => setConfirmDelete(p)}
+                      />
+                      <IconButton
+                        className="btn-sm soft-edit"
+                        icon={<IconEdit size={14} />}
+                        label={t.edit}
                         onClick={() => {
                           setEditingReadOnly(false);
                           setEditing(p);
                         }}
-                        title={t.edit}
-                      >
-                        <IconEdit size={13} /> {t.edit}
-                      </button>
-                      <button
-                        className="btn btn-sm soft-success"
+                      />
+                      <IconButton
+                        className="btn-sm soft-success"
+                        icon={<IconDuplicate size={14} />}
+                        label={t.duplicate}
                         onClick={() => onDuplicate(p)}
-                        title={t.duplicate}
-                      >
-                        <IconDuplicate size={13} /> {t.duplicate}
-                      </button>
-                      <button
-                        className="btn btn-sm soft-danger"
-                        onClick={() => setConfirmDelete(p)}
-                        title={t.delete}
-                      >
-                        <IconTrash size={13} /> {t.delete}
-                      </button>
+                      />
                     </div>
                   </td>
                 </tr>

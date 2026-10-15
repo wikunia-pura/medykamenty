@@ -15,8 +15,13 @@ import {
   IconSettings,
   IconTrash,
 } from '../components/Icons';
+import Toggle from '../components/Toggle';
+import IconButton from '../components/IconButton';
+import BadgeSelect from '../components/BadgeSelect';
 import ModalHeader from '../components/ModalHeader';
 import { useEscapeKey } from '../utils/useEscapeKey';
+import SkeletonRows from '../components/SkeletonRows';
+import { useMinimumLoading } from '../utils/useMinimumLoading';
 
 interface Props {
   onOpenOrder: (id: string) => void;
@@ -58,8 +63,11 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
     }
   };
 
+  // First load shows skeleton rows (held briefly so a fast load still eases in).
+  const [initialLoading, setInitialLoading] = useState(true);
+  const showSkeleton = useMinimumLoading(initialLoading);
   useEffect(() => {
-    void reload();
+    void reload().finally(() => setInitialLoading(false));
   }, []);
 
   const onAdd = () => {
@@ -198,7 +206,7 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
         </button>
       </div>
 
-      <div className="card">
+      <div className="card card-fill">
         <div className="toolbar">
           <div className="toolbar-actions">
             <button className="btn primary toolbar-action-primary" onClick={onAdd}>
@@ -225,15 +233,22 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="hint">
-                    {query ? '—' : t.noData}
-                  </td>
-                </tr>
+            <tbody
+              key={showSkeleton ? 'loading' : 'ready'}
+              className={showSkeleton ? undefined : 'rows-enter'}
+            >
+              {showSkeleton ? (
+                <SkeletonRows cells={4} actions />
+              ) : (
+                filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="hint">
+                      {query ? '—' : t.noData}
+                    </td>
+                  </tr>
+                )
               )}
-              {filtered.map((o) => {
+              {!showSkeleton && filtered.map((o) => {
                 const tasks = o.workflow?.tasks ?? [];
                 const endDate =
                   tasks.length > 0 ? tasks[tasks.length - 1].endDate : null;
@@ -252,21 +267,13 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
                             {t.archivedTag}
                           </span>
                         )}
-                        <select
-                          className={`status-inline-select order-status-${o.status}`}
+                        <BadgeSelect
+                          className={`order-status-${o.status}`}
                           value={o.status}
-                          onClick={(ev) => ev.stopPropagation()}
-                          onChange={(e) =>
-                            void onPickStatus(o, e.target.value as OrderStatus)
-                          }
-                          title={t.changeStatus}
-                        >
-                          {statusOptions.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
+                          options={statusOptions}
+                          ariaLabel={t.changeStatus}
+                          onChange={(next) => void onPickStatus(o, next)}
+                        />
                       </div>
                     </td>
                     <td>{o.startDate}</td>
@@ -292,30 +299,27 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
                       onClick={(ev) => ev.stopPropagation()}
                     >
                       <div className="btn-row">
-                        <button
-                          className="btn btn-sm soft-edit"
+                        <IconButton
+                          className="btn-sm soft-danger"
+                          icon={<IconTrash size={14} />}
+                          label={t.delete}
+                          onClick={() => setConfirmDelete(o)}
+                        />
+                        <IconButton
+                          className="btn-sm soft-edit"
+                          icon={<IconEdit size={14} />}
+                          label={t.edit}
                           onClick={() => onEdit(o)}
-                          title={t.edit}
-                        >
-                          <IconEdit size={13} /> {t.edit}
-                        </button>
-                        <button
-                          className="btn btn-sm soft-success"
+                        />
+                        <IconButton
+                          className="btn-sm soft-success"
+                          icon={<IconDuplicate size={14} />}
+                          label={t.duplicate}
                           onClick={async () => {
                             await window.electronAPI.duplicateOrder(o.id);
                             await reload();
                           }}
-                          title={t.duplicate}
-                        >
-                          <IconDuplicate size={13} /> {t.duplicate}
-                        </button>
-                        <button
-                          className="btn btn-sm soft-danger"
-                          onClick={() => setConfirmDelete(o)}
-                          title={t.delete}
-                        >
-                          <IconTrash size={13} /> {t.delete}
-                        </button>
+                        />
                       </div>
                     </td>
                   </tr>
@@ -383,10 +387,10 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
                     </span>
                   )}
                 </span>
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={showArchived}
-                  onChange={(ev) => setShowArchived(ev.target.checked)}
+                  onChange={setShowArchived}
+                  ariaLabel={t.showArchived}
                 />
               </label>
             </div>

@@ -3,6 +3,7 @@ import type { Order, OrderStatus, WorkflowTemplate } from '../../shared/types';
 import { useT } from '../i18n';
 import ModalHeader from './ModalHeader';
 import { IconPlus, IconEdit } from './Icons';
+import Toggle from './Toggle';
 import { useEscapeKey } from '../utils/useEscapeKey';
 
 interface Props {
@@ -133,12 +134,10 @@ const OrderEditorModal: React.FC<Props> = ({ editing, setEditing, onCancel, onSa
           {!isNew && (
             <label className="settings-toggle-row" style={{ marginTop: 6 }}>
               <span>{t.archivedField}</span>
-              <input
-                type="checkbox"
+              <Toggle
                 checked={!!editing.archived}
-                onChange={(e) =>
-                  setEditing({ ...editing, archived: e.target.checked })
-                }
+                onChange={(v) => setEditing({ ...editing, archived: v })}
+                ariaLabel={t.archivedField}
               />
             </label>
           )}

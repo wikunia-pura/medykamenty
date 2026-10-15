@@ -66,7 +66,11 @@ const ShortageReportTooltip: React.FC<Props> = ({ entry, batches }) => {
   const groups = entry.report.groups.length;
 
   if (missing.length === 0) {
-    return <span className="tag success">{t.noShortages}</span>;
+    return (
+      <span className="tag success" style={{ whiteSpace: 'nowrap' }}>
+        {t.readyForProduction}
+      </span>
+    );
   }
 
   const statuses = groupStatusFor(entry, batches);

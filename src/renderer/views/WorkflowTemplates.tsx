@@ -7,8 +7,11 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import { IconEdit, IconTrash, IconPlus, IconDuplicate } from '../components/Icons';
+import IconButton from '../components/IconButton';
 import HoverTooltip from '../components/HoverTooltip';
 import type { TaskType } from '../../shared/types';
+import SkeletonRows from '../components/SkeletonRows';
+import { useMinimumLoading } from '../utils/useMinimumLoading';
 
 const WorkflowTemplates: React.FC = () => {
   const t = useT();
@@ -28,8 +31,11 @@ const WorkflowTemplates: React.FC = () => {
     }
   };
 
+  // First load shows skeleton rows (held briefly so a fast load still eases in).
+  const [initialLoading, setInitialLoading] = useState(true);
+  const showSkeleton = useMinimumLoading(initialLoading);
   useEffect(() => {
-    void reload();
+    void reload().finally(() => setInitialLoading(false));
   }, []);
 
   const onAdd = () => {
@@ -100,7 +106,7 @@ const WorkflowTemplates: React.FC = () => {
         <span className="page-header-count">{items.length}</span>
       </div>
 
-      <div className="card">
+      <div className="card card-fill">
         <div className="toolbar">
           <div className="toolbar-actions">
             <button className="btn primary toolbar-action-primary" onClick={onAdd}>
@@ -126,15 +132,22 @@ const WorkflowTemplates: React.FC = () => {
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="hint">
-                    {query ? '—' : t.noData}
-                  </td>
-                </tr>
+            <tbody
+              key={showSkeleton ? 'loading' : 'ready'}
+              className={showSkeleton ? undefined : 'rows-enter'}
+            >
+              {showSkeleton ? (
+                <SkeletonRows cells={3} actions />
+              ) : (
+                filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="hint">
+                      {query ? '—' : t.noData}
+                    </td>
+                  </tr>
+                )
               )}
-              {filtered.map((wt) => {
+              {!showSkeleton && filtered.map((wt) => {
                 const total = wt.tasks.reduce((acc, t) => acc + (t.durationDays || 0), 0);
                 return (
                   <tr
@@ -184,30 +197,27 @@ const WorkflowTemplates: React.FC = () => {
                       onClick={(ev) => ev.stopPropagation()}
                     >
                       <div className="btn-row">
-                        <button
-                          className="btn btn-sm soft-edit"
+                        <IconButton
+                          className="btn-sm soft-danger"
+                          icon={<IconTrash size={14} />}
+                          label={t.delete}
+                          onClick={() => setConfirmDelete(wt)}
+                        />
+                        <IconButton
+                          className="btn-sm soft-edit"
+                          icon={<IconEdit size={14} />}
+                          label={t.edit}
                           onClick={() => onEdit(wt)}
-                          title={t.edit}
-                        >
-                          <IconEdit size={13} /> {t.edit}
-                        </button>
-                        <button
-                          className="btn btn-sm soft-success"
+                        />
+                        <IconButton
+                          className="btn-sm soft-success"
+                          icon={<IconDuplicate size={14} />}
+                          label={t.duplicate}
                           onClick={async () => {
                             await window.electronAPI.duplicateWorkflowTemplate(wt.id);
                             await reload();
                           }}
-                          title={t.duplicate}
-                        >
-                          <IconDuplicate size={13} /> {t.duplicate}
-                        </button>
-                        <button
-                          className="btn btn-sm soft-danger"
-                          onClick={() => setConfirmDelete(wt)}
-                          title={t.delete}
-                        >
-                          <IconTrash size={13} /> {t.delete}
-                        </button>
+                        />
                       </div>
                     </td>
                   </tr>

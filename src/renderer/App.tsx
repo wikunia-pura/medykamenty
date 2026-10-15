@@ -25,6 +25,7 @@ import Orders from './views/Orders';
 import OrderDetails from './views/OrderDetails';
 import WorkflowTemplates from './views/WorkflowTemplates';
 import OrderTaskBanner from './components/OrderTaskBanner';
+import { useModalAutoWidth } from './utils/useModalAutoWidth';
 
 const NAV_STACK_LIMIT = 50;
 
@@ -34,6 +35,8 @@ interface NavState {
 }
 
 const App: React.FC = () => {
+  // Modals widen to fit their content instead of scrolling sideways.
+  useModalAutoWidth();
   const [nav, setNav] = useState<NavState>({ stack: ['dashboard'], index: 0 });
   const view = nav.stack[nav.index];
   const canGoBack = nav.index > 0;
@@ -453,6 +456,8 @@ const App: React.FC = () => {
             orderTaskContextOrderId={orderTaskCtx?.orderId}
             onNavigateToOrder={openOrder}
             taskBanner={taskBanner}
+            warehouseEmail={settings.warehouseEmail}
+            onSettingsChange={onSettingsChanged}
           />
         );
       case 'emailGenerator':

@@ -219,7 +219,12 @@ export interface ElectronAPI {
   deleteShortageReport(id: string): Promise<{ ok: boolean }>;
   updateShortageReport(
     id: string,
-    patch: { reportName?: string; orderId?: string | null; archived?: boolean },
+    patch: {
+      reportName?: string;
+      orderId?: string | null;
+      archived?: boolean;
+      warehouseNotice?: ShortageReportEntry['warehouseNotice'] | null;
+    },
   ): Promise<ShortageReportEntry | undefined>;
   setReportSupplierReceived(
     reportId: string,

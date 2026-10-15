@@ -5,14 +5,18 @@ import type { Supplier, SupplierType, Lang } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import BlockedByDialog from '../components/BlockedByDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
+import SkeletonRows from '../components/SkeletonRows';
+import { useMinimumLoading } from '../utils/useMinimumLoading';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import { IconEdit, IconTrash, IconPlus, IconDuplicate } from '../components/Icons';
+import IconButton from '../components/IconButton';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
 import SearchableSelect from '../components/SearchableSelect';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
 import { useColumnResize } from '../utils/useColumnResize';
+import { sortRows, type SortValue } from '../utils/sortRows';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import {
   exportSuppliersCsv,
@@ -29,6 +33,8 @@ const Suppliers: React.FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<Supplier | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const showSkeleton = useMinimumLoading(initialLoading);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,10 +70,12 @@ const Suppliers: React.FC = () => {
     widths,
     setWidth,
     resetWidth,
+    sort,
+    toggleSort,
     orderedColumns,
     orderedVisibleIds,
   } = useColumnPrefs('suppliers', COLUMNS);
-  const { decorateHeader } = useColumnResize(setWidth);
+  const { decorateHeader } = useColumnResize(setWidth, { sort, toggleSort });
 
   const headerFor = (id: string): React.ReactNode => {
     switch (id) {
@@ -121,11 +129,13 @@ const Suppliers: React.FC = () => {
 
   useEffect(() => {
     void (async () => {
-      setLoaderMessage(t.loading);
+      // First load shows skeleton rows in the table (see SkeletonRows), not a
+      // blocking overlay.
+      setInitialLoading(true);
       try {
         await reload();
       } finally {
-        setLoaderMessage(null);
+        setInitialLoading(false);
       }
     })();
   }, []);
@@ -134,6 +144,31 @@ const Suppliers: React.FC = () => {
     () => items.filter((s) => matchesQuery(s, query)),
     [items, query],
   );
+
+  // Header-click sort key per column: what the cell shows.
+  const sortValueFor = (id: string, s: Supplier): SortValue => {
+    switch (id) {
+      case 'name':
+        return s.name;
+      case 'type':
+        return typeLabel(s.type);
+      case 'email':
+        return s.email;
+      case 'phone':
+        return s.phone;
+      case 'contactPerson':
+        return s.contactPerson;
+      case 'paymentTerms':
+        return s.paymentTerms;
+      case 'language':
+        return s.preferredEmailLanguage;
+      case 'notes':
+        return s.notes;
+      default:
+        return undefined;
+    }
+  };
+  const sorted = useMemo(() => sortRows(filtered, sort, sortValueFor), [filtered, sort, t]);
 
   const onAdd = () =>
     setEditing({
@@ -265,7 +300,7 @@ const Suppliers: React.FC = () => {
         <span className="page-header-count">{items.length}</span>
       </div>
 
-      <div className="card">
+      <div className="card card-fill">
         <div className="toolbar">
           <div className="toolbar-actions">
             <ExportImportButtons
@@ -306,46 +341,52 @@ const Suppliers: React.FC = () => {
             <thead>
               <tr>
                 {orderedVisibleIds.map((id) => decorateHeader(headerFor(id), id, widths[id]))}
+                <th className="col-filler" aria-hidden />
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={orderedVisibleIds.length + 1} className="hint">
-                    {query ? '—' : t.noData}
-                  </td>
-                </tr>
+            <tbody
+              key={showSkeleton ? 'loading' : 'ready'}
+              className={showSkeleton ? undefined : 'rows-enter'}
+            >
+              {showSkeleton ? (
+                <SkeletonRows cells={orderedVisibleIds.length} filler actions />
+              ) : (
+                sorted.length === 0 && (
+                  <tr>
+                    <td colSpan={orderedVisibleIds.length + 2} className="hint">
+                      {query ? '—' : t.noData}
+                    </td>
+                  </tr>
+                )
               )}
-              {filtered.map((s) => (
+              {!showSkeleton && sorted.map((s) => (
                 <tr key={s.id}>
                   {orderedVisibleIds.map((id) => cellFor(id, s))}
+                  <td className="col-filler" />
                   <td className="actions actions-sticky">
                     <div className="btn-row">
-                      <button
-                        className="btn btn-sm soft-edit"
+                      <IconButton
+                        className="btn-sm soft-danger"
+                        icon={<IconTrash size={14} />}
+                        label={t.delete}
+                        onClick={() => setConfirmDelete(s)}
+                      />
+                      <IconButton
+                        className="btn-sm soft-edit"
+                        icon={<IconEdit size={14} />}
+                        label={t.edit}
                         onClick={() => setEditing(s)}
-                        title={t.edit}
-                      >
-                        <IconEdit size={13} /> {t.edit}
-                      </button>
-                      <button
-                        className="btn btn-sm soft-success"
+                      />
+                      <IconButton
+                        className="btn-sm soft-success"
+                        icon={<IconDuplicate size={14} />}
+                        label={t.duplicate}
                         onClick={async () => {
                           await window.electronAPI.duplicateSupplier(s.id);
                           await reload();
                         }}
-                        title={t.duplicate}
-                      >
-                        <IconDuplicate size={13} /> {t.duplicate}
-                      </button>
-                      <button
-                        className="btn btn-sm soft-danger"
-                        onClick={() => setConfirmDelete(s)}
-                        title={t.delete}
-                      >
-                        <IconTrash size={13} /> {t.delete}
-                      </button>
+                      />
                     </div>
                   </td>
                 </tr>

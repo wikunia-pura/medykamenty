@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n';
+import { VIEW_ICONS } from '../viewIcons';
 import { HeaderNav, useNavigation } from '../navigation';
 import type {
   EmailBatch,
@@ -15,6 +16,8 @@ import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
+import { SkeletonTable } from '../components/SkeletonRows';
+import { useMinimumLoading } from '../utils/useMinimumLoading';
 import HoverTooltip from '../components/HoverTooltip';
 import PlanEditorModal from '../components/PlanEditorModal';
 import SupplierPickerModal from '../components/SupplierPickerModal';
@@ -30,6 +33,8 @@ import {
   IconSettings,
   IconTrash,
 } from '../components/Icons';
+import Toggle from '../components/Toggle';
+import IconButton from '../components/IconButton';
 import ModalHeader from '../components/ModalHeader';
 
 interface Props {
@@ -90,6 +95,9 @@ const EmailGenerator: React.FC<Props> = ({
   const [focus, setFocus] = useState<FocusState | null>(cache.focus);
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  // First load: skeleton list instead of a blocking overlay.
+  const [initialLoading, setInitialLoading] = useState(true);
+  const showSkeleton = useMinimumLoading(initialLoading);
   const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [listQuery, setListQuery] = useState('');
@@ -180,13 +188,13 @@ const EmailGenerator: React.FC<Props> = ({
 
   useEffect(() => {
     void (async () => {
-      setLoaderMessage(t.loading);
+      setInitialLoading(true);
       try {
         const { reports: r } = await loadAll();
         const firstWithGroups = r.find((x) => x.report.groups.length > 0);
         if (!selectedReportId && firstWithGroups) onSelectReport(firstWithGroups.id);
       } finally {
-        setLoaderMessage(null);
+        setInitialLoading(false);
       }
     })();
   }, []);
@@ -750,7 +758,7 @@ const EmailGenerator: React.FC<Props> = ({
       </div>
       {taskBanner}
 
-      {reports.length === 0 ? (
+      {reports.length === 0 && !showSkeleton ? (
         <div
           className="card highlight-callout"
           style={{ textAlign: 'center', padding: 32 }}
@@ -768,9 +776,7 @@ const EmailGenerator: React.FC<Props> = ({
         </div>
       ) : (
         <div className="compute-hero">
-          <span className="compute-hero-icon" aria-hidden>
-            ✉️
-          </span>
+          <span className="compute-hero-icon compute-hero-icon-mail" aria-hidden>{VIEW_ICONS.emailGenerator}</span>
           <div className="compute-hero-text">
             <span className="compute-hero-title">{t.emailGeneratorHeroTitle}</span>
             <span className="compute-hero-hint">{t.emailGeneratorHeroHint}</span>
@@ -797,8 +803,23 @@ const EmailGenerator: React.FC<Props> = ({
         </div>
       )}
 
-      {batches.length > 0 && (
-        <div className="card">
+      {showSkeleton && (
+        <div className="card card-fill">
+          <div className="card-header">
+            <div>
+              <div className="card-title">{t.olderEmailBatchesTitle}</div>
+              <div className="hint">{t.olderEmailBatchesHint}</div>
+            </div>
+          </div>
+          <SkeletonTable
+            headers={[t.batchName, t.reportName, t.selectedPlan, t.generatedAtLabel, t.suppliers]}
+            actionsHeader={t.actionsHeader}
+          />
+        </div>
+      )}
+
+      {!showSkeleton && batches.length > 0 && (
+        <div className="card card-fill">
           <div className="card-header">
             <div>
               <div className="card-title">{t.olderEmailBatchesTitle}</div>
@@ -832,7 +853,7 @@ const EmailGenerator: React.FC<Props> = ({
                     <th className="actions actions-sticky">{t.actionsHeader}</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="rows-enter">
                   {filteredBatches.map((b) => {
                     const sent = b.emails.filter((e) => !!e.sentAt).length;
                     const total = b.emails.length;
@@ -981,19 +1002,18 @@ const EmailGenerator: React.FC<Props> = ({
                           onClick={(ev) => ev.stopPropagation()}
                         >
                           <div className="btn-row">
+                            <IconButton
+                              className="btn-sm soft-danger"
+                              icon={<IconTrash size={14} />}
+                              label={t.delete}
+                              onClick={() => setConfirmDelete(b)}
+                            />
                             <button
                               className="btn btn-sm"
                               onClick={() => setFocusAndCache({ batch: b })}
                               title={t.preview}
                             >
                               <IconEye size={13} /> {t.preview}
-                            </button>
-                            <button
-                              className="btn btn-sm soft-danger"
-                              onClick={() => setConfirmDelete(b)}
-                              title={t.delete}
-                            >
-                              <IconTrash size={13} /> {t.delete}
                             </button>
                           </div>
                         </td>
@@ -1060,10 +1080,10 @@ const EmailGenerator: React.FC<Props> = ({
                     </span>
                   )}
                 </span>
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={showArchived}
-                  onChange={(ev) => setShowArchived(ev.target.checked)}
+                  onChange={setShowArchived}
+                  ariaLabel={t.showArchived}
                 />
               </label>
             </div>

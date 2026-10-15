@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { useT } from '../i18n';
+import { useLang, useT } from '../i18n';
+import { VIEW_ICONS } from '../viewIcons';
 import { HeaderNav, useNavigation } from '../navigation';
 import type {
+  AppSettings,
   EmailBatch,
   Order,
   ProductionPlan,
@@ -25,6 +27,8 @@ import DependencyShortageModal, {
 } from '../components/DependencyShortageModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
+import { SkeletonTable } from '../components/SkeletonRows';
+import { useMinimumLoading } from '../utils/useMinimumLoading';
 import NoPlansEmptyState from '../components/NoPlansEmptyState';
 import {
   IconArchive,
@@ -32,17 +36,24 @@ import {
   IconCheck,
   IconClose,
   IconEdit,
+  IconLink,
   IconMail,
   IconPlus,
   IconSettings,
   IconTrash,
+  IconUnlink,
 } from '../components/Icons';
+import Toggle from '../components/Toggle';
+import IconButton from '../components/IconButton';
 import SearchableSelect from '../components/SearchableSelect';
 import SupplierPickerModal from '../components/SupplierPickerModal';
 import PlanEditorModal from '../components/PlanEditorModal';
 import ShortageReportTooltip from '../components/ShortageReportTooltip';
 import ModalHeader from '../components/ModalHeader';
+import SegmentedControl from '../components/SegmentedControl';
+import WarehouseMailModal from '../components/WarehouseMailModal';
 import { useEscapeKey } from '../utils/useEscapeKey';
+import { formatPrepareDate } from '../utils/warehouseMail';
 
 interface Props {
   selectedPlanId: string;
@@ -57,9 +68,20 @@ interface Props {
   // Lets the user jump to an order from the "linked order" pill or column.
   onNavigateToOrder?: (orderId: string) => void;
   taskBanner?: React.ReactNode;
+  // Prefills the warehouse pick-list mail; edits there are saved back to settings.
+  warehouseEmail?: string;
+  onSettingsChange?: (s: AppSettings) => void;
 }
 
 type ReportMode = 'preview' | 'edit';
+type RequirementFilter = 'all' | 'short';
+
+// Today as 'YYYY-MM-DD' in local time — the floor for a usable "prepare for" day.
+const todayDateOnly = () => {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
 
 interface FocusState {
   report: ShortageReport;
@@ -88,8 +110,11 @@ const ShortageReportView: React.FC<Props> = ({
   orderTaskContextOrderId,
   onNavigateToOrder,
   taskBanner,
+  warehouseEmail,
+  onSettingsChange,
 }) => {
   const t = useT();
+  const lang = useLang();
   const navCtx = useNavigation();
   // True after the initial data fetch (plans, suppliers, products, orders,
   // history). Used to gate the "linked plan / order deleted" warnings so they
@@ -105,6 +130,9 @@ const ShortageReportView: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  // First load: skeleton list instead of a blocking overlay.
+  const [initialLoading, setInitialLoading] = useState(true);
+  const showSkeleton = useMinimumLoading(initialLoading);
   const [reassigningKey, setReassigningKey] = useState<string | null>(null);
   // Group whose supplier the user is currently changing via the modal.
   // null = modal closed.
@@ -147,6 +175,10 @@ const ShortageReportView: React.FC<Props> = ({
   // change their mind on the generated report and regenerate.
   const [depDraft, setDepDraft] = useState<Record<string, DependencyRowChoice>>({});
   const [depSubDraft, setDepSubDraft] = useState<Record<string, string>>({});
+  // "Pełne zapotrzebowanie" card: every item of the plan, or only the short ones.
+  const [requirementFilter, setRequirementFilter] = useState<RequirementFilter>('all');
+  // Report whose warehouse pick-list mail is open (from the focus bar or a list row).
+  const [warehouseMailEntryId, setWarehouseMailEntryId] = useState<string | null>(null);
 
   // Re-seed the expired-batch draft from whichever report is in focus.
   useEffect(() => {
@@ -212,7 +244,7 @@ const ShortageReportView: React.FC<Props> = ({
 
   useEffect(() => {
     void (async () => {
-      setLoaderMessage(t.loading);
+      setInitialLoading(true);
       try {
         const [ps, ss, pr, os, bs, cs] = await Promise.all([
           window.electronAPI.listPlans(),
@@ -232,7 +264,7 @@ const ShortageReportView: React.FC<Props> = ({
         await loadHistory();
         setDataLoaded(true);
       } finally {
-        setLoaderMessage(null);
+        setInitialLoading(false);
       }
     })();
   }, []);
@@ -680,6 +712,72 @@ const ShortageReportView: React.FC<Props> = ({
     }
   };
 
+  // Marks (or, with null, unmarks) the warehouse pick-list mail as sent.
+  // Errors propagate to the mail modal, which shows them in place.
+  const setWarehouseNotice = async (entryId: string, prepareFor: string | null) => {
+    await window.electronAPI.updateShortageReport(entryId, {
+      warehouseNotice: prepareFor ? { prepareFor, sentAt: new Date().toISOString() } : null,
+    });
+    await loadHistory();
+  };
+
+  // Suppliers whose delivery is not yet marked as received. Empty = everything
+  // is complete ("skompletowane"), including when nothing had to be ordered.
+  const pendingSuppliersOf = (
+    report: ShortageReport,
+    receipts: ShortageReportEntry['supplierReceipts'],
+  ): string[] => {
+    const received = new Set((receipts ?? []).map((r) => r.supplierId));
+    return report.groups
+      .filter(
+        (g) =>
+          g.rawLines.length + g.componentLines.length > 0 &&
+          !received.has(supplierReceiptKey(g)),
+      )
+      .map((g) => g.supplierName);
+  };
+
+  // The warehouse mail modal for `warehouseMailEntryId` — rendered in both the
+  // focused view and the list, so it works from either.
+  const renderWarehouseMail = () => {
+    const entry = warehouseMailEntryId
+      ? history.find((e) => e.id === warehouseMailEntryId)
+      : undefined;
+    if (!entry) return null;
+    const order = entry.orderId ? orders.find((o) => o.id === entry.orderId) : undefined;
+    const planName = plans.find((p) => p.id === entry.planId)?.name ?? entry.planName;
+    const notice = entry.warehouseNotice;
+    // Default "prepare for" day: the one already sent, else the linked order's
+    // start date while it still lies ahead, else left for the user to pick.
+    const orderStart = order?.startDate;
+    const initialDate =
+      notice?.prepareFor ?? (orderStart && orderStart >= todayDateOnly() ? orderStart : '');
+    return (
+      <WarehouseMailModal
+        key={entry.id}
+        runName={order?.name ?? planName}
+        rawLines={entry.report.rawLines ?? []}
+        componentLines={entry.report.componentLines ?? []}
+        pendingSuppliers={pendingSuppliersOf(entry.report, entry.supplierReceipts)}
+        initialDate={initialDate}
+        initialTo={warehouseEmail ?? ''}
+        sentAt={notice?.sentAt}
+        onSaveTo={(email) => void saveWarehouseEmail(email)}
+        onToggleSent={(prepareFor) => setWarehouseNotice(entry.id, prepareFor)}
+        onClose={() => setWarehouseMailEntryId(null)}
+      />
+    );
+  };
+
+  const saveWarehouseEmail = async (email: string) => {
+    try {
+      const next = await window.electronAPI.updateSettings({ warehouseEmail: email });
+      onSettingsChange?.(next);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   // ----- Focused view (compute / edit / preview a single report) -----
   if (focus) {
     const { report, mode, reportName } = focus;
@@ -694,6 +792,14 @@ const ShortageReportView: React.FC<Props> = ({
     const focusOrderId = focusedEntry?.orderId;
     const linkedOrder = focusOrderId ? orders.find((o) => o.id === focusOrderId) : null;
     const orderMissing = dataLoaded && !!focusOrderId && !linkedOrder;
+
+    // Every item the plan consumes — the lines carry shortage-free items too;
+    // only the supplier groups are filtered to what is short.
+    const allLines = [...(report.rawLines ?? []), ...(report.componentLines ?? [])];
+    const shortLines = allLines.filter((l) => l.shortage > 0);
+    const visibleRequirementLines = requirementFilter === 'short' ? shortLines : allLines;
+    const pendingSuppliers = pendingSuppliersOf(report, focusedEntry?.supplierReceipts);
+    const warehouseNotice = focusedEntry?.warehouseNotice;
 
     // Packaging decisions carried on the report (see the panel below).
     const depRefs = report.dependencyShortages ?? [];
@@ -787,7 +893,9 @@ const ShortageReportView: React.FC<Props> = ({
                 )}
               </span>
             )}
-            {focus.entryId && (
+            {/* Only when the report is linked to an order — an empty "—" here
+                read as missing data. Linking lives in the chain-icon button. */}
+            {focus.entryId && focusOrderId && (
               <span className="focus-bar-meta">
                 <span className="hint">{t.orders}:</span>{' '}
                 {linkedOrder ? (
@@ -803,26 +911,46 @@ const ShortageReportView: React.FC<Props> = ({
                   <span className="tag danger" title={t.orderDeleted}>
                     {t.orderDeletedTag}
                   </span>
+                ) : null}
+              </span>
+            )}
+            {focus.entryId && allLines.length > 0 && (
+              <span className="focus-bar-meta">
+                <span className="hint">{t.warehouseStatus}:</span>{' '}
+                {warehouseNotice ? (
+                  <span className="tag success">
+                    <IconCheck size={11} />{' '}
+                    {t.warehouseSentTag.replace(
+                      '{date}',
+                      formatPrepareDate(warehouseNotice.prepareFor, lang),
+                    )}
+                  </span>
+                ) : pendingSuppliers.length === 0 ? (
+                  <span className="tag success">{t.warehouseComplete}</span>
                 ) : (
-                  <span className="hint">—</span>
+                  <span className="tag warn">
+                    {t.warehouseAwaiting.replace('{n}', String(pendingSuppliers.length))}
+                  </span>
                 )}
               </span>
             )}
           </div>
           <div className="btn-row">
+            {/* Secondary actions are icon-only so the title and meta keep the room. */}
             {focus.entryId && (
               <>
                 {focusOrderId ? (
-                  <button
-                    className="btn soft-danger"
+                  <IconButton
+                    className="soft-danger"
+                    icon={<IconUnlink size={15} />}
+                    label={t.unlinkOrder}
                     onClick={() => void setReportOrder(focus.entryId!, null)}
-                    title={t.unlinkOrder}
-                  >
-                    <IconClose size={13} /> {t.unlinkOrder}
-                  </button>
+                  />
                 ) : (
-                  <button
-                    className="btn soft-edit"
+                  <IconButton
+                    className="soft-edit"
+                    icon={<IconLink size={15} />}
+                    label={t.linkOrder}
                     onClick={() => {
                       if (orderTaskContextOrderId) {
                         void setReportOrder(focus.entryId!, orderTaskContextOrderId);
@@ -831,56 +959,62 @@ const ShortageReportView: React.FC<Props> = ({
                       }
                     }}
                     disabled={orders.length === 0}
-                    title={t.linkOrder}
-                  >
-                    <IconPlus size={13} /> {t.linkOrder}
-                  </button>
+                  />
                 )}
               </>
             )}
             {mode === 'preview' ? (
-              <button
-                className="btn primary"
-                onClick={() =>
-                  setFocusAndCache({ ...focus, mode: 'edit' })
-                }
-                title={t.editMode}
-              >
-                <IconEdit size={13} /> {t.edit}
-              </button>
+              <IconButton
+                className="soft-edit"
+                icon={<IconEdit size={15} />}
+                label={t.editMode}
+                onClick={() => setFocusAndCache({ ...focus, mode: 'edit' })}
+              />
             ) : (
               <>
                 {focus.entryId && focusedEntry && (
-                  <button
-                    className="btn soft-neutral"
+                  <IconButton
+                    className="soft-neutral"
+                    icon={<IconArchive size={15} />}
+                    label={focusedEntry.archived ? t.unarchiveReport : t.archiveReport}
                     onClick={() =>
                       void setReportArchived(focus.entryId!, !focusedEntry.archived)
                     }
-                    title={focusedEntry.archived ? t.unarchiveReport : t.archiveReport}
                     disabled={busy}
-                  >
-                    <IconArchive size={13} />{' '}
-                    {focusedEntry.archived ? t.unarchiveReport : t.archiveReport}
-                  </button>
+                  />
                 )}
-                <button
-                  className="btn primary"
-                  onClick={() =>
-                    setFocusAndCache({ ...focus, mode: 'preview' })
-                  }
-                  title={t.finishEditing}
-                >
-                  <IconCheck size={13} /> {t.finishEditing}
-                </button>
+                <IconButton
+                  className="soft-edit"
+                  icon={<IconCheck size={15} />}
+                  label={t.finishEditing}
+                  onClick={() => setFocusAndCache({ ...focus, mode: 'preview' })}
+                />
               </>
             )}
+            {/* Once marked as sent it turns into a muted "done" state; it still
+                opens the mail so it can be re-read or unmarked. */}
             <button
-              className="btn primary-filled"
+              className={`btn ${warehouseNotice ? 'soft-neutral' : 'primary-filled'}`}
+              onClick={() => setWarehouseMailEntryId(focus.entryId)}
+              disabled={!focus.entryId || allLines.length === 0}
+            >
+              {/* Both labels share one cell, the inactive one hidden, so the button
+                  keeps the width of the longer label whichever state it's in. */}
+              <span className="swap-label">
+                <span className={warehouseNotice ? undefined : 'is-hidden'}>
+                  <IconCheck size={13} /> {t.warehouseMailSent}
+                </span>
+                <span className={warehouseNotice ? 'is-hidden' : undefined}>
+                  <IconMail size={13} /> {t.warehouseMail}
+                </span>
+              </span>
+            </button>
+            <button
+              className="btn soft-success"
               onClick={() => focus.entryId && onNavigateToEmails(focus.entryId)}
               disabled={!focus.entryId || focus.report.groups.length === 0}
-              title={t.goToEmailGenerator}
             >
-              <IconMail size={13} /> {t.generateEmails}
+              <IconMail size={13} /> {t.supplierMail}
             </button>
           </div>
         </div>
@@ -1038,6 +1172,15 @@ const ShortageReportView: React.FC<Props> = ({
           </div>
         )}
 
+        {report.groups.length > 0 && (
+          <div className="report-section-header">
+            <h2>
+              {t.shortagesBySupplierTitle}{' '}
+              <span className="hint">({report.groups.length})</span>
+            </h2>
+          </div>
+        )}
+
         {report.groups.map((g) => {
           const lines = [...g.rawLines, ...g.componentLines];
           if (lines.length === 0) return null;
@@ -1135,7 +1278,7 @@ const ShortageReportView: React.FC<Props> = ({
                 <thead>
                   <tr>
                     <th>{t.name}</th>
-                    <th>Typ</th>
+                    <th>{t.itemKind}</th>
                     <th>{t.supplier}</th>
                     <th className="num">{t.required}</th>
                     <th className="num">{t.available}</th>
@@ -1153,7 +1296,7 @@ const ShortageReportView: React.FC<Props> = ({
                         <td className="col-wrap">{line.itemName}</td>
                         <td>
                           <span className="tag">
-                            {line.itemKind === 'raw' ? 'surowiec' : 'komponent'}
+                            {line.itemKind === 'raw' ? t.itemKindRaw : t.itemKindComponent}
                           </span>
                         </td>
                         <td>
@@ -1191,11 +1334,86 @@ const ShortageReportView: React.FC<Props> = ({
           );
         })}
 
+        {allLines.length > 0 && (
+          <>
+            <div className="report-section-header is-separated">
+              <div>
+                <h2>
+                  {t.fullRequirementTitle} <span className="hint">({allLines.length})</span>
+                </h2>
+                <div className="hint">{t.fullRequirementHint}</div>
+              </div>
+              <SegmentedControl
+                size="sm"
+                value={requirementFilter}
+                onChange={setRequirementFilter}
+                ariaLabel={t.fullRequirementTitle}
+                options={[
+                  {
+                    value: 'all',
+                    label: `${t.fullRequirementFilterAll} (${allLines.length})`,
+                  },
+                  {
+                    value: 'short',
+                    label: `${t.fullRequirementFilterShort} (${shortLines.length})`,
+                    tone: 'danger',
+                  },
+                ]}
+              />
+            </div>
+            <div className="card">
+              {visibleRequirementLines.length === 0 ? (
+                <div className="hint">{t.fullRequirementNothingShort}</div>
+              ) : (
+                <table className="table shortage-table">
+                  <colgroup>
+                    <col style={{ width: '34%' }} />
+                    <col style={{ width: 110 }} />
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 80 }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>{t.name}</th>
+                      <th>{t.itemKind}</th>
+                      <th className="num">{t.available}</th>
+                      <th className="num">{t.required}</th>
+                      <th className="num">{t.fullRequirementLeftOver}</th>
+                      <th>{t.unit}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleRequirementLines.map((line) => (
+                      <tr key={`${line.itemKind}-${line.itemId}`}>
+                        <td className="col-wrap">{line.itemName}</td>
+                        <td>
+                          <span className="tag">
+                            {line.itemKind === 'raw' ? t.itemKindRaw : t.itemKindComponent}
+                          </span>
+                        </td>
+                        <td className="num">{fmt(line.available, line.unit)}</td>
+                        <td className="num">{fmt(line.required, line.unit)}</td>
+                        <td className={`num${line.shortage > 0 ? ' error-text' : ''}`}>
+                          {line.shortage > 0
+                            ? `−${fmt(line.shortage, line.unit)}`
+                            : fmt(line.available - line.required, line.unit)}
+                        </td>
+                        <td>{line.unit}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        )}
+
         {focus.entryId && focus.report.groups.length > 0 && (
           <button
             className="floating-next"
             onClick={() => onNavigateToEmails(focus.entryId!)}
-            title={t.goToEmailGenerator}
           >
             <span className="floating-next-step">3</span>
             <span className="floating-next-text">
@@ -1227,6 +1445,8 @@ const ShortageReportView: React.FC<Props> = ({
             onPick={(id) => reassignGroup(groupPickerTarget, id)}
           />
         )}
+
+        {renderWarehouseMail()}
       </div>
     );
   }
@@ -1253,13 +1473,11 @@ const ShortageReportView: React.FC<Props> = ({
       </div>
       {taskBanner}
 
-      {!hasPlans ? (
+      {!hasPlans && !showSkeleton ? (
         <NoPlansEmptyState onAddPlan={() => onNavigate('productionPlan')} />
       ) : (
         <div className="compute-hero">
-          <span className="compute-hero-icon" aria-hidden>
-            ⚡
-          </span>
+          <span className="compute-hero-icon" aria-hidden>{VIEW_ICONS.shortageReport}</span>
           <div className="compute-hero-text">
             <span className="compute-hero-title">{t.computeShortages}</span>
             <span className="compute-hero-hint">{t.dashboardMissingItems}</span>
@@ -1288,10 +1506,25 @@ const ShortageReportView: React.FC<Props> = ({
         </div>
       )}
 
-      {history.length > 0 && (() => {
+      {showSkeleton && (
+        <div className="card card-fill">
+          <div className="card-header">
+            <div>
+              <div className="card-title">{t.olderReportsTitle}</div>
+              <div className="hint">{t.olderReportsHint}</div>
+            </div>
+          </div>
+          <SkeletonTable
+            headers={[t.reportName, t.selectedPlan, t.orders, t.computedAtLabel, t.shortageReport]}
+            actionsHeader={t.actionsHeader}
+          />
+        </div>
+      )}
+
+      {!showSkeleton && history.length > 0 && (() => {
         const visibleHistory = history.filter((e) => showArchived || !e.archived);
         return (
-        <div className="card">
+        <div className="card card-fill">
           <div className="card-header">
             <div>
               <div className="card-title">{t.olderReportsTitle}</div>
@@ -1319,7 +1552,7 @@ const ShortageReportView: React.FC<Props> = ({
                   <th className="actions actions-sticky">{t.actionsHeader}</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="rows-enter">
                 {visibleHistory.map((e) => {
                   const linkedPlan = plans.find((p) => p.id === e.planId);
                   const livePlanName = linkedPlan?.name ?? e.planName;
@@ -1341,11 +1574,10 @@ const ShortageReportView: React.FC<Props> = ({
                     key={e.id}
                     className={`row-clickable${e.archived ? ' row-archived' : ''}`}
                     onClick={() => openEntry(e, 'preview')}
-                    title={t.preview}
                   >
                     <td className="col-name col-wrap">
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <span>{e.reportName}</span>
+                        <span className="col-name-text">{e.reportName}</span>
                         {e.archived && (
                           <span className="tag" title={t.archivedTag}>
                             {t.archivedTag}
@@ -1412,17 +1644,24 @@ const ShortageReportView: React.FC<Props> = ({
                       onClick={(ev) => ev.stopPropagation()}
                     >
                       <div className="btn-row">
+                        <IconButton
+                          className="btn-sm soft-danger"
+                          icon={<IconTrash size={14} />}
+                          label={t.delete}
+                          onClick={() => setConfirmDelete(e)}
+                        />
                         {e.orderId ? (
-                          <button
-                            className="btn btn-sm soft-danger"
+                          <IconButton
+                            className="btn-sm soft-danger"
+                            icon={<IconUnlink size={14} />}
+                            label={t.unlinkOrder}
                             onClick={() => void setReportOrder(e.id, null)}
-                            title={t.unlinkOrder}
-                          >
-                            <IconClose size={13} /> {t.unlinkOrder}
-                          </button>
+                          />
                         ) : (
-                          <button
-                            className="btn btn-sm soft-success"
+                          <IconButton
+                            className="btn-sm soft-edit"
+                            icon={<IconLink size={14} />}
+                            label={t.linkOrder}
                             onClick={() => {
                               if (orderTaskContextOrderId) {
                                 void setReportOrder(e.id, orderTaskContextOrderId);
@@ -1431,32 +1670,40 @@ const ShortageReportView: React.FC<Props> = ({
                               }
                             }}
                             disabled={orders.length === 0}
-                            title={t.linkOrder}
-                          >
-                            <IconPlus size={13} /> {t.linkOrder}
-                          </button>
+                          />
                         )}
-                        <button
-                          className="btn btn-sm soft-edit"
+                        <IconButton
+                          className="btn-sm soft-edit"
+                          icon={<IconEdit size={14} />}
+                          label={t.edit}
                           onClick={() => openEntry(e, 'edit')}
-                          title={t.edit}
-                        >
-                          <IconEdit size={13} /> {t.edit}
-                        </button>
+                        />
                         <button
-                          className="btn btn-sm soft-danger"
-                          onClick={() => setConfirmDelete(e)}
-                          title={t.delete}
+                          className={`btn btn-sm ${e.warehouseNotice ? 'soft-neutral' : 'primary-filled'}`}
+                          onClick={() => setWarehouseMailEntryId(e.id)}
+                          disabled={
+                            (e.report.rawLines ?? []).length +
+                              (e.report.componentLines ?? []).length ===
+                            0
+                          }
                         >
-                          <IconTrash size={13} /> {t.delete}
+                          {/* Both labels share one cell, the inactive one hidden, so the button
+                              keeps the width of the longer label whichever state it's in. */}
+                          <span className="swap-label">
+                            <span className={e.warehouseNotice ? undefined : 'is-hidden'}>
+                              <IconCheck size={13} /> {t.warehouseMailSent}
+                            </span>
+                            <span className={e.warehouseNotice ? 'is-hidden' : undefined}>
+                              <IconMail size={13} /> {t.warehouseMail}
+                            </span>
+                          </span>
                         </button>
                         <button
                           className="btn btn-sm soft-success"
                           onClick={() => onNavigateToEmails(e.id)}
                           disabled={e.report.groups.length === 0}
-                          title={t.generateEmails}
                         >
-                          <IconMail size={13} /> {t.generateEmails}
+                          <IconMail size={13} /> {t.supplierMail}
                         </button>
                       </div>
                     </td>
@@ -1524,10 +1771,10 @@ const ShortageReportView: React.FC<Props> = ({
                         </span>
                       )}
                     </span>
-                    <input
-                      type="checkbox"
+                    <Toggle
                       checked={showArchived}
-                      onChange={(ev) => setShowArchived(ev.target.checked)}
+                      onChange={setShowArchived}
+                      ariaLabel={t.showArchived}
                     />
                   </label>
                 );
@@ -1552,7 +1799,6 @@ const ShortageReportView: React.FC<Props> = ({
           <button
             className="floating-next"
             onClick={() => onNavigateToEmails(nextEntry.id)}
-            title={t.goToEmailGenerator}
           >
             <span className="floating-next-step">3</span>
             <span className="floating-next-text">
@@ -1571,6 +1817,8 @@ const ShortageReportView: React.FC<Props> = ({
           onPick={(orderId) => void setReportOrder(pickerEntryId, orderId)}
         />
       )}
+
+      {renderWarehouseMail()}
 
       {pendingExpired && (
         <ExpiredStockModal
@@ -1625,8 +1873,8 @@ const ReportOrderPicker: React.FC<{
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
         <ModalHeader
-          icon={<IconPlus size={18} />}
-          tone="add"
+          icon={<IconLink size={18} />}
+          tone="edit"
           title={t.linkOrder}
           onClose={onCancel}
         />

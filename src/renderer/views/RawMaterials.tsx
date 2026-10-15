@@ -15,6 +15,8 @@ import { totalStockQty, hasExpiredBatch, batchExpiryStatus, isExpired } from '..
 import ConfirmDialog from '../components/ConfirmDialog';
 import BlockedByDialog from '../components/BlockedByDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
+import SkeletonRows from '../components/SkeletonRows';
+import { useMinimumLoading } from '../utils/useMinimumLoading';
 import SupplierMultiPicker from '../components/SupplierMultiPicker';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import SearchableSelect from '../components/SearchableSelect';
@@ -26,6 +28,7 @@ import OverageCell from '../components/OverageCell';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
 import { useColumnResize } from '../utils/useColumnResize';
+import { sortRows, type SortValue } from '../utils/sortRows';
 import {
   IconEdit,
   IconTrash,
@@ -37,6 +40,8 @@ import {
   IconSettings,
   IconDuplicate,
 } from '../components/Icons';
+import Toggle from '../components/Toggle';
+import IconButton from '../components/IconButton';
 import HoverTooltip from '../components/HoverTooltip';
 import ModalHeader from '../components/ModalHeader';
 import ExportImportButtons from '../components/ExportImportButtons';
@@ -75,6 +80,8 @@ const RawMaterials: React.FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<RawMaterial | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const showSkeleton = useMinimumLoading(initialLoading);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -128,10 +135,12 @@ const RawMaterials: React.FC = () => {
     widths,
     setWidth,
     resetWidth,
+    sort,
+    toggleSort,
     orderedColumns,
     orderedVisibleIds,
   } = useColumnPrefs('rawMaterials', COLUMNS);
-  const { decorateHeader } = useColumnResize(setWidth);
+  const { decorateHeader } = useColumnResize(setWidth, { sort, toggleSort });
 
   const headerFor = (id: string): React.ReactNode => {
     switch (id) {
@@ -381,11 +390,13 @@ const RawMaterials: React.FC = () => {
 
   useEffect(() => {
     void (async () => {
-      setLoaderMessage(t.loading);
+      // First load shows skeleton rows in the table (see SkeletonRows), not a
+      // blocking overlay.
+      setInitialLoading(true);
       try {
         await reload();
       } finally {
-        setLoaderMessage(null);
+        setInitialLoading(false);
       }
     })();
   }, []);
@@ -414,6 +425,52 @@ const RawMaterials: React.FC = () => {
       return true;
     });
   }, [items, suppliers, query, expiryFilter, expiringDays]);
+
+  // Header-click sort key per column: what the cell shows, numeric where the
+  // column is. Stock is compared in g/ml so 2 kg ranks above 500 g.
+  const sortValueFor = (id: string, rm: RawMaterial): SortValue => {
+    switch (id) {
+      case 'name':
+        return rm.name;
+      case 'symbol':
+        return rm.mpFirmaSymbol;
+      case 'unit':
+        return rm.unit;
+      case 'stock':
+        return totalStockQty(rm) * (rm.unit === 'kg' || rm.unit === 'l' ? 1000 : 1);
+      case 'suppliers': {
+        // The first chip shown: the preferred supplier, else the first one.
+        const ids = rm.supplierIds ?? [];
+        const first =
+          rm.preferredSupplierId && ids.includes(rm.preferredSupplierId)
+            ? rm.preferredSupplierId
+            : ids[0];
+        return first ? suppliers.find((s) => s.id === first)?.name : undefined;
+      }
+      case 'moq':
+        return rm.moq;
+      case 'leadTime':
+        return rm.leadTimeDays;
+      case 'shelfLife':
+        return rm.shelfLifeMonths;
+      case 'price':
+        return rm.lastPurchasePriceNet;
+      case 'overage':
+        return rm.overagePct ?? defaultOveragePct;
+      case 'currency':
+        return rm.currency;
+      case 'factory':
+        return !!rm.factorySupplied;
+      case 'notes':
+        return rm.notes;
+      default:
+        return undefined;
+    }
+  };
+  const sorted = useMemo(
+    () => sortRows(filtered, sort, sortValueFor),
+    [filtered, sort, suppliers, defaultOveragePct],
+  );
 
   // Counts for the filter chips (independent of the active expiry filter).
   const expiredCount = useMemo(() => items.filter((rm) => hasExpiredBatch(rm)).length, [items]);
@@ -501,7 +558,12 @@ const RawMaterials: React.FC = () => {
         (b) => (b.qty ?? 0) !== 0 || b.expiryDate || b.retestExpiryDate,
       );
       payload.stockBatches = batches;
-      payload.stockQty = batches.reduce((s, b) => s + (b.qty ?? 0), 0);
+      // With batches the stock is their sum; without, it's the flat value
+      // typed in the "Stan" field.
+      payload.stockQty =
+        batches.length > 0
+          ? batches.reduce((s, b) => s + (b.qty ?? 0), 0)
+          : editing.stockQty ?? 0;
       payload.stockSource = 'manual';
       payload.stockUpdatedAt = new Date().toISOString();
     }
@@ -796,7 +858,7 @@ const RawMaterials: React.FC = () => {
         </button>
       </div>
 
-      <div className="card">
+      <div className="card card-fill">
         <div className="toolbar">
           <div className="toolbar-actions">
             <ExportImportButtons format="csv" onExport={onExport} onImport={onImport} busy={busy} />
@@ -893,46 +955,52 @@ const RawMaterials: React.FC = () => {
             <thead>
               <tr>
                 {orderedVisibleIds.map((id) => decorateHeader(headerFor(id), id, widths[id]))}
+                <th className="col-filler" aria-hidden />
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={orderedVisibleIds.length + 1} className="hint">
-                    {query ? '—' : t.noData}
-                  </td>
-                </tr>
+            <tbody
+              key={showSkeleton ? 'loading' : 'ready'}
+              className={showSkeleton ? undefined : 'rows-enter'}
+            >
+              {showSkeleton ? (
+                <SkeletonRows cells={orderedVisibleIds.length} filler actions />
+              ) : (
+                sorted.length === 0 && (
+                  <tr>
+                    <td colSpan={orderedVisibleIds.length + 2} className="hint">
+                      {query ? '—' : t.noData}
+                    </td>
+                  </tr>
+                )
               )}
-              {filtered.map((rm) => (
+              {!showSkeleton && sorted.map((rm) => (
                 <tr key={rm.id}>
                   {orderedVisibleIds.map((id) => cellFor(id, rm))}
+                  <td className="col-filler" />
                   <td className="actions actions-sticky">
                     <div className="btn-row">
-                      <button
-                        className="btn btn-sm soft-edit"
+                      <IconButton
+                        className="btn-sm soft-danger"
+                        icon={<IconTrash size={14} />}
+                        label={t.delete}
+                        onClick={() => setConfirmDelete(rm)}
+                      />
+                      <IconButton
+                        className="btn-sm soft-edit"
+                        icon={<IconEdit size={14} />}
+                        label={t.edit}
                         onClick={() => startEdit(rm)}
-                        title={t.edit}
-                      >
-                        <IconEdit size={13} /> {t.edit}
-                      </button>
-                      <button
-                        className="btn btn-sm soft-success"
+                      />
+                      <IconButton
+                        className="btn-sm soft-success"
+                        icon={<IconDuplicate size={14} />}
+                        label={t.duplicate}
                         onClick={async () => {
                           await window.electronAPI.duplicateRawMaterial(rm.id);
                           await reload();
                         }}
-                        title={t.duplicate}
-                      >
-                        <IconDuplicate size={13} /> {t.duplicate}
-                      </button>
-                      <button
-                        className="btn btn-sm soft-danger"
-                        onClick={() => setConfirmDelete(rm)}
-                        title={t.delete}
-                      >
-                        <IconTrash size={13} /> {t.delete}
-                      </button>
+                      />
                     </div>
                   </td>
                 </tr>
@@ -982,11 +1050,13 @@ const RawMaterials: React.FC = () => {
               </div>
               <div className="form-row">
                 <label>{t.factorySupplied}</label>
-                <input
-                  type="checkbox"
-                  checked={!!editing.factorySupplied}
-                  onChange={(e) => setEditing({ ...editing, factorySupplied: e.target.checked })}
-                />
+                <div>
+                  <Toggle
+                    checked={!!editing.factorySupplied}
+                    onChange={(v) => setEditing({ ...editing, factorySupplied: v })}
+                    ariaLabel={t.factorySupplied}
+                  />
+                </div>
               </div>
               <div className="form-row">
                 <label>{t.suppliers}</label>
@@ -1070,6 +1140,25 @@ const RawMaterials: React.FC = () => {
                   onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
                 />
               </div>
+              {/* Stock is editable inline on the list, so it is here too: a
+                  flat value while there are no batches (with batches the
+                  stock is their sum, edited per batch below). */}
+              {(editing.stockBatches ?? []).length === 0 && (
+                <div className="form-row">
+                  <label>
+                    {t.stock} ({editing.unit ?? 'kg'})
+                  </label>
+                  <NumberInput
+                    className="input"
+                    step="0.001"
+                    value={editing.stockQty}
+                    onChange={(v) => {
+                      setEditing({ ...editing, stockQty: v });
+                      setStockDirty(true);
+                    }}
+                  />
+                </div>
+              )}
               <div className="form-row" style={{ alignItems: 'flex-start' }}>
                 <label>{t.stockBatches}</label>
                 <div style={{ flex: 1 }}>

@@ -299,7 +299,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteShortageReport: (id: string) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_DELETE, id),
   updateShortageReport: (
     id: string,
-    patch: { reportName?: string; orderId?: string | null; archived?: boolean },
+    patch: {
+      reportName?: string;
+      orderId?: string | null;
+      archived?: boolean;
+      warehouseNotice?: { prepareFor: string; sentAt: string } | null;
+    },
   ) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_UPDATE, id, patch),
   setReportSupplierReceived: (
     reportId: string,

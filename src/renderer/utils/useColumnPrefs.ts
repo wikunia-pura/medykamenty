@@ -9,12 +9,19 @@ export interface ColumnDef {
   required?: boolean;
 }
 
+// Header-click sort of a table; null = the view's natural order.
+export interface ColumnSort {
+  id: string;
+  dir: 'asc' | 'desc';
+}
+
 interface StoredPrefs {
   visible: string[];
   order: string[];
   // Per-column pixel widths the user set by dragging the column border. Columns
   // absent here fall back to their CSS default width (col-w-* class).
   widths: Record<string, number>;
+  sort: ColumnSort | null;
 }
 
 // Smallest a column may be dragged to, in px.
@@ -30,7 +37,7 @@ const loadPrefs = (key: string): StoredPrefs | null => {
     // Legacy format: bare string[] of visible ids — keep default order.
     if (Array.isArray(parsed)) {
       const visible = parsed.filter((x): x is string => typeof x === 'string');
-      return { visible, order: [], widths: {} };
+      return { visible, order: [], widths: {}, sort: null };
     }
     if (parsed && typeof parsed === 'object') {
       const visible = Array.isArray(parsed.visible)
@@ -45,7 +52,14 @@ const loadPrefs = (key: string): StoredPrefs | null => {
           if (typeof v === 'number' && Number.isFinite(v) && v > 0) widths[k] = v;
         }
       }
-      return { visible, order, widths };
+      const rawSort = parsed.sort as Partial<ColumnSort> | null | undefined;
+      const sort: ColumnSort | null =
+        rawSort &&
+        typeof rawSort.id === 'string' &&
+        (rawSort.dir === 'asc' || rawSort.dir === 'desc')
+          ? { id: rawSort.id, dir: rawSort.dir }
+          : null;
+      return { visible, order, widths, sort };
     }
     return null;
   } catch {
@@ -95,6 +109,10 @@ export function useColumnPrefs(viewKey: string, columns: ColumnDef[]) {
   const [widths, setWidths] = useState<Record<string, number>>(
     () => loadPrefs(viewKey)?.widths ?? {},
   );
+  const [sort, setSort] = useState<ColumnSort | null>(() => {
+    const saved = loadPrefs(viewKey)?.sort ?? null;
+    return saved && columns.some((c) => c.id === saved.id) ? saved : null;
+  });
 
   // If new columns are introduced after the user already has saved prefs,
   // append them so they're not invisible to the picker.
@@ -112,8 +130,8 @@ export function useColumnPrefs(viewKey: string, columns: ColumnDef[]) {
   }, [columns]);
 
   useEffect(() => {
-    savePrefs(viewKey, { visible: [...visible], order, widths });
-  }, [viewKey, visible, order, widths]);
+    savePrefs(viewKey, { visible: [...visible], order, widths, sort });
+  }, [viewKey, visible, order, widths, sort]);
 
   const toggle = useCallback(
     (id: string) => {
@@ -124,9 +142,21 @@ export function useColumnPrefs(viewKey: string, columns: ColumnDef[]) {
         for (const c of columns) if (c.required) next.add(c.id);
         return next;
       });
+      // Hiding the sorted column drops the sort — an invisible sort key would
+      // leave the user no header to click to undo it.
+      setSort((prev) => (prev?.id === id ? null : prev));
     },
     [columns],
   );
+
+  // Header click: ascending → descending → back to the natural order.
+  const toggleSort = useCallback((id: string) => {
+    setSort((prev) => {
+      if (prev?.id !== id) return { id, dir: 'asc' };
+      if (prev.dir === 'asc') return { id, dir: 'desc' };
+      return null;
+    });
+  }, []);
 
   const reorder = useCallback((fromIndex: number, toIndex: number) => {
     setOrder((prev) => {
@@ -171,6 +201,7 @@ export function useColumnPrefs(viewKey: string, columns: ColumnDef[]) {
     setVisible(initialVisible(columns, null));
     setOrder(columns.map((c) => c.id));
     setWidths({});
+    setSort(null);
   }, [columns]);
 
   const isVisible = useCallback((id: string) => visible.has(id), [visible]);
@@ -197,6 +228,8 @@ export function useColumnPrefs(viewKey: string, columns: ColumnDef[]) {
     setWidth,
     resetWidth,
     resetWidths,
+    sort,
+    toggleSort,
     orderedColumns,
     orderedVisibleIds,
   };

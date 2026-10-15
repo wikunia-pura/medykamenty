@@ -9,15 +9,19 @@ import type {
 } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
+import SkeletonRows from '../components/SkeletonRows';
+import { useMinimumLoading } from '../utils/useMinimumLoading';
 import NoProductsEmptyState from '../components/NoProductsEmptyState';
 import NoPlansEmptyState from '../components/NoPlansEmptyState';
 import type { ViewKey } from './types';
 import SearchInput, { matchesQuery } from '../components/SearchInput';
 import { IconEdit, IconTrash, IconPlus, IconDuplicate } from '../components/Icons';
+import IconButton from '../components/IconButton';
 import ExportImportButtons from '../components/ExportImportButtons';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
 import { useColumnResize } from '../utils/useColumnResize';
+import { sortRows, type SortValue } from '../utils/sortRows';
 import PlanEditorModal from '../components/PlanEditorModal';
 import HoverTooltip from '../components/HoverTooltip';
 import PlanReportsPopover from '../components/PlanReportsPopover';
@@ -60,6 +64,8 @@ const ProductionPlanView: React.FC<Props> = ({
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const showSkeleton = useMinimumLoading(initialLoading);
 
   const COLUMNS: ColumnDef[] = useMemo(
     () => [
@@ -80,10 +86,12 @@ const ProductionPlanView: React.FC<Props> = ({
     widths,
     setWidth,
     resetWidth,
+    sort,
+    toggleSort,
     orderedColumns,
     orderedVisibleIds,
   } = useColumnPrefs('plans', COLUMNS);
-  const { decorateHeader } = useColumnResize(setWidth);
+  const { decorateHeader } = useColumnResize(setWidth, { sort, toggleSort });
 
   const filteredPlans = useMemo(() => {
     if (!query.trim()) return plans;
@@ -136,11 +144,13 @@ const ProductionPlanView: React.FC<Props> = ({
 
   useEffect(() => {
     void (async () => {
-      setLoaderMessage(t.loading);
+      // First load shows skeleton rows in the table (see SkeletonRows), not a
+      // blocking overlay.
+      setInitialLoading(true);
       try {
         await reload();
       } finally {
-        setLoaderMessage(null);
+        setInitialLoading(false);
       }
     })();
   }, []);
@@ -255,7 +265,33 @@ const ProductionPlanView: React.FC<Props> = ({
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? '?';
 
-  if (products.length === 0) {
+  // Header-click sort key per column: what the cell shows — count columns by
+  // their count, dates by their ISO timestamp.
+  const sortValueFor = (id: string, p: ProductionPlan): SortValue => {
+    switch (id) {
+      case 'name':
+        return p.name;
+      case 'status':
+        return statusInfo(p.status).label;
+      case 'items':
+        return (p.items ?? []).length;
+      case 'bulk':
+        return (p.bulkMass ?? []).length;
+      case 'created':
+        return p.createdAt;
+      case 'updated':
+        return p.updatedAt;
+      default:
+        return undefined;
+    }
+  };
+  const sortedPlans = useMemo(
+    () => sortRows(filteredPlans, sort, sortValueFor),
+    [filteredPlans, sort, t],
+  );
+
+  // While loading, the lists are empty for a moment — not an empty state.
+  if (!showSkeleton && products.length === 0) {
     return (
       <div className="main">
         <div className="page-header">
@@ -268,7 +304,7 @@ const ProductionPlanView: React.FC<Props> = ({
     );
   }
 
-  if (plans.length === 0) {
+  if (!showSkeleton && plans.length === 0) {
     return (
       <div className="main">
         <div className="page-header">
@@ -298,7 +334,7 @@ const ProductionPlanView: React.FC<Props> = ({
         <span className="page-header-count">{plans.length}</span>
       </div>
 
-      <div className="card">
+      <div className="card card-fill">
         <div className="toolbar">
           <div className="toolbar-actions">
             <ExportImportButtons
@@ -351,18 +387,26 @@ const ProductionPlanView: React.FC<Props> = ({
                   })();
                   return decorateHeader(th, id, widths[id]);
                 })}
+                <th className="col-filler" aria-hidden />
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
-            <tbody>
-              {filteredPlans.length === 0 && (
-                <tr>
-                  <td colSpan={orderedVisibleIds.length + 1} className="hint">
-                    {query ? '—' : t.noData}
-                  </td>
-                </tr>
+            <tbody
+              key={showSkeleton ? 'loading' : 'ready'}
+              className={showSkeleton ? undefined : 'rows-enter'}
+            >
+              {showSkeleton ? (
+                <SkeletonRows cells={orderedVisibleIds.length} filler actions />
+              ) : (
+                sortedPlans.length === 0 && (
+                  <tr>
+                    <td colSpan={orderedVisibleIds.length + 2} className="hint">
+                      {query ? '—' : t.noData}
+                    </td>
+                  </tr>
+                )
               )}
-              {filteredPlans.map((p) => {
+              {!showSkeleton && sortedPlans.map((p) => {
                 const info = statusInfo(p.status);
                 const cellFor = (id: string): React.ReactNode => {
                   switch (id) {
@@ -482,29 +526,27 @@ const ProductionPlanView: React.FC<Props> = ({
                 return (
                   <tr key={p.id}>
                     {orderedVisibleIds.map((id) => cellFor(id))}
+                    <td className="col-filler" />
                     <td className="actions actions-sticky">
                       <div className="btn-row">
-                        <button
-                          className="btn btn-sm soft-edit"
-                          onClick={() => setEditing(p)}
-                          title={t.edit}
-                        >
-                          <IconEdit size={13} /> {t.edit}
-                        </button>
-                        <button
-                          className="btn btn-sm soft-success"
-                          onClick={() => onDuplicate(p)}
-                          title={t.duplicatePlan}
-                        >
-                          <IconDuplicate size={13} /> {t.duplicate}
-                        </button>
-                        <button
-                          className="btn btn-sm soft-danger"
+                        <IconButton
+                          className="btn-sm soft-danger"
+                          icon={<IconTrash size={14} />}
+                          label={t.delete}
                           onClick={() => setConfirmDelete(p)}
-                          title={t.delete}
-                        >
-                          <IconTrash size={13} /> {t.delete}
-                        </button>
+                        />
+                        <IconButton
+                          className="btn-sm soft-edit"
+                          icon={<IconEdit size={14} />}
+                          label={t.edit}
+                          onClick={() => setEditing(p)}
+                        />
+                        <IconButton
+                          className="btn-sm soft-success"
+                          icon={<IconDuplicate size={14} />}
+                          label={t.duplicate}
+                          onClick={() => onDuplicate(p)}
+                        />
                       </div>
                     </td>
                   </tr>

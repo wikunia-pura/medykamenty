@@ -8,7 +8,7 @@ interface Props {
   subtitle?: React.ReactNode;
   onClose: () => void;
   /** Color tint for the icon badge. Defaults to "neutral". */
-  tone?: 'edit' | 'add' | 'danger' | 'neutral';
+  tone?: 'edit' | 'add' | 'danger' | 'warning' | 'neutral';
 }
 
 const ModalHeader: React.FC<Props> = ({ icon, title, subtitle, onClose, tone = 'neutral' }) => {

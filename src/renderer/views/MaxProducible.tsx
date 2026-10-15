@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useT, useLang } from '../i18n';
+import { VIEW_ICONS } from '../viewIcons';
 import { HeaderNav } from '../navigation';
 import type {
   Product,
@@ -97,6 +98,8 @@ const MaxProducibleView: React.FC = () => {
   const [expandedIds, setExpandedIds] = useState<string[]>(() => loadState().expandedIds);
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  // Set while the entry refresh runs, so it computes without the overlay.
+  const quietRef = useRef(false);
   // Expired-stock gate for the production calculator: after the first
   // (expired-excluded) pass, if any ingredient has expired batches the user
   // decides per-run which to count; `base` holds that first pass for cancel.
@@ -157,14 +160,17 @@ const MaxProducibleView: React.FC = () => {
 
   useEffect(() => {
     void (async () => {
-      setLoaderMessage(t.loading);
+      // Entering the view: load the lists and refresh the remembered
+      // selection quietly — previous results stay on screen and the banner's
+      // refresh icon spins; no blocking overlay.
+      quietRef.current = true;
       try {
         const filteredIds = await reload();
         if (filteredIds.length > 0) {
           await compute(filteredIds);
         }
       } finally {
-        setLoaderMessage(null);
+        quietRef.current = false;
       }
     })();
   }, []);
@@ -214,7 +220,7 @@ const MaxProducibleView: React.FC = () => {
     substitutions: Record<string, string> = {},
   ): Promise<MaxProducibleResult[]> => {
     setBusy(true);
-    setLoaderMessage(t.loaderComputing);
+    if (!quietRef.current) setLoaderMessage(t.loaderComputing);
     try {
       return await Promise.all(
         targetIds.map((id) =>
@@ -281,9 +287,7 @@ const MaxProducibleView: React.FC = () => {
       </div>
 
       <div className="compute-hero">
-        <span className="compute-hero-icon" aria-hidden>
-          📦
-        </span>
+        <span className="compute-hero-icon" aria-hidden>{VIEW_ICONS.maxProducible}</span>
         <div className="compute-hero-text">
           <span className="compute-hero-title">{t.maxProducible}</span>
           <span className="compute-hero-hint">{t.maxProducibleHeroHint}</span>
@@ -297,6 +301,19 @@ const MaxProducibleView: React.FC = () => {
               clearLabel={t.maxProducibleClearSelection}
               selectedCountLabel={t.maxProducibleSelectedCount}
             />
+            {/* Re-run with the same selection — lives in the banner next to
+                the main action once there are results. */}
+            {results.length > 0 && (
+              <button
+                type="button"
+                className="btn compute-hero-secondary"
+                onClick={() => compute()}
+                disabled={busy || productIds.length === 0}
+              >
+                <IconRefresh size={15} className={busy ? 'spinning' : undefined} />
+                <span>{t.maxProducibleRefresh}</span>
+              </button>
+            )}
             <button
               className="compute-hero-cta"
               disabled={productIds.length === 0 || busy}
@@ -307,21 +324,6 @@ const MaxProducibleView: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {results.length > 0 && (
-        <div className="maxprod-results-header">
-          <button
-            type="button"
-            className="btn primary-filled maxprod-refresh-btn"
-            onClick={() => compute()}
-            disabled={busy || productIds.length === 0}
-            title={t.maxProducibleRefresh}
-          >
-            <IconRefresh size={16} className={busy ? 'spinning' : undefined} />
-            <span>{t.maxProducibleRefresh}</span>
-          </button>
-        </div>
-      )}
 
       {expiredBatches.length > 0 && (
         <div className="card expired-report-panel">

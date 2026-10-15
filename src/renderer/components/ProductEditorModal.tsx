@@ -48,7 +48,7 @@ const ProductEditorModal: React.FC<Props> = ({
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div
-        className={`modal modal-lg${readOnly ? ' modal-readonly' : ''}`}
+        className={`modal modal-lg modal-tabbed${readOnly ? ' modal-readonly' : ''}`}
         onClick={(e) => e.stopPropagation()}
       >
         <ModalHeader

@@ -22,6 +22,7 @@ export interface T {
   stock: string;
   stockSync: string;
   stockSyncHint: string;
+  stockSyncPending: string;
   stockSyncInProgress: string;
   stockSyncDone: string;
   stockSourceLabel: string;
@@ -194,6 +195,10 @@ export interface T {
   rawStockRejectAll: string;
   // Expiry / batches (catalog + calculators)
   stockBatches: string;
+  stockBatchCount1: string;
+  stockBatchCount2: string;
+  stockBatchCount5: string;
+  stockTotal: string;
   stockBatchesEditHint: string;
   stockBatchAdd: string;
   expiryRetest: string;
@@ -372,6 +377,7 @@ export interface T {
   computeShortages: string;
   computeCost: string;
   generateEmails: string;
+  supplierMail: string;
   planStatusDraft: string;
   planStatusComputed: string;
   planStatusArchived: string;
@@ -392,7 +398,37 @@ export interface T {
   suggestedOrder: string;
   bySupplier: string;
   noShortages: string;
+  readyForProduction: string;
   warnings: string;
+  // Full requirement — every item of the plan, not just the shortages
+  shortagesBySupplierTitle: string;
+  fullRequirementTitle: string;
+  fullRequirementHint: string;
+  fullRequirementFilterAll: string;
+  fullRequirementFilterShort: string;
+  fullRequirementLeftOver: string;
+  fullRequirementNothingShort: string;
+  itemKind: string;
+  itemKindRaw: string;
+  itemKindComponent: string;
+  // Warehouse pick-list mail ("przygotujcie na dzień X")
+  warehouseMail: string;
+  warehouseMailSent: string;
+  warehouseMailHint: string;
+  warehousePrepareFor: string;
+  warehousePickDateFirst: string;
+  warehouseEmail: string;
+  warehouseEmailHint: string;
+  warehouseStatus: string;
+  warehouseComplete: string;
+  warehouseCompleteBanner: string;
+  warehouseAwaiting: string;
+  warehouseAwaitingBanner: string;
+  warehouseSentTag: string;
+  warehouseMailTooLong: string;
+  emailTo: string;
+  emailSubject: string;
+  emailBody: string;
   // Email generator
   emailLanguage: string;
   refineWithAI: string;
@@ -759,8 +795,10 @@ const pl: T = {
   suppliers: 'Dostawcy',
   stockImport: 'Import stanów',
   stock: 'Stan',
-  stockSync: 'Synchronizuj stany',
+  stockSync: 'Zapisz stany do katalogu',
   stockSyncHint: 'Zapisz stany z ostatniego importu do katalogu surowców i komponentów.',
+  stockSyncPending:
+    'Pobrane stany nie są jeszcze zapisane w katalogu — raporty liczą ze starych. Sprawdź dopasowania poniżej i kliknij „Zapisz stany do katalogu”.',
   stockSyncInProgress: 'Synchronizacja stanów…',
   stockSyncDone: 'Zaktualizowano stany w katalogu: {n}.',
   stockSourceLabel: 'Źródło',
@@ -944,6 +982,10 @@ const pl: T = {
   rawStockRejectAll: 'Odrzuć wszystkie',
   // Expiry / batches (catalog + calculators)
   stockBatches: 'Partie / daty ważności',
+  stockBatchCount1: '{n} partia',
+  stockBatchCount2: '{n} partie',
+  stockBatchCount5: '{n} partii',
+  stockTotal: 'Razem',
   stockBatchesEditHint:
     'Dodaj partie ze stanem i datą ważności. Data po reteście (fiz.-chem.) nadpisuje pierwotną. Zapisanie zmian oznacza stan jako ustawiony ręcznie.',
   stockBatchAdd: 'Dodaj partię',
@@ -1135,6 +1177,7 @@ const pl: T = {
   computeShortages: 'Oblicz zapotrzebowanie',
   computeCost: 'Oblicz koszt',
   generateEmails: 'Wygeneruj maile',
+  supplierMail: 'Mail do dostawców',
   planStatusDraft: 'Szkic',
   planStatusComputed: 'Policzony',
   planStatusArchived: 'Zarchiwizowany',
@@ -1156,7 +1199,40 @@ const pl: T = {
   suggestedOrder: 'Do zamówienia',
   bySupplier: 'Wg dostawcy',
   noShortages: 'Brak braków — można uruchamiać produkcję.',
+  readyForProduction: 'Można uruchamiać produkcję',
   warnings: 'Ostrzeżenia',
+  shortagesBySupplierTitle: 'Braki wg dostawców',
+  fullRequirementTitle: 'Pełne zapotrzebowanie',
+  fullRequirementHint:
+    'Wszystkie surowce i komponenty tego planu, także te, których nie brakuje: stan → potrzeba → ile zostanie po produkcji (ujemne = brak).',
+  fullRequirementFilterAll: 'Wszystko',
+  fullRequirementFilterShort: 'Tylko braki',
+  fullRequirementLeftOver: 'Zostanie',
+  fullRequirementNothingShort: 'Niczego nie brakuje — wszystko jest na stanie.',
+  itemKind: 'Typ',
+  itemKindRaw: 'surowiec',
+  itemKindComponent: 'komponent',
+  warehouseMail: 'Mail do magazynu',
+  warehouseMailSent: 'Wysłano do magazynu',
+  warehouseMailHint:
+    'Wszystkie surowce i komponenty z tego raportu w pełnej potrzebnej ilości (z naddatkiem) — do przygotowania przez magazyn na wybrany dzień.',
+  warehousePrepareFor: 'Przygotować na dzień',
+  warehousePickDateFirst: 'Wybierz dzień, a treść maila uzupełni się sama.',
+  warehouseEmail: 'Adres e-mail magazynu',
+  warehouseEmailHint:
+    'Podpowiadany w „Mail do magazynu” w raporcie zapotrzebowania. Zapisywany na tym komputerze.',
+  warehouseStatus: 'Magazyn',
+  warehouseComplete: 'wszystko skompletowane',
+  warehouseCompleteBanner: 'Wszystko skompletowane — można wysłać listę do magazynu.',
+  warehouseAwaiting: 'czeka na dostawy ({n})',
+  warehouseAwaitingBanner:
+    'Jeszcze nie wszystko skompletowane — brak potwierdzenia dostawy od: {names}. Mail można wysłać mimo to.',
+  warehouseSentTag: 'wysłano — na {date}',
+  warehouseMailTooLong:
+    'Lista jest długa — program pocztowy może uciąć treść otwartą przez „{open}”. Użyj „{copy}” i wklej ją do maila.',
+  emailTo: 'Do',
+  emailSubject: 'Temat',
+  emailBody: 'Treść',
   emailLanguage: 'Język maila',
   refineWithAI: 'Popraw z AI',
   aiUnavailable: 'AI niedostępne — brak klucza w buildzie',
@@ -1535,7 +1611,9 @@ const en: T = {
   suppliers: 'Suppliers',
   stockImport: 'Stock import',
   stock: 'Stock',
-  stockSync: 'Sync stock',
+  stockSync: 'Save stock to catalog',
+  stockSyncPending:
+    'The fetched stock is not saved to the catalog yet — reports still use the old values. Check the matches below and click "Save stock to catalog".',
   stockSyncHint:
     'Write the latest import quantities into the raw materials and components catalog.',
   stockSyncInProgress: 'Syncing stock…',
@@ -1720,6 +1798,10 @@ const en: T = {
   rawStockRejectAll: 'Reject all',
   // Expiry / batches (catalog + calculators)
   stockBatches: 'Batches / expiry',
+  stockBatchCount1: '{n} batch',
+  stockBatchCount2: '{n} batches',
+  stockBatchCount5: '{n} batches',
+  stockTotal: 'Total',
   stockBatchesEditHint:
     'Add batches with a quantity and expiry date. The retest (physico-chemical) date overrides the original. Saving marks the stock as manually set.',
   stockBatchAdd: 'Add batch',
@@ -1907,6 +1989,7 @@ const en: T = {
   computeShortages: 'Compute shortages',
   computeCost: 'Compute cost',
   generateEmails: 'Generate emails',
+  supplierMail: 'Email to suppliers',
   planStatusDraft: 'Draft',
   planStatusComputed: 'Computed',
   planStatusArchived: 'Archived',
@@ -1928,7 +2011,40 @@ const en: T = {
   suggestedOrder: 'To order',
   bySupplier: 'By supplier',
   noShortages: 'No shortages — production can start.',
+  readyForProduction: 'Ready for production',
   warnings: 'Warnings',
+  shortagesBySupplierTitle: 'Shortages by supplier',
+  fullRequirementTitle: 'Full requirement',
+  fullRequirementHint:
+    'Every raw material and component in this plan, including those not short: stock → required → left over after production (negative = shortage).',
+  fullRequirementFilterAll: 'All',
+  fullRequirementFilterShort: 'Shortages only',
+  fullRequirementLeftOver: 'Left over',
+  fullRequirementNothingShort: 'Nothing is short — everything is in stock.',
+  itemKind: 'Type',
+  itemKindRaw: 'raw material',
+  itemKindComponent: 'component',
+  warehouseMail: 'Email to warehouse',
+  warehouseMailSent: 'Sent to warehouse',
+  warehouseMailHint:
+    'Every raw material and component from this report at the full required quantity (overage included) — for the warehouse to have ready by the chosen day.',
+  warehousePrepareFor: 'Prepare for',
+  warehousePickDateFirst: 'Pick the day and the email fills itself in.',
+  warehouseEmail: 'Warehouse email address',
+  warehouseEmailHint:
+    'Suggested in "Email to warehouse" on the shortage report. Saved on this computer.',
+  warehouseStatus: 'Warehouse',
+  warehouseComplete: 'everything complete',
+  warehouseCompleteBanner: 'Everything is complete — the list can go to the warehouse.',
+  warehouseAwaiting: 'awaiting deliveries ({n})',
+  warehouseAwaitingBanner:
+    'Not everything is complete yet — no delivery confirmed from: {names}. You can still send the email.',
+  warehouseSentTag: 'sent — for {date}',
+  warehouseMailTooLong:
+    'The list is long — your mail client may cut off the text opened via "{open}". Use "{copy}" and paste it into the email.',
+  emailTo: 'To',
+  emailSubject: 'Subject',
+  emailBody: 'Body',
   emailLanguage: 'Email language',
   refineWithAI: 'Refine with AI',
   aiUnavailable: 'AI unavailable — no API key in build',

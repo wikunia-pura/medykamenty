@@ -20,6 +20,7 @@ import LoadingOverlay from '../components/LoadingOverlay';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPrefs, type ColumnDef } from '../utils/useColumnPrefs';
 import { useColumnResize } from '../utils/useColumnResize';
+import { sortRows, type SortValue } from '../utils/sortRows';
 import {
   IconTrash,
   IconPlus,
@@ -29,6 +30,7 @@ import {
   IconChevronDown,
   IconChevronRight,
 } from '../components/Icons';
+import IconButton from '../components/IconButton';
 import ModalHeader from '../components/ModalHeader';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import UnmatchedRowModal, { type ResolveAction } from '../components/UnmatchedRowModal';
@@ -130,7 +132,10 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     [t],
   );
   const stockColumns = useColumnPrefs('stockImport', STOCK_COLUMNS);
-  const { decorateHeader } = useColumnResize(stockColumns.setWidth);
+  const { decorateHeader } = useColumnResize(stockColumns.setWidth, {
+    sort: stockColumns.sort,
+    toggleSort: stockColumns.toggleSort,
+  });
 
   const loadCurrent = async () => {
     const [stock, rms, cs, settings] = await Promise.all([
@@ -317,12 +322,9 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
 
   useEffect(() => {
     void (async () => {
-      setLoaderMessage(t.loading);
-      try {
-        await loadCurrent();
-      } finally {
-        setLoaderMessage(null);
-      }
+      // No blocking overlay on entry — the banners are usable right away and
+      // the snapshot tables appear when loaded.
+      await loadCurrent();
     })();
   }, []);
 
@@ -359,6 +361,10 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
   const setStagedKind = (path: string, kind: 'raw' | 'component') =>
     setStaged((prev) => prev.map((f) => (f.path === path ? { ...f, kind } : f)));
 
+  // Set after a fetch / import in this session until the snapshot is saved to
+  // the catalog — the banner then says the reports still see the old stock.
+  const [syncPending, setSyncPending] = useState(false);
+
   const startBsxImport = async () => {
     setError(null);
     setSummary(null);
@@ -368,6 +374,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
       // Phase A: stock snapshots (fast, ~2-3s). Show table immediately.
       const res = await window.electronAPI.importStockFromBsx();
       setSummary(res);
+      setSyncPending(true);
       setRawExpanded(true);
       setCompExpanded(true);
       await loadCurrent();
@@ -407,6 +414,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     try {
       await window.electronAPI.resolveStockConflicts(resolutions);
       setConflicts([]);
+      setSyncPending(false);
       await loadCurrent();
     } catch (err) {
       setError((err as Error).message);
@@ -427,6 +435,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
       if (res.conflicts.length > 0) {
         setConflicts(res.conflicts);
       } else {
+        setSyncPending(false);
         setInfo(t.stockSyncDone.replace('{n}', String(res.applied)));
       }
     } catch (err) {
@@ -475,6 +484,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
       }
 
       setSummary(totals);
+      setSyncPending(true);
       setStaged([]);
       if (rawFiles.length > 0) setRawExpanded(false);
       if (compFiles.length > 0) setCompExpanded(false);
@@ -502,6 +512,45 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     let filtered = rows;
     if (unmatchedOnly) filtered = filtered.filter(isUnmatched);
     if (query.trim()) filtered = filtered.filter((r) => matchesQuery(r, query));
+
+    // Header-click sort key per column: the row's value; 'match' ranks
+    // unmatched → ambiguous → matched. Sorted before the 200-row cap below.
+    const sortValueFor = (id: string, r: StockRow): SortValue => {
+      switch (id) {
+        case 'name':
+          return r.name;
+        case 'match':
+          if (r.matchAmbiguous) return 1;
+          return r.matchedRawMaterialId || r.matchedComponentId ? 2 : 0;
+        case 'qty':
+          return r.qty;
+        case 'netUnit':
+          return r.netPrice;
+        case 'vatUnit':
+          return r.vatPrice;
+        case 'grossUnit':
+          return r.grossPrice;
+        case 'currency':
+          return r.currency;
+        case 'netTotal':
+          return r.oNet;
+        case 'vatTotal':
+          return r.oVat;
+        case 'grossTotal':
+          return r.oGross;
+        case 'symbol':
+          return r.mpFirmaSymbol;
+        case 'manufacturer':
+          return r.manufacturerSymbol;
+        case 'warehouse':
+          return r.warehouse;
+        case 'notes':
+          return r.notes;
+        default:
+          return undefined;
+      }
+    };
+    const sorted = sortRows(filtered, stockColumns.sort, sortValueFor);
 
     const headerFor = (id: string): React.ReactNode => {
       switch (id) {
@@ -778,43 +827,43 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
                 {stockColumns.orderedVisibleIds.map((id) =>
                   decorateHeader(headerFor(id), id, stockColumns.widths[id]),
                 )}
+                <th className="col-filler" aria-hidden />
                 <th className="actions actions-sticky">{t.actionsHeader}</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
+              {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={stockColumns.orderedVisibleIds.length + 1} className="hint">
+                  <td colSpan={stockColumns.orderedVisibleIds.length + 2} className="hint">
                     {query || unmatchedOnly ? '—' : t.noData}
                   </td>
                 </tr>
               )}
-              {filtered.slice(0, 200).map((r, idx) => (
+              {sorted.slice(0, 200).map((r, idx) => (
                 <tr key={`${r.rowKey}-${idx}`}>
                   {stockColumns.orderedVisibleIds.map((id) => cellFor(id, r))}
+                  <td className="col-filler" />
                   <td className="actions actions-sticky">
                     <div className="btn-row">
-                      <button
-                        className="btn btn-sm soft-edit"
-                        onClick={() => setEditingRow({ row: r, kind, snapshotId })}
-                        title={t.stockEditRow}
-                      >
-                        <IconEdit size={13} /> {t.edit}
-                      </button>
-                      <button
-                        className="btn btn-sm soft-danger"
+                      <IconButton
+                        className="btn-sm soft-danger"
+                        icon={<IconTrash size={14} />}
+                        label={t.delete}
                         onClick={() => setConfirmDeleteRow({ row: r, snapshotId })}
-                        title={t.stockDeleteRow}
-                      >
-                        <IconTrash size={13} /> {t.delete}
-                      </button>
+                      />
+                      <IconButton
+                        className="btn-sm soft-edit"
+                        icon={<IconEdit size={14} />}
+                        label={t.edit}
+                        onClick={() => setEditingRow({ row: r, kind, snapshotId })}
+                      />
                     </div>
                   </td>
                 </tr>
               ))}
               {filtered.length > 200 && (
                 <tr>
-                  <td colSpan={stockColumns.orderedVisibleIds.length + 1} className="hint">
+                  <td colSpan={stockColumns.orderedVisibleIds.length + 2} className="hint">
                     … +{filtered.length - 200}
                   </td>
                 </tr>
@@ -896,16 +945,6 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         {(rawRows.length > 0 || compRows.length > 0) && (
           <span className="page-header-count">({rawRows.length + compRows.length})</span>
         )}
-        <button
-          type="button"
-          className="btn primary"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => void syncCatalog()}
-          disabled={busy || (!rawSnapshot && !compSnapshot)}
-          title={t.stockSyncHint}
-        >
-          <IconCheck size={14} /> {t.stockSync}
-        </button>
       </div>
       {taskBanner}
       {info && (
@@ -945,8 +984,21 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
                 </div>
               )}
               {!bsxConfigured && <div className="bsx-banner-warning">{t.bsxNotConfigured}</div>}
+              {syncPending && <div className="bsx-banner-warning">{t.stockSyncPending}</div>}
             </div>
+            {/* Two steps: fetch a snapshot, then (after reviewing the matches)
+                write its quantities to the catalog the reports read from.
+                Step 2 is placed first on purpose, so the filled step-1 CTA
+                sits at the banner's trailing edge. */}
             <div className="bsx-banner-action">
+              <button
+                type="button"
+                className={`btn bsx-banner-secondary${syncPending ? ' pending' : ''}`}
+                onClick={() => void syncCatalog()}
+                disabled={busy || (!rawSnapshot && !compSnapshot)}
+              >
+                <IconCheck size={16} /> {t.stockSync}
+              </button>
               <button
                 className="bsx-banner-cta"
                 disabled={busy || !bsxConfigured}
@@ -1027,13 +1079,12 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
                           />
                         </td>
                         <td className="actions">
-                          <button
-                            className="btn btn-sm soft-danger"
+                          <IconButton
+                            className="btn-sm soft-danger"
+                            icon={<IconTrash size={14} />}
+                            label={t.delete}
                             onClick={() => removeStaged(f.path)}
-                            title={t.delete}
-                          >
-                            <IconTrash size={13} /> {t.delete}
-                          </button>
+                          />
                         </td>
                       </tr>
                     ))}
@@ -1141,7 +1192,6 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         <button
           className="floating-next"
           onClick={() => onNavigate('shortageReport')}
-          title={t.goToShortageReport}
         >
           <span className="floating-next-step">2</span>
           <span className="floating-next-text">

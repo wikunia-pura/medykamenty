@@ -950,7 +950,12 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     (
       _e,
       id: string,
-      patch: { reportName?: string; orderId?: string | null; archived?: boolean },
+      patch: {
+        reportName?: string;
+        orderId?: string | null;
+        archived?: boolean;
+        warehouseNotice?: { prepareFor: string; sentAt: string } | null;
+      },
     ) => db.updateShortageReport(id, patch),
   );
   ipcMain.handle(

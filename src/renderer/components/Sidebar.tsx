@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import Logo from './Logo';
 import type { ViewKey } from '../views/types';
+import { VIEW_ICONS } from '../viewIcons';
 
 type NavGroup =
   | 'dashboard'
@@ -129,21 +130,21 @@ const Sidebar: React.FC<Props> = ({ current, onSelect, userEmail, onSignOut }) =
   const [dropGroup, setDropGroup] = useState<NavGroup | null>(null);
 
   const defaultItems: NavItem[] = [
-    { key: 'dashboard', label: t.dashboard, icon: '◇', group: 'dashboard' },
-    { key: 'orders', label: t.orders, icon: '▤', group: 'orders' },
-    { key: 'workflowTemplates', label: t.workflowTemplates, icon: '☷', group: 'orders' },
-    { key: 'stockImport', label: t.stockImport, icon: '⇪', group: 'workflow' },
-    { key: 'shortageReport', label: t.shortageReport, icon: '⚠', group: 'workflow' },
-    { key: 'emailGenerator', label: t.emailGenerator, icon: '✉', group: 'workflow' },
-    { key: 'costCalculator', label: t.costCalculator, icon: '$', group: 'tools' },
-    { key: 'maxProducible', label: t.maxProducible, icon: '∞', group: 'tools' },
-    { key: 'productionPlan', label: t.productionPlan, icon: '▤', group: 'plan' },
-    { key: 'products', label: t.products, icon: '◐', group: 'catalog' },
-    { key: 'rawMaterials', label: t.rawMaterials, icon: '⬡', group: 'catalog' },
-    { key: 'components', label: t.components, icon: '▦', group: 'catalog' },
-    { key: 'outerPackaging', label: t.outerPackaging, icon: '▣', group: 'catalog' },
-    { key: 'suppliers', label: t.suppliers, icon: '◉', group: 'catalog' },
-    { key: 'settings', label: t.settings, icon: '⚙', group: 'system' },
+    { key: 'dashboard', label: t.dashboard, icon: VIEW_ICONS.dashboard, group: 'dashboard' },
+    { key: 'orders', label: t.orders, icon: VIEW_ICONS.orders, group: 'orders' },
+    { key: 'workflowTemplates', label: t.workflowTemplates, icon: VIEW_ICONS.workflowTemplates, group: 'orders' },
+    { key: 'stockImport', label: t.stockImport, icon: VIEW_ICONS.stockImport, group: 'workflow' },
+    { key: 'shortageReport', label: t.shortageReport, icon: VIEW_ICONS.shortageReport, group: 'workflow' },
+    { key: 'emailGenerator', label: t.emailGenerator, icon: VIEW_ICONS.emailGenerator, group: 'workflow' },
+    { key: 'costCalculator', label: t.costCalculator, icon: VIEW_ICONS.costCalculator, group: 'tools' },
+    { key: 'maxProducible', label: t.maxProducible, icon: VIEW_ICONS.maxProducible, group: 'tools' },
+    { key: 'productionPlan', label: t.productionPlan, icon: VIEW_ICONS.productionPlan, group: 'plan' },
+    { key: 'products', label: t.products, icon: VIEW_ICONS.products, group: 'catalog' },
+    { key: 'rawMaterials', label: t.rawMaterials, icon: VIEW_ICONS.rawMaterials, group: 'catalog' },
+    { key: 'components', label: t.components, icon: VIEW_ICONS.components, group: 'catalog' },
+    { key: 'outerPackaging', label: t.outerPackaging, icon: VIEW_ICONS.outerPackaging, group: 'catalog' },
+    { key: 'suppliers', label: t.suppliers, icon: VIEW_ICONS.suppliers, group: 'catalog' },
+    { key: 'settings', label: t.settings, icon: VIEW_ICONS.settings, group: 'system' },
   ];
 
   // Items follow the persisted layout; categories keep their fixed order.

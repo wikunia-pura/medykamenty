@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { createPortal } from 'react-dom';
 import type { Supplier } from '../../shared/types';
 import { useT } from '../i18n';
-import { IconStar, IconSearch, IconClose } from './Icons';
+import { IconStar, IconChevronDown, IconSearch, IconClose } from './Icons';
 
 interface Props {
   suppliers: Supplier[];
@@ -162,7 +162,7 @@ const SupplierMultiPicker: React.FC<Props> = ({
           )}
         </span>
         <span className="searchable-select-caret" aria-hidden>
-          ▾
+          <IconChevronDown size={14} />
         </span>
       </button>
       {open &&

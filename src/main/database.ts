@@ -1095,12 +1095,22 @@ export default class Database {
 
   async updateShortageReport(
     id: string,
-    patch: { reportName?: string; orderId?: string | null; archived?: boolean },
+    patch: {
+      reportName?: string;
+      orderId?: string | null;
+      archived?: boolean;
+      warehouseNotice?: ShortageReportEntry['warehouseNotice'] | null;
+    },
   ): Promise<ShortageReportEntry | undefined> {
     const existing = await this.getShortageReport(id);
     if (!existing) return undefined;
     const next: ShortageReportEntry = withReportName({ ...existing });
     if (patch.reportName !== undefined) next.reportName = patch.reportName;
+    if (patch.warehouseNotice !== undefined) {
+      // null clears the "sent to warehouse" mark; undefined leaves it alone.
+      if (patch.warehouseNotice === null) delete next.warehouseNotice;
+      else next.warehouseNotice = patch.warehouseNotice;
+    }
     if (patch.orderId !== undefined) {
       // null clears the link; undefined leaves it alone.
       if (patch.orderId === null) delete next.orderId;

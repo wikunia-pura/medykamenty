@@ -29,6 +29,8 @@ import {
 } from '../components/Icons';
 import NumberInput from '../components/NumberInput';
 import HoverTooltip from '../components/HoverTooltip';
+import IconButton from '../components/IconButton';
+import BadgeSelect from '../components/BadgeSelect';
 import ShortageReportTooltip from '../components/ShortageReportTooltip';
 import PlanEditorModal from '../components/PlanEditorModal';
 import TaskNoteDialog from '../components/TaskNoteDialog';
@@ -359,11 +361,17 @@ const OrderDetails: React.FC<Props> = ({
             </span>
             <span className="focus-bar-meta">
               <span className="hint">{t.orderStatus}:</span>{' '}
-              <select
-                className={`status-inline-select order-status-${order.status}`}
+              <BadgeSelect
+                className={`order-status-${order.status}`}
                 value={order.status}
-                onChange={async (e) => {
-                  const next = e.target.value as OrderStatus;
+                ariaLabel={t.changeStatus}
+                options={[
+                  { value: 'draft', label: t.orderStatusDraft },
+                  { value: 'in_progress', label: t.orderStatusInProgress },
+                  { value: 'completed', label: t.orderStatusCompleted },
+                  { value: 'cancelled', label: t.orderStatusCancelled },
+                ]}
+                onChange={async (next: OrderStatus) => {
                   setBusy(true);
                   try {
                     const updated = await window.electronAPI.updateOrder(orderId, {
@@ -376,23 +384,16 @@ const OrderDetails: React.FC<Props> = ({
                     setBusy(false);
                   }
                 }}
-                title={t.changeStatus}
-              >
-                <option value="draft">{t.orderStatusDraft}</option>
-                <option value="in_progress">{t.orderStatusInProgress}</option>
-                <option value="completed">{t.orderStatusCompleted}</option>
-                <option value="cancelled">{t.orderStatusCancelled}</option>
-              </select>
+              />
             </span>
           </div>
           <div className="btn-row">
-            <button
-              type="button"
-              className="btn"
+            <IconButton
+              className="soft-edit"
+              icon={<IconEdit size={15} />}
+              label={t.edit}
               onClick={() => setEditingOrder({ ...order })}
-            >
-              <IconEdit size={12} /> {t.edit}
-            </button>
+            />
           </div>
       </div>
 
@@ -505,6 +506,25 @@ const OrderDetails: React.FC<Props> = ({
                     )}
                   </div>
                   <div className="workflow-task-status-controls">
+                    <IconButton
+                      className="btn-sm soft-danger"
+                      icon={<IconTrash size={14} />}
+                      label={t.delete}
+                      onClick={async () => {
+                        setBusy(true);
+                        try {
+                          const updated = await window.electronAPI.deleteOrderTask(
+                            orderId,
+                            task.id,
+                          );
+                          setOrder(updated);
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : String(err));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    />
                     {task.status === 'todo' && (
                       <button
                         type="button"
@@ -554,35 +574,12 @@ const OrderDetails: React.FC<Props> = ({
                       <IconNote size={13} />{' '}
                       {task.note ? t.taskEditNote : t.taskAddNote}
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm soft-edit"
+                    <IconButton
+                      className="btn-sm soft-edit"
+                      icon={<IconEdit size={14} />}
+                      label={t.edit}
                       onClick={() => setEditingTask(task)}
-                      title={t.edit}
-                    >
-                      <IconEdit size={13} /> {t.edit}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm soft-danger"
-                      onClick={async () => {
-                        setBusy(true);
-                        try {
-                          const updated = await window.electronAPI.deleteOrderTask(
-                            orderId,
-                            task.id,
-                          );
-                          setOrder(updated);
-                        } catch (err) {
-                          setError(err instanceof Error ? err.message : String(err));
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      title={t.delete}
-                    >
-                      <IconTrash size={13} /> {t.delete}
-                    </button>
+                    />
                   </div>
                 </div>
               );
@@ -669,6 +666,12 @@ const OrderDetails: React.FC<Props> = ({
                       onClick={(ev) => ev.stopPropagation()}
                     >
                       <div className="btn-row">
+                        <IconButton
+                          className="btn-sm soft-danger"
+                          icon={<IconTrash size={14} />}
+                          label={t.delete}
+                          onClick={() => setConfirmDeleteReport(r)}
+                        />
                         <button
                           className="btn btn-sm soft-danger"
                           onClick={async () => {
@@ -698,27 +701,18 @@ const OrderDetails: React.FC<Props> = ({
                         >
                           <IconClose size={13} /> {t.unlinkOrder}
                         </button>
-                        <button
-                          className="btn btn-sm soft-edit"
+                        <IconButton
+                          className="btn-sm soft-edit"
+                          icon={<IconEdit size={14} />}
+                          label={t.edit}
                           onClick={() => onNavigateToReport(r.planId, r.id)}
-                          title={t.edit}
-                        >
-                          <IconEdit size={13} /> {t.edit}
-                        </button>
-                        <button
-                          className="btn btn-sm soft-danger"
-                          onClick={() => setConfirmDeleteReport(r)}
-                          title={t.delete}
-                        >
-                          <IconTrash size={13} /> {t.delete}
-                        </button>
+                        />
                         <button
                           className="btn btn-sm soft-success"
                           onClick={() => onNavigateToEmails(r.id)}
                           disabled={r.report.groups.length === 0}
-                          title={t.generateEmails}
                         >
-                          <IconMail size={13} /> {t.generateEmails}
+                          <IconMail size={13} /> {t.supplierMail}
                         </button>
                       </div>
                     </td>
@@ -887,19 +881,18 @@ const OrderDetails: React.FC<Props> = ({
                       onClick={(ev) => ev.stopPropagation()}
                     >
                       <div className="btn-row">
+                        <IconButton
+                          className="btn-sm soft-danger"
+                          icon={<IconTrash size={14} />}
+                          label={t.delete}
+                          onClick={() => setConfirmDeleteBatch(b)}
+                        />
                         <button
                           className="btn btn-sm"
                           onClick={() => onNavigateToBatch(b.id)}
                           title={t.preview}
                         >
                           <IconMail size={13} /> {t.preview}
-                        </button>
-                        <button
-                          className="btn btn-sm soft-danger"
-                          onClick={() => setConfirmDeleteBatch(b)}
-                          title={t.delete}
-                        >
-                          <IconTrash size={13} /> {t.delete}
                         </button>
                       </div>
                     </td>

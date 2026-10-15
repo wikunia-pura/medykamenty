@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useT, useLang } from '../i18n';
+import { VIEW_ICONS } from '../viewIcons';
 import { HeaderNav } from '../navigation';
 import type {
   ProductionPlan,
@@ -92,6 +93,9 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
   );
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  // Set while the entry refresh runs, so it computes without the overlay.
+  const quietRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const [editingPlan, setEditingPlan] = useState<Partial<ProductionPlan> | null>(null);
@@ -120,14 +124,19 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
 
   useEffect(() => {
     void (async () => {
-      setLoaderMessage(t.loading);
+      // Entering the view: load the lists and refresh the remembered
+      // selection quietly — previous results stay on screen and the banner's
+      // refresh icon spins; no blocking overlay.
+      setInitialLoading(true);
+      quietRef.current = true;
       try {
         const filteredIds = await reload();
         if (filteredIds.length > 0) {
           await compute(filteredIds);
         }
       } finally {
-        setLoaderMessage(null);
+        quietRef.current = false;
+        setInitialLoading(false);
       }
     })();
   }, []);
@@ -239,7 +248,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
     const targetIds = ids ?? planIds;
     if (targetIds.length === 0) return;
     setBusy(true);
-    setLoaderMessage(t.loaderComputing);
+    if (!quietRef.current) setLoaderMessage(t.loaderComputing);
     setError(null);
     try {
       const next = await Promise.all(targetIds.map((id) => window.electronAPI.computeCost(id)));
@@ -266,7 +275,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
   };
   const KIND_ORDER: CostItemKind[] = ['raw', 'component', 'bulkPackaging'];
 
-  if (plans.length === 0) {
+  if (!initialLoading && plans.length === 0) {
     return (
       <div className="main">
         <div className="page-header">
@@ -285,9 +294,7 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
         <h1>{t.costCalculator}</h1>
       </div>
       <div className="compute-hero">
-        <span className="compute-hero-icon" aria-hidden>
-          💰
-        </span>
+        <span className="compute-hero-icon" aria-hidden>{VIEW_ICONS.costCalculator}</span>
         <div className="compute-hero-text">
           <span className="compute-hero-title">{t.computeCost}</span>
           <span className="compute-hero-hint">{t.costCalculatorHeroHint}</span>
@@ -301,6 +308,19 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
               clearLabel={t.maxProducibleClearSelection}
               selectedCountLabel={t.maxProducibleSelectedCount}
             />
+            {/* Re-run with the same selection — lives in the banner next to
+                the main action once there are results. */}
+            {reports.length > 0 && (
+              <button
+                type="button"
+                className="btn compute-hero-secondary"
+                onClick={() => compute()}
+                disabled={busy || planIds.length === 0}
+              >
+                <IconRefresh size={15} className={busy ? 'spinning' : undefined} />
+                <span>{t.maxProducibleRefresh}</span>
+              </button>
+            )}
             <button
               className="compute-hero-cta"
               disabled={planIds.length === 0 || busy}
@@ -312,21 +332,6 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
           {error && <div className="compute-hero-error">{error}</div>}
         </div>
       </div>
-
-      {reports.length > 0 && (
-        <div className="maxprod-results-header">
-          <button
-            type="button"
-            className="btn primary-filled maxprod-refresh-btn"
-            onClick={() => compute()}
-            disabled={busy || planIds.length === 0}
-            title={t.maxProducibleRefresh}
-          >
-            <IconRefresh size={16} className={busy ? 'spinning' : undefined} />
-            <span>{t.maxProducibleRefresh}</span>
-          </button>
-        </div>
-      )}
 
       {reports.map((report) => {
         const planName = planNameById.get(report.planId) ?? '—';
@@ -432,7 +437,16 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
                         const hasItems = (line.items ?? []).length > 0;
                         return (
                           <React.Fragment key={line.productId}>
-                            <tr>
+                            {/* The whole row toggles the cost breakdown; the
+                                product link inside still opens the preview. */}
+                            <tr
+                              className={hasItems ? 'row-clickable' : undefined}
+                              onClick={
+                                hasItems
+                                  ? () => toggleItems(report.planId, line.productId)
+                                  : undefined
+                              }
+                            >
                               <td>
                                 <div className="cost-product-cell">
                                   {hasItems && (
@@ -483,7 +497,6 @@ const CostCalculatorView: React.FC<Props> = ({ onNavigate }) => {
                                 ) : (
                                   <HoverTooltip
                                     align="right"
-                                    triggerClassName="count-bubble"
                                     trigger={
                                       <span className="tag warn">
                                         {line.missingPriceItems.length}
