@@ -2,10 +2,27 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ShortageReportEntry, EmailBatch } from '../../shared/types';
 import { useT } from '../i18n';
+import type { T } from '../translations';
+
+// "1 email" / "2 emaile" / "5 emaili" — Polish plural; English uses the first
+// two forms.
+function emailCountLabel(t: T, n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  const form =
+    n === 1
+      ? t.emailCount1
+      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+        ? t.emailCount2
+        : t.emailCount5;
+  return form.replace('{n}', String(n));
+}
 
 interface Props {
   trigger: React.ReactNode;
   triggerClassName?: string;
+  // Accessible name of the trigger. Not a native `title` — the popover itself
+  // is the hover hint.
   triggerTitle?: string;
   reports: ShortageReportEntry[];
   batches: EmailBatch[];
@@ -87,7 +104,7 @@ const PlanReportsPopover: React.FC<Props> = ({
       <span
         ref={triggerRef}
         className={triggerClassName}
-        title={triggerTitle}
+        aria-label={triggerTitle}
         onMouseEnter={() => {
           cancelClose();
           setOpen(true);
@@ -150,7 +167,7 @@ const PlanReportsPopover: React.FC<Props> = ({
                         onClick={() => onSelectBatch(b)}
                       >
                         <span className="plan-reports-item-name">
-                          {b.emails.length} {b.emails.length === 1 ? 'email' : 'emaile'}
+                          {emailCountLabel(t, b.emails.length)}
                         </span>
                         <span className="plan-reports-item-meta">
                           {new Date(b.generatedAt).toLocaleString()}

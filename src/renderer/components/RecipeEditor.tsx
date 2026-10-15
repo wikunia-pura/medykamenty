@@ -13,6 +13,7 @@ import { IconPlus, IconClose } from './Icons';
 import SearchableSelect from './SearchableSelect';
 import NumberInput from './NumberInput';
 import HoverTooltip from './HoverTooltip';
+import IconButton from './IconButton';
 
 // When set, only one section of the editor is shown — used by the product
 // modal's tabbed layout so each tab renders just its concern. Default 'all'
@@ -296,13 +297,12 @@ const RecipeEditor: React.FC<Props> = ({
               </td>
               {!readOnly && (
                 <td className="actions">
-                  <button
-                    className="btn btn-sm soft-danger btn-icon-only"
+                  <IconButton
+                    className="btn-sm soft-danger"
+                    icon={<IconClose size={12} />}
+                    label={t.delete}
                     onClick={() => removeIngredient(idx)}
-                    title={t.delete}
-                  >
-                    <IconClose size={12} />
-                  </button>
+                  />
                 </td>
               )}
             </tr>
@@ -364,13 +364,12 @@ const RecipeEditor: React.FC<Props> = ({
               </td>
               {!readOnly && (
                 <td className="actions">
-                  <button
-                    className="btn btn-sm soft-danger btn-icon-only"
+                  <IconButton
+                    className="btn-sm soft-danger"
+                    icon={<IconClose size={12} />}
+                    label={t.delete}
                     onClick={() => removePackaging(idx)}
-                    title={t.delete}
-                  >
-                    <IconClose size={12} />
-                  </button>
+                  />
                 </td>
               )}
             </tr>
@@ -561,13 +560,12 @@ const RecipeEditor: React.FC<Props> = ({
                 </td>
                 {!readOnly && (
                   <td className="actions">
-                    <button
-                      className="btn btn-sm soft-danger btn-icon-only"
+                    <IconButton
+                      className="btn-sm soft-danger"
+                      icon={<IconClose size={12} />}
+                      label={t.delete}
                       onClick={() => removeTier(idx)}
-                      title={t.delete}
-                    >
-                      <IconClose size={12} />
-                    </button>
+                    />
                   </td>
                 )}
               </tr>

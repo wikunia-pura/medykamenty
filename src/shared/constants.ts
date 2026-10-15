@@ -13,8 +13,6 @@ export const DEFAULT_AI_MODEL = 'claude-haiku-5-5';
 
 export const STOCK_SNAPSHOT_RETENTION = 10;
 export const FUZZY_MATCH_THRESHOLD = 0.85;
-export const SHORTAGE_REPORT_RETENTION = 50;
-export const EMAIL_BATCH_RETENTION = 50;
 // How many past price changes a raw material / component keeps on its
 // `priceHistory`. Newest first; older entries are dropped on write.
 export const PRICE_HISTORY_LIMIT = 10;

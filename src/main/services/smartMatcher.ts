@@ -33,8 +33,11 @@ export interface Suggestion {
 }
 
 const DIACRITICS = /[̀-ͯ]/g;
-// Parenthetical chunks (), [], {} are usually descriptive noise.
+// Parenthetical chunks (), [], {} — often descriptive noise ("(99%)",
+// "(BASF)"), but sometimes the identity itself ("Butelka (100 ml)"). Only the
+// fuzzy SCORE ignores them (see looseNormalize); identity keys keep them.
 const PAREN_NOISE = /[([{][^)\]}]*[)\]}]/g;
+const BRACKET_CHARS = /[()[\]{}]/g;
 // Common product-form noise words (Polish + English) — stripped before scoring.
 const FORM_NOISE = new Set([
   'spray',
@@ -66,19 +69,26 @@ const PUNCT = /[.,;:!?_\-/\\+*'"`]/g;
 // into tokens or break equality on aggressively normalized strings.
 const INVISIBLE_CHARS = /[​-‍⁠﻿­]/gu;
 
+// Identity key: used for the importers' smart-key lookups AND to store / look
+// up aliases (alias_normalized). Numbers and units are IDENTITY for
+// components ("Butelka 100 ml" vs "...200 ml", "Taśma ML 60 mb" vs "...120
+// mb", "CBD 1" vs "CBD 10") — they must survive normalization, otherwise
+// distinct items collapse to one key and their stocks get summed. We
+// therefore keep digits and unit tokens, and only split digit↔letter
+// boundaries so "100ml" and "100 ml" tokenize alike. Bracket CONTENTS are kept
+// too (only the bracket characters go): "Butelka (100 ml)" and "Butelka (200
+// ml)" used to share one key. Consequence: "Allantoina" no longer keys equal
+// to "Allantoina (BASF)" — such pairs now surface as suggestions /
+// "possible duplicate" warnings instead of silent matches. Changing this
+// function changes the keys of already-stored aliases (alias_normalized).
 export function normalize(s: string): string {
   if (!s) return '';
-  // Numbers and units are IDENTITY for components ("Butelka 100 ml" vs
-  // "...200 ml", "Taśma ML 60 mb" vs "...120 mb", "CBD 1" vs "CBD 10") — they
-  // must survive normalization, otherwise distinct items collapse to one key
-  // and their stocks get summed. We therefore keep digits and unit tokens, and
-  // only split digit↔letter boundaries so "100ml" and "100 ml" tokenize alike.
   return s
     .replace(INVISIBLE_CHARS, '')
     .normalize('NFD')
     .replace(DIACRITICS, '')
     .toLowerCase()
-    .replace(PAREN_NOISE, ' ')
+    .replace(BRACKET_CHARS, ' ')
     .replace(/&/g, ' ')
     .replace(PUNCT, ' ')
     .replace(/(\d)(\p{L})/gu, '$1 $2')
@@ -152,18 +162,47 @@ function prefixBonus(a: string, b: string): number {
 // never auto-picked or flagged as the same item — it just drops out of the list.
 const VARIANT_MISMATCH_CAP = 0.4;
 
-function scoreOne(sourceNorm: string, sourceTokens: string[], candidateName: string): number {
-  const candNorm = normalize(candidateName);
+// Scoring form: `normalize` minus bracketed annotations, so "Allantoina"
+// still scores 1.0 against "Allantoina (BASF)" in the suggestion list.
+function looseNormalize(s: string): string {
+  return normalize((s ?? '').replace(PAREN_NOISE, ' '));
+}
+
+const HAS_BRACKET_NOTE = /[([{][^)\]}]*[)\]}]/;
+function hasBracketNote(s: string): boolean {
+  return HAS_BRACKET_NOTE.test(s);
+}
+
+// Variant check on the RAW names (bracket contents included), so
+// "Butelka (100 ml)" vs "Butelka (200 ml)" is a different variant. One
+// allowance: when only ONE side carries a bracketed note, the note is
+// treated as an annotation ("Gliceryna" vs "Gliceryna (99%)") and the names
+// are compared without it.
+function sameVariantForSuggestion(sourceRaw: string, candRaw: string): boolean {
+  if (sameVariant(variantTokens(sourceRaw), variantTokens(candRaw), { loose: true })) return true;
+  if (hasBracketNote(sourceRaw) === hasBracketNote(candRaw)) return false;
+  return sameVariant(
+    variantTokens(sourceRaw.replace(PAREN_NOISE, ' ')),
+    variantTokens(candRaw.replace(PAREN_NOISE, ' ')),
+    { loose: true },
+  );
+}
+
+function scoreOne(
+  sourceRaw: string,
+  sourceNorm: string,
+  sourceTokens: string[],
+  candidateName: string,
+): number {
+  const candNorm = looseNormalize(candidateName);
   const candTokens = tokenize(candNorm);
   const lev = levenshteinSimilarity(sourceNorm, candNorm);
   const jac = tokenJaccard(sourceTokens, candTokens);
   const base = Math.max(lev, jac);
   const score = Math.min(1, base + prefixBonus(sourceNorm, candNorm));
-  // Compare the *normalized* forms: parenthetical annotations ("(BASF)",
-  // "(99%)") are already stripped by `normalize`, so they don't count as a
-  // distinguishing token — only bare differences ("CBD 1%" vs "CBD 10%",
-  // "Butelka 100 ml" vs "200 ml") cap the score.
-  if (!sameVariant(variantTokens(sourceNorm), variantTokens(candNorm))) {
+  // Different numbers / line codes / words ("CBD 1%" vs "CBD 10%", "Butelka
+  // (100 ml)" vs "(200 ml)", "Metyloparaben" vs "Etyloparaben") cap the score.
+  if (!sameVariantForSuggestion(sourceRaw, candidateName)) {
     return Math.min(score, VARIANT_MISMATCH_CAP);
   }
   return score;
@@ -192,14 +231,14 @@ export function suggestMatches(
     }
   }
 
-  const sourceNorm = normalize(source.name);
+  const sourceNorm = looseNormalize(source.name);
   const sourceTokens = tokenize(sourceNorm);
 
   for (const c of candidates) {
     if (out.some((s) => s.id === c.id)) continue;
-    let best = scoreOne(sourceNorm, sourceTokens, c.name);
+    let best = scoreOne(source.name, sourceNorm, sourceTokens, c.name);
     for (const alias of c.aliases ?? []) {
-      const s = scoreOne(sourceNorm, sourceTokens, alias);
+      const s = scoreOne(source.name, sourceNorm, sourceTokens, alias);
       if (s > best) best = s;
     }
     if (best >= threshold) {
@@ -210,4 +249,34 @@ export function suggestMatches(
   return out
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, limit);
+}
+
+// Names compared with every bracketed note dropped — "Krem X (2025)" and
+// "Krem X" give the same key. Not an identity key (it would merge
+// "Butelka (100 ml)" with "Butelka (200 ml)"); only for decisions that must
+// err on the side of treating names as the same thing: keeping catalog entries
+// alive in an overwrite import, and the "possible duplicate" warning.
+export function bracketlessKey(s: string): string {
+  return looseNormalize(s);
+}
+
+/**
+ * Near-duplicate check for the import warnings: like suggestMatches, but a
+ * bracketed note on either side ("(Tocobiol)" vs "(daw. Tocobiol)") doesn't
+ * hide a likely duplicate.
+ */
+export function findLikelyDuplicate(
+  name: string,
+  candidates: SuggestionCandidate[],
+  threshold = 0.85,
+): Suggestion | undefined {
+  const strip = (s: string) => s.replace(PAREN_NOISE, ' ').replace(/\s+/g, ' ').trim();
+  const top = suggestMatches(
+    { name: strip(name) },
+    candidates.map((c) => ({ ...c, name: strip(c.name), aliases: c.aliases?.map(strip) })),
+    { limit: 1, threshold },
+  )[0];
+  if (!top) return undefined;
+  const original = candidates.find((c) => c.id === top.id);
+  return { ...top, name: original?.name ?? top.name };
 }

@@ -54,6 +54,7 @@ const CH = {
   STOCK_DELETE_SNAPSHOT: 'stock:delete-snapshot',
   STOCK_DELETE_KIND: 'stock:delete-kind',
   STOCK_SUGGEST_MATCHES: 'stock:suggest-matches',
+  STOCK_SUGGEST_MATCHES_BULK: 'stock:suggest-matches-bulk',
   STOCK_IMPORT_BSX: 'stock:import-bsx',
   STOCK_LOAD_BSX_PRICES: 'stock:load-bsx-prices',
 
@@ -83,6 +84,8 @@ const CH = {
   SHORTAGE_REPORT_LIST: 'shortageReport:list',
   SHORTAGE_REPORT_GET: 'shortageReport:get',
   SHORTAGE_REPORT_DELETE: 'shortageReport:delete',
+  SHORTAGE_REPORT_DELETE_MANY: 'shortageReport:delete-many',
+  SHORTAGE_REPORT_RECOMPUTE: 'shortageReport:recompute',
   SHORTAGE_REPORT_UPDATE: 'shortageReport:update',
   SHORTAGE_REPORT_SET_SUPPLIER_RECEIVED: 'shortageReport:set-supplier-received',
 
@@ -90,6 +93,7 @@ const CH = {
   EMAIL_BATCH_LIST: 'emailBatch:list',
   EMAIL_BATCH_GET: 'emailBatch:get',
   EMAIL_BATCH_DELETE: 'emailBatch:delete',
+  EMAIL_BATCH_DELETE_MANY: 'emailBatch:delete-many',
   EMAIL_BATCH_UPDATE: 'emailBatch:update',
   EMAIL_BATCH_UPDATE_EMAIL: 'emailBatch:update-email',
   EMAIL_BATCH_MARK_SENT: 'emailBatch:mark-sent',
@@ -134,8 +138,9 @@ const CH = {
   LLM_REWRITE_EMAIL: 'llm:rewrite-email',
   LLM_MATCH_SUGGEST: 'llm:match-suggest',
 
-  DEMO_SEED: 'demo:seed',
-  DATA_WIPE: 'data:wipe',
+  CATALOG_DELETE_MANY: 'catalog:delete-many',
+  CATALOG_SAVE_MANY: 'catalog:save-many',
+  CATALOG_SET_PREFERRED_SUPPLIER: 'catalog:set-preferred-supplier',
 
   APP_GET_VERSION: 'app:get-version',
   APP_OPEN_EXTERNAL: 'app:open-external',
@@ -246,6 +251,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     source: { name: string; mpFirmaSymbol?: string },
     limit?: number,
   ) => ipcRenderer.invoke(CH.STOCK_SUGGEST_MATCHES, kind, source, limit),
+  suggestStockMatchesBulk: (
+    kind: 'raw' | 'component',
+    sources: { name: string; mpFirmaSymbol?: string }[],
+    limit?: number,
+  ) => ipcRenderer.invoke(CH.STOCK_SUGGEST_MATCHES_BULK, kind, sources, limit),
   importStockFromBsx: () => ipcRenderer.invoke(CH.STOCK_IMPORT_BSX),
   loadBsxPrices: (snapshotIds: { raw?: string; component?: string }) =>
     ipcRenderer.invoke(CH.STOCK_LOAD_BSX_PRICES, snapshotIds),
@@ -297,6 +307,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listShortageReports: () => ipcRenderer.invoke(CH.SHORTAGE_REPORT_LIST),
   getShortageReport: (id: string) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_GET, id),
   deleteShortageReport: (id: string) => ipcRenderer.invoke(CH.SHORTAGE_REPORT_DELETE, id),
+  deleteShortageReports: (ids: string[]) =>
+    ipcRenderer.invoke(CH.SHORTAGE_REPORT_DELETE_MANY, ids),
+  recomputeShortageReport: (reportId: string, opts?: unknown) =>
+    ipcRenderer.invoke(CH.SHORTAGE_REPORT_RECOMPUTE, reportId, opts),
   updateShortageReport: (
     id: string,
     patch: {
@@ -326,6 +340,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listEmailBatches: () => ipcRenderer.invoke(CH.EMAIL_BATCH_LIST),
   getEmailBatch: (id: string) => ipcRenderer.invoke(CH.EMAIL_BATCH_GET, id),
   deleteEmailBatch: (id: string) => ipcRenderer.invoke(CH.EMAIL_BATCH_DELETE, id),
+  deleteEmailBatches: (ids: string[]) => ipcRenderer.invoke(CH.EMAIL_BATCH_DELETE_MANY, ids),
   updateEmailBatch: (
     id: string,
     patch: { batchName?: string; orderId?: string | null },
@@ -431,8 +446,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(CH.LLM_MATCH_SUGGEST, sourceName, candidates),
 
   // Demo / data
-  seedDemo: () => ipcRenderer.invoke(CH.DEMO_SEED),
-  wipeData: () => ipcRenderer.invoke(CH.DATA_WIPE),
+  // Bulk catalog ops — one IPC call (and one write per table) for many items.
+  deleteCatalogItems: (kind: string, ids: string[]) =>
+    ipcRenderer.invoke(CH.CATALOG_DELETE_MANY, kind, ids),
+  saveSuppliers: (items: unknown[]) => ipcRenderer.invoke(CH.CATALOG_SAVE_MANY, 'supplier', items),
+  saveRawMaterials: (items: unknown[], opts?: unknown) =>
+    ipcRenderer.invoke(CH.CATALOG_SAVE_MANY, 'raw', items, opts),
+  saveComponents: (items: unknown[], opts?: unknown) =>
+    ipcRenderer.invoke(CH.CATALOG_SAVE_MANY, 'component', items, opts),
+  saveProducts: (items: unknown[]) => ipcRenderer.invoke(CH.CATALOG_SAVE_MANY, 'product', items),
+  setPreferredSupplier: (items: unknown[], supplierId: string | null) =>
+    ipcRenderer.invoke(CH.CATALOG_SET_PREFERRED_SUPPLIER, items, supplierId),
 
   // App
   getAppVersion: () => ipcRenderer.invoke(CH.APP_GET_VERSION),

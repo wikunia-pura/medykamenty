@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n';
 import type { StockRow, MatchSuggestion } from '../../shared/types';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import ModalHeader from './ModalHeader';
 import { IconPlus, IconTrash } from './Icons';
 import type { ResolveAction } from './UnmatchedRowModal';
+import IconButton from './IconButton';
 
 // Per-row resolution choice in the bulk view. `targetId` is `null` when the
 // user wants to add the row as a new catalog entry — there's no existing
@@ -21,6 +22,8 @@ interface Props {
   rows: StockRow[];
   kind: 'raw' | 'component';
   busy?: boolean;
+  // Rows that failed on the last apply; they stay in `rows`, applied ones leave.
+  errors?: { rowKey: string; name: string; message: string }[];
   onApply: (decisions: { row: StockRow; action: ResolveAction }[]) => void;
   onCancel: () => void;
 }
@@ -32,7 +35,14 @@ const ACTION_LABELS: Record<ActionType, keyof ReturnType<typeof useT>> = {
   'rename-existing': 'resolveRowActionRename',
 };
 
-const BulkUnmatchedModal: React.FC<Props> = ({ rows, kind, busy, onApply, onCancel }) => {
+const BulkUnmatchedModal: React.FC<Props> = ({
+  rows,
+  kind,
+  busy,
+  errors,
+  onApply,
+  onCancel,
+}) => {
   const t = useT();
   useEscapeKey(onCancel);
 
@@ -49,25 +59,36 @@ const BulkUnmatchedModal: React.FC<Props> = ({ rows, kind, busy, onApply, onCanc
   // the snapshot as unmatched, not part of `onApply`.
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
-  // Fetch suggestions for every row once on mount. Concurrent fan-out keeps
-  // perceived latency low; the suggestions are independent of each other.
+  // Fetch suggestions in one call (the catalog is read once for all rows).
+  // Only rows that have none yet are fetched: when applied rows leave `rows`
+  // after an apply, the remaining rows keep the choices the user made.
+  const requestedRef = useRef(new Set<string>());
   useEffect(() => {
+    const pending = rows.filter((r) => !requestedRef.current.has(r.rowKey));
+    if (pending.length === 0) return;
+    for (const r of pending) requestedRef.current.add(r.rowKey);
     let cancelled = false;
+    let done = false;
     (async () => {
-      const results = await Promise.all(
-        rows.map((r) =>
-          window.electronAPI
-            .suggestStockMatches(kind, { name: r.name, mpFirmaSymbol: r.mpFirmaSymbol }, 3)
-            .catch(() => [] as MatchSuggestion[]),
-        ),
-      );
+      let results: MatchSuggestion[][];
+      try {
+        results = await window.electronAPI.suggestStockMatchesBulk(
+          kind,
+          pending.map((r) => ({ name: r.name, mpFirmaSymbol: r.mpFirmaSymbol })),
+          3,
+        );
+      } catch {
+        results = pending.map(() => []);
+      }
       if (cancelled) return;
+      done = true;
       setChoices((prev) => {
         const next = { ...prev };
-        rows.forEach((r, i) => {
-          const top = results[i][0];
+        pending.forEach((r, i) => {
+          const sug = results[i] ?? [];
+          const top = sug[0];
           next[r.rowKey] = {
-            suggestions: results[i],
+            suggestions: sug,
             // Auto-pre-pick the top suggestion only if it's strong; otherwise
             // default to "add as new" so the user isn't nudged into a bad map.
             targetId: top && top.confidence >= 0.75 ? top.id : null,
@@ -79,6 +100,9 @@ const BulkUnmatchedModal: React.FC<Props> = ({ rows, kind, busy, onApply, onCanc
     })();
     return () => {
       cancelled = true;
+      // A fetch cut short (unmount, StrictMode re-run) is requested again by
+      // the next run; finished ones are never re-fetched.
+      if (!done) for (const r of pending) requestedRef.current.delete(r.rowKey);
     };
   }, [rows, kind]);
 
@@ -195,6 +219,18 @@ const BulkUnmatchedModal: React.FC<Props> = ({ rows, kind, busy, onApply, onCanc
           onClose={onCancel}
         />
         <div className="modal-body">
+          {errors && errors.length > 0 && (
+            <div className="alert alert-error" style={{ cursor: 'default' }}>
+              <strong>{t.bulkApplyFailedRows.replace('{n}', String(errors.length))}</strong>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                {errors.map((e) => (
+                  <li key={e.rowKey}>
+                    {e.name}: {e.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="bulk-toolbar">
             <span className="hint">{t.bulkSetAll}</span>
             <button
@@ -298,14 +334,12 @@ const BulkUnmatchedModal: React.FC<Props> = ({ rows, kind, busy, onApply, onCanc
                         </select>
                       </td>
                       <td className="bulk-col-skip">
-                        <button
-                          type="button"
-                          className={`btn btn-sm ${isSkipped ? 'soft-warn' : 'soft-danger'}`}
+                        <IconButton
+                          className={`btn-sm ${isSkipped ? 'soft-warn' : 'soft-danger'}`}
+                          icon={<IconTrash size={12} />}
+                          label={isSkipped ? t.bulkUnskip : t.bulkSkipRow}
                           onClick={() => toggleSkip(row.rowKey)}
-                          title={isSkipped ? t.bulkUnskip : t.bulkSkipRow}
-                        >
-                          <IconTrash size={12} />
-                        </button>
+                        />
                       </td>
                     </tr>
                   );

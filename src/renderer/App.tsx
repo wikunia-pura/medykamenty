@@ -4,9 +4,14 @@ import Footer from './components/Footer';
 import UpdateNotification from './components/UpdateNotification';
 import BackupNotifier from './components/BackupNotifier';
 import ExistingBatchChooser from './components/ExistingBatchChooser';
-import { I18nProvider } from './i18n';
+import { I18nProvider, useT } from './i18n';
+import { translations } from './translations';
+import ErrorBoundary from './components/ErrorBoundary';
+import ModalHeader from './components/ModalHeader';
+import { IconInfo } from './components/Icons';
+import { useEscapeKey } from './utils/useEscapeKey';
 import { NavigationProvider } from './navigation';
-import type { EmailBatch, Lang, AppSettings, TaskStatus } from '../shared/types';
+import type { EmailBatch, Lang, AppSettings, Order, TaskStatus } from '../shared/types';
 import type { ViewKey } from './views/types';
 import Dashboard from './views/Dashboard';
 import Products from './views/Products';
@@ -28,6 +33,12 @@ import OrderTaskBanner from './components/OrderTaskBanner';
 import { useModalAutoWidth } from './utils/useModalAutoWidth';
 
 const NAV_STACK_LIMIT = 50;
+
+type AppErrorKey =
+  | 'actionFailed'
+  | 'loadDataFailed'
+  | 'aiStatusLoadFailed'
+  | 'emailBatchesCheckFailed';
 
 interface NavState {
   stack: ViewKey[];
@@ -95,6 +106,18 @@ const App: React.FC = () => {
     );
 
   const [lang, setLangState] = useState<Lang>('pl');
+  // App.tsx renders the I18nProvider, so it reads its own strings directly.
+  const t = translations[lang];
+  // Failures of App-level actions and background loads, shown in a bar at the
+  // top of the window (click to dismiss) instead of only in the console.
+  // Kept as key + detail so it renders in the current language even when the
+  // failure happened before the saved language was loaded.
+  const [appError, setAppError] = useState<{ key: AppErrorKey; error: string } | null>(null);
+  // Result of an action that needs acknowledging (the cloud migration).
+  const [notice, setNotice] = useState<{ title: string; text: string } | null>(null);
+  // Failure of a workflow-task action from the task banner; shown under it.
+  const [taskError, setTaskError] = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState('0.0.0');
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [aiAvailable, setAiAvailable] = useState(false);
@@ -134,30 +157,45 @@ const App: React.FC = () => {
     setSession(s);
   };
 
+  const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
   const handleSignOut = async () => {
-    await window.electronAPI.authSignOut();
-    setSession(null);
+    try {
+      await window.electronAPI.authSignOut();
+      setSession(null);
+    } catch (err) {
+      setAppError({ key: 'actionFailed', error: errText(err) });
+    }
   };
 
   const handleRunMigration = async () => {
     if (!migrationInfo) return;
-    const result = await window.electronAPI.migrationRun();
-    if (result.ok) {
-      alert(
-        `Przeniesiono do chmury:\n` +
-          `• Dostawcy: ${result.counts.suppliers}\n` +
-          `• Surowce: ${result.counts.rawMaterials}\n` +
-          `• Komponenty: ${result.counts.components}\n` +
-          `• Produkty: ${result.counts.products}\n` +
-          `• Plany: ${result.counts.productionPlans}\n` +
-          `• Snapshoty: ${result.counts.stockSnapshots}\n` +
-          `• Raporty: ${result.counts.shortageReports}\n` +
-          `• Maile RFQ: ${result.counts.emailBatches}`,
-      );
-      const fresh = await window.electronAPI.migrationGetStatus();
-      setMigrationInfo({ hasLocalData: fresh.hasLocalData, migrated: fresh.migrated });
-    } else {
-      alert(`Błąd migracji:\n${result.error}`);
+    try {
+      const result = await window.electronAPI.migrationRun();
+      if (result.ok) {
+        const c = result.counts;
+        setNotice({
+          title: t.migrationDoneTitle,
+          text: t.migrationDoneDetails
+            .replace('{suppliers}', String(c.suppliers))
+            .replace('{rawMaterials}', String(c.rawMaterials))
+            .replace('{components}', String(c.components))
+            .replace('{products}', String(c.products))
+            .replace('{plans}', String(c.productionPlans))
+            .replace('{snapshots}', String(c.stockSnapshots))
+            .replace('{reports}', String(c.shortageReports))
+            .replace('{emailBatches}', String(c.emailBatches)),
+        });
+        const fresh = await window.electronAPI.migrationGetStatus();
+        setMigrationInfo({ hasLocalData: fresh.hasLocalData, migrated: fresh.migrated });
+      } else {
+        setNotice({
+          title: t.migrationFailedTitle,
+          text: result.error,
+        });
+      }
+    } catch (err) {
+      setNotice({ title: t.migrationFailedTitle, text: errText(err) });
     }
   };
 
@@ -190,7 +228,9 @@ const App: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to check existing email batches', err);
-      // Fall through to the default generate flow on error.
+      // Fall through to the default generate flow on error, but say so — the
+      // new batch may duplicate one that already exists.
+      setAppError({ key: 'emailBatchesCheckFailed', error: errText(err) });
     }
     proceedToGenerateEmails(reportId);
   };
@@ -216,18 +256,28 @@ const App: React.FC = () => {
     target: 'stockImport' | 'shortageReport' | 'emailGenerator',
     orderId: string,
     taskId: string,
-    extras?: { focusReportId?: string; focusBatchId?: string; planId?: string },
+    extras?: {
+      focusReportId?: string;
+      focusBatchId?: string;
+      planId?: string;
+      // The caller's (fresh) copy of the order — saves fetching it again.
+      order?: Order;
+    },
   ) => {
     let orderName = '';
     let taskStatus: TaskStatus = 'in_progress';
     try {
-      const o = await window.electronAPI.getOrder(orderId);
+      const o =
+        extras?.order && extras.order.id === orderId
+          ? extras.order
+          : await window.electronAPI.getOrder(orderId);
       orderName = o?.name ?? '';
       const tk = o?.workflow?.tasks.find((task) => task.id === taskId);
       if (tk) taskStatus = tk.status;
     } catch {
       /* ignore — banner still renders, just without the name */
     }
+    setTaskError(null);
     setSelectedOrderId(orderId);
     setOrderTaskCtx({ orderId, taskId, orderName, taskStatus });
     if (extras?.planId) setSelectedPlanId(extras.planId);
@@ -238,12 +288,15 @@ const App: React.FC = () => {
 
   const markTaskDoneAndReturn = async () => {
     if (!orderTaskCtx) return;
+    setTaskError(null);
     try {
       await window.electronAPI.updateOrderTask(orderTaskCtx.orderId, orderTaskCtx.taskId, {
         status: 'done',
       });
     } catch (err) {
-      console.error('Failed to mark task done', err);
+      // Stay on the task screen: the task is NOT done.
+      setTaskError(t.taskStatusUpdateFailed.replace('{error}', errText(err)));
+      return;
     }
     setOrderTaskCtx(null);
     setView('orderDetails');
@@ -251,17 +304,19 @@ const App: React.FC = () => {
 
   const reopenTaskAndStay = async () => {
     if (!orderTaskCtx) return;
+    setTaskError(null);
     try {
       await window.electronAPI.updateOrderTask(orderTaskCtx.orderId, orderTaskCtx.taskId, {
         status: 'in_progress',
       });
       setOrderTaskCtx({ ...orderTaskCtx, taskStatus: 'in_progress' });
     } catch (err) {
-      console.error('Failed to reopen task', err);
+      setTaskError(t.taskStatusUpdateFailed.replace('{error}', errText(err)));
     }
   };
 
   const backToOrderFromTask = () => {
+    setTaskError(null);
     setOrderTaskCtx(null);
     setView('orderDetails');
   };
@@ -278,6 +333,7 @@ const App: React.FC = () => {
       view !== 'emailGenerator'
     ) {
       setOrderTaskCtx(null);
+      setTaskError(null);
     }
   }, [view]);
 
@@ -325,12 +381,14 @@ const App: React.FC = () => {
         document.body.classList.toggle('dark-mode', s.darkMode);
       } catch (err) {
         console.error('Failed to load settings', err);
+        setSettingsError(errText(err));
       }
       try {
         const v = await window.electronAPI.getAppVersion();
         setAppVersion(v);
       } catch (err) {
         console.error('Failed to load version', err);
+        setAppError({ key: 'loadDataFailed', error: errText(err) });
       }
       try {
         const s = await window.electronAPI.authGetSession();
@@ -350,12 +408,14 @@ const App: React.FC = () => {
         setAiAvailable(ai.available);
       } catch (err) {
         console.error('Failed to query AI availability', err);
+        setAppError({ key: 'aiStatusLoadFailed', error: errText(err) });
       }
       try {
         const m = await window.electronAPI.migrationGetStatus();
         setMigrationInfo({ hasLocalData: m.hasLocalData, migrated: m.migrated });
       } catch (err) {
         console.error('Failed to query migration status', err);
+        setAppError({ key: 'loadDataFailed', error: errText(err) });
       }
     })();
   }, [session]);
@@ -363,30 +423,54 @@ const App: React.FC = () => {
   const setLang = async (newLang: Lang) => {
     setLangState(newLang);
     if (settings) {
-      const updated = await window.electronAPI.updateSettings({ language: newLang });
-      setSettings(updated);
+      try {
+        const updated = await window.electronAPI.updateSettings({ language: newLang });
+        setSettings(updated);
+      } catch (err) {
+        setAppError({ key: 'actionFailed', error: errText(err) });
+      }
     }
   };
 
   const onSettingsChanged = (s: AppSettings) => {
     setSettings(s);
+    setLangState(s.language);
     document.body.classList.toggle('dark-mode', s.darkMode);
   };
 
   const renderView = () => {
-    if (!settings) return <div className="main">Loading…</div>;
+    if (!settings) {
+      return (
+        <div className="main">
+          {settingsError ? (
+            <div className="card error-text">
+              {t.settingsLoadFailed.replace('{error}', settingsError)}
+            </div>
+          ) : (
+            t.loading
+          )}
+        </div>
+      );
+    }
     const taskBanner =
       orderTaskCtx &&
       (view === 'stockImport' ||
         view === 'shortageReport' ||
         view === 'emailGenerator') ? (
-        <OrderTaskBanner
-          orderName={orderTaskCtx.orderName}
-          taskStatus={orderTaskCtx.taskStatus}
-          onBackToOrder={backToOrderFromTask}
-          onMarkDone={markTaskDoneAndReturn}
-          onReopen={reopenTaskAndStay}
-        />
+        <>
+          <OrderTaskBanner
+            orderName={orderTaskCtx.orderName}
+            taskStatus={orderTaskCtx.taskStatus}
+            onBackToOrder={backToOrderFromTask}
+            onMarkDone={markTaskDoneAndReturn}
+            onReopen={reopenTaskAndStay}
+          />
+          {taskError && (
+            <div className="alert alert-error" onClick={() => setTaskError(null)}>
+              {taskError}
+            </div>
+          )}
+        </>
       ) : null;
     switch (view) {
       case 'dashboard':
@@ -509,6 +593,15 @@ const App: React.FC = () => {
       <div className="app">
         <UpdateNotification />
         <BackupNotifier />
+        {appError && (
+          <div
+            className="alert alert-error"
+            style={{ margin: '8px 16px' }}
+            onClick={() => setAppError(null)}
+          >
+            {t[appError.key].replace('{error}', appError.error)}
+          </div>
+        )}
         {migrationInfo && migrationInfo.hasLocalData && !migrationInfo.migrated && (
           <div
             style={{
@@ -521,11 +614,8 @@ const App: React.FC = () => {
               gap: 12,
             }}
           >
-            <span>
-              Wykryto dane z poprzedniej wersji aplikacji. Prześlij je raz do chmury, aby były
-              współdzielone z innymi użytkownikami.
-            </span>
-            <button onClick={handleRunMigration}>Prześlij dane do chmury</button>
+            <span>{t.migrationBannerText}</span>
+            <button onClick={handleRunMigration}>{t.migrationBannerButton}</button>
           </div>
         )}
         <NavigationProvider
@@ -541,7 +631,11 @@ const App: React.FC = () => {
               userEmail={session.email}
               onSignOut={handleSignOut}
             />
-            {renderView()}
+            {/* Keyed by view: a crash in one screen leaves the sidebar usable, and
+                navigating elsewhere clears the error. */}
+            <ErrorBoundary key={view} lang={lang}>
+              {renderView()}
+            </ErrorBoundary>
           </div>
         </NavigationProvider>
         {pendingEmailChooser && (
@@ -559,9 +653,42 @@ const App: React.FC = () => {
             onCancel={() => setPendingEmailChooser(null)}
           />
         )}
+        {notice && (
+          <AppNoticeDialog
+            title={notice.title}
+            text={notice.text}
+            onClose={() => setNotice(null)}
+          />
+        )}
         <Footer appVersion={appVersion} />
       </div>
     </I18nProvider>
+  );
+};
+
+// One-button acknowledgement dialog in the app's own modal shell (replaces the
+// native alert()).
+const AppNoticeDialog: React.FC<{ title: string; text: string; onClose: () => void }> = ({
+  title,
+  text,
+  onClose,
+}) => {
+  const t = useT();
+  useEscapeKey(onClose);
+  return (
+    <div className="modal-overlay" style={{ zIndex: 1000 }} onClick={onClose}>
+      <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+        <ModalHeader icon={<IconInfo size={18} />} tone="neutral" title={title} onClose={onClose} />
+        <div className="modal-body" style={{ whiteSpace: 'pre-wrap' }}>
+          {text}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn primary-filled" onClick={onClose}>
+            {t.close}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
 

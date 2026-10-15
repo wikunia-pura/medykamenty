@@ -116,7 +116,7 @@ export interface ElectronAPI {
   getProduct(id: string): Promise<Product | undefined>;
   createProduct(input: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>): Promise<Product>;
   updateProduct(id: string, patch: Partial<Product>): Promise<Product>;
-  deleteProduct(id: string): Promise<{ ok: boolean }>;
+  deleteProduct(id: string): Promise<{ ok: boolean; blockedBy?: string[] }>;
   duplicateProduct(id: string): Promise<Product>;
   analyzeRecipesXlsx(
     mode: RecipeImportMode,
@@ -168,6 +168,12 @@ export interface ElectronAPI {
     source: { name: string; mpFirmaSymbol?: string },
     limit?: number,
   ): Promise<MatchSuggestion[]>;
+  // Same as suggestStockMatches for many rows; result[i] belongs to sources[i].
+  suggestStockMatchesBulk(
+    kind: 'raw' | 'component',
+    sources: { name: string; mpFirmaSymbol?: string }[],
+    limit?: number,
+  ): Promise<MatchSuggestion[][]>;
   importStockFromBsx(): Promise<ImportSummary>;
   loadBsxPrices(snapshotIds: { raw?: string; component?: string }): Promise<
     { ok: true; raw: number; component: number } | { ok: false; error: string }
@@ -217,6 +223,18 @@ export interface ElectronAPI {
   listShortageReports(): Promise<ShortageReportEntry[]>;
   getShortageReport(id: string): Promise<ShortageReportEntry | undefined>;
   deleteShortageReport(id: string): Promise<{ ok: boolean }>;
+  deleteShortageReports(ids: string[]): Promise<{ deleted: number }>;
+  // Re-run the shortage math for an existing report and replace its content in
+  // place — keeps the id, name, order link, archive flag, supplier receipts and
+  // warehouse notice. Use for edits of an open report (e.g. supplier changes).
+  recomputeShortageReport(
+    reportId: string,
+    opts?: {
+      includeExpiredBatchIds?: string[];
+      acceptedDependencyIds?: string[];
+      substitutions?: Record<string, string>;
+    },
+  ): Promise<ShortageReportEntry>;
   updateShortageReport(
     id: string,
     patch: {
@@ -240,6 +258,7 @@ export interface ElectronAPI {
   listEmailBatches(): Promise<EmailBatch[]>;
   getEmailBatch(id: string): Promise<EmailBatch | undefined>;
   deleteEmailBatch(id: string): Promise<{ ok: boolean }>;
+  deleteEmailBatches(ids: string[]): Promise<{ deleted: number }>;
   updateEmailBatch(
     id: string,
     patch: { batchName?: string; orderId?: string | null },
@@ -358,16 +377,32 @@ export interface ElectronAPI {
     candidates: { id: string; name: string }[],
   ): Promise<{ id: string; confidence: number } | null>;
 
-  // Demo / data
-  seedDemo(): Promise<{
-    suppliers: number;
-    rawMaterials: number;
-    components: number;
-    products: number;
-    plans: number;
-    stockSnapshots: number;
-  }>;
-  wipeData(): Promise<{ ok: boolean }>;
+  // Bulk catalog ops — one IPC call and one write per table for many items.
+  // Items still in use are not deleted; they come back in `blocked`.
+  deleteCatalogItems(
+    kind: 'supplier' | 'raw' | 'component' | 'product',
+    ids: string[],
+  ): Promise<{ deleted: number; blocked: { id: string; blockedBy: string[] }[] }>;
+  // Create (no id) or patch (with id) many entries at once; returns them saved.
+  saveSuppliers(
+    items: { id?: string; patch: Partial<Omit<Supplier, 'id' | 'createdAt'>> }[],
+  ): Promise<Supplier[]>;
+  saveRawMaterials(
+    items: { id?: string; patch: Partial<Omit<RawMaterial, 'id' | 'createdAt'>> }[],
+    opts?: { priceSource?: PriceChangeSource },
+  ): Promise<RawMaterial[]>;
+  saveComponents(
+    items: { id?: string; patch: Partial<Omit<PackagingComponent, 'id' | 'createdAt'>> }[],
+    opts?: { priceSource?: PriceChangeSource },
+  ): Promise<PackagingComponent[]>;
+  saveProducts(
+    items: { id?: string; patch: Partial<Omit<Product, 'id' | 'createdAt'>> }[],
+  ): Promise<Product[]>;
+  // Make `supplierId` the preferred supplier of each item (null clears it).
+  setPreferredSupplier(
+    items: { kind: 'raw' | 'component'; id: string }[],
+    supplierId: string | null,
+  ): Promise<void>;
 
   // App
   getAppVersion(): Promise<string>;

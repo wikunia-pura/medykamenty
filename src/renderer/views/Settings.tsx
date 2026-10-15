@@ -5,6 +5,10 @@ import type { AppSettings, BsxIntegrationSettings, Lang } from '../../shared/typ
 import Toggle from '../components/Toggle';
 import SearchableSelect from '../components/SearchableSelect';
 import NumberInput from '../components/NumberInput';
+import ConfirmDialog from '../components/ConfirmDialog';
+
+const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
 interface Props {
   settings: AppSettings;
@@ -15,21 +19,30 @@ const SettingsView: React.FC<Props> = ({ settings, onChange }) => {
   const t = useT();
   const [busy, setBusy] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   // Typed locally and saved on blur — a per-keystroke async save would drop
   // characters while typing a whole address.
   const [warehouseEmailDraft, setWarehouseEmailDraft] = useState(settings.warehouseEmail ?? '');
 
   const update = async (patch: Partial<AppSettings>) => {
-    const next = await window.electronAPI.updateSettings(patch);
-    onChange(next);
+    setError(null);
+    try {
+      const next = await window.electronAPI.updateSettings(patch);
+      onChange(next);
+    } catch (err) {
+      setError(`${t.settingsSaveFailed}: ${errorMessage(err)}`);
+    }
   };
 
   const checkUpdates = async () => {
     setBusy('updates');
+    setError(null);
     try {
       const r = await window.electronAPI.checkForUpdates();
       if (r.error) setInfo(`${t.error}: ${r.error}`);
       else setInfo(r.message ?? `${t.appVersion}: ${r.info?.version ?? '?'}`);
+    } catch (err) {
+      setError(`${t.error}: ${errorMessage(err)}`);
     } finally {
       setBusy(null);
     }
@@ -41,6 +54,8 @@ const SettingsView: React.FC<Props> = ({ settings, onChange }) => {
         <HeaderNav />
         <h1>{t.settings}</h1>
       </div>
+
+      {error && <div className="card error-text">{error}</div>}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>{t.appName}</h2>
@@ -108,6 +123,7 @@ const SettingsView: React.FC<Props> = ({ settings, onChange }) => {
       <BsxSection
         settings={settings}
         onPatch={async (patch) => {
+          // Throws on failure — BsxSection reports it next to the control.
           const next = await window.electronAPI.updateSettings({ bsx: patch });
           onChange(next);
         }}
@@ -124,7 +140,9 @@ const SettingsView: React.FC<Props> = ({ settings, onChange }) => {
           <button
             className="btn"
             onClick={() =>
-              window.electronAPI.openExternal('https://github.com/wikunia-pura/medykamenty')
+              void window.electronAPI
+                .openExternal('https://github.com/wikunia-pura/medykamenty')
+                .catch((err) => setError(`${t.error}: ${errorMessage(err)}`))
             }
           >
             GitHub
@@ -153,6 +171,11 @@ const BackupSection: React.FC = () => {
   const [status, setStatus] = useState<BackupStatusInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // Restore confirmation in steps: merge asks once, replace asks twice (it
+  // wipes the shared cloud data for every install).
+  const [confirmStep, setConfirmStep] = useState<'merge' | 'replace1' | 'replace2' | null>(
+    null,
+  );
 
   const loadStatus = async () => {
     try {
@@ -170,20 +193,18 @@ const BackupSection: React.FC = () => {
     setBusy(true);
     setMessage(null);
     try {
+      // ok:false without a path is the user cancelling the save dialog.
       const r = await window.electronAPI.exportBackup();
       if (r.ok && r.path) setMessage(t.backupExported.replace('{path}', r.path));
+    } catch (err) {
+      setMessage(`${t.backupError}: ${errorMessage(err)}`);
     } finally {
       setBusy(false);
     }
   };
 
   const handleImport = async (mode: 'merge' | 'replace') => {
-    if (mode === 'merge') {
-      if (!window.confirm(t.backupImportConfirmMerge)) return;
-    } else {
-      if (!window.confirm(t.backupImportConfirmReplace1)) return;
-      if (!window.confirm(t.backupImportConfirmReplace2)) return;
-    }
+    setConfirmStep(null);
     setBusy(true);
     setMessage(null);
     try {
@@ -218,13 +239,24 @@ const BackupSection: React.FC = () => {
         <button className="btn" disabled={busy} onClick={handleExport}>
           {t.exportData}
         </button>
-        <button className="btn" disabled={busy} onClick={() => handleImport('merge')}>
+        <button className="btn" disabled={busy} onClick={() => setConfirmStep('merge')}>
           {t.importDataMerge}
         </button>
-        <button className="btn soft-danger" disabled={busy} onClick={() => handleImport('replace')}>
+        <button
+          className="btn soft-danger"
+          disabled={busy}
+          onClick={() => setConfirmStep('replace1')}
+        >
           {t.importDataReplace}
         </button>
-        <button className="btn" onClick={() => void window.electronAPI.backupOpenFolder()}>
+        <button
+          className="btn"
+          onClick={() =>
+            void window.electronAPI
+              .backupOpenFolder()
+              .catch((err) => setMessage(`${t.backupError}: ${errorMessage(err)}`))
+          }
+        >
           {t.backupOpenFolder}
         </button>
       </div>
@@ -232,6 +264,29 @@ const BackupSection: React.FC = () => {
         <div className="hint" style={{ marginTop: 8 }}>
           {message}
         </div>
+      )}
+      {confirmStep === 'merge' && (
+        <ConfirmDialog
+          message={t.backupImportConfirmMerge}
+          onConfirm={() => void handleImport('merge')}
+          onCancel={() => setConfirmStep(null)}
+        />
+      )}
+      {confirmStep === 'replace1' && (
+        <ConfirmDialog
+          danger
+          message={t.backupImportConfirmReplace1}
+          onConfirm={() => setConfirmStep('replace2')}
+          onCancel={() => setConfirmStep(null)}
+        />
+      )}
+      {confirmStep === 'replace2' && (
+        <ConfirmDialog
+          danger
+          message={t.backupImportConfirmReplace2}
+          onConfirm={() => void handleImport('replace')}
+          onCancel={() => setConfirmStep(null)}
+        />
       )}
     </div>
   );
@@ -259,19 +314,27 @@ const BsxSection: React.FC<BsxSectionProps> = ({ settings, onPatch }) => {
   const [warehouses, setWarehouses] = useState<BsxWarehouse[] | null>(null);
   const [warehousesBusy, setWarehousesBusy] = useState(false);
   const [warehousesError, setWarehousesError] = useState<string | null>(null);
+  // Failed save of a BSX field or of the password.
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const saveField = (field: keyof BsxIntegrationSettings, value: string | number | undefined) => {
-    void onPatch({ [field]: value } as Partial<BsxIntegrationSettings>);
+    setSaveError(null);
+    void onPatch({ [field]: value } as Partial<BsxIntegrationSettings>).catch((err) =>
+      setSaveError(`${t.settingsSaveFailed}: ${errorMessage(err)}`),
+    );
   };
 
   const savePassword = async () => {
     if (!password) return;
     setPwBusy(true);
+    setSaveError(null);
     try {
       await window.electronAPI.setBsxPassword(password);
       setPassword('');
       // Refresh settings so hasPassword updates without a manual reload.
       await onPatch({});
+    } catch (err) {
+      setSaveError(`${t.settingsSaveFailed}: ${errorMessage(err)}`);
     } finally {
       setPwBusy(false);
     }
@@ -279,9 +342,12 @@ const BsxSection: React.FC<BsxSectionProps> = ({ settings, onPatch }) => {
 
   const clearPassword = async () => {
     setPwBusy(true);
+    setSaveError(null);
     try {
       await window.electronAPI.clearBsxPassword();
       await onPatch({});
+    } catch (err) {
+      setSaveError(`${t.settingsSaveFailed}: ${errorMessage(err)}`);
     } finally {
       setPwBusy(false);
     }
@@ -294,6 +360,8 @@ const BsxSection: React.FC<BsxSectionProps> = ({ settings, onPatch }) => {
       const r = await window.electronAPI.testBsxConnection();
       if (r.ok) setTestResult({ ok: true, message: t.bsxConnectionOk });
       else setTestResult({ ok: false, message: `${t.bsxConnectionFailed}: ${r.error}` });
+    } catch (err) {
+      setTestResult({ ok: false, message: `${t.bsxConnectionFailed}: ${errorMessage(err)}` });
     } finally {
       setTestBusy(false);
     }
@@ -309,6 +377,9 @@ const BsxSection: React.FC<BsxSectionProps> = ({ settings, onPatch }) => {
         setWarehouses(null);
         setWarehousesError(r.error);
       }
+    } catch (err) {
+      setWarehouses(null);
+      setWarehousesError(errorMessage(err));
     } finally {
       setWarehousesBusy(false);
     }
@@ -317,6 +388,11 @@ const BsxSection: React.FC<BsxSectionProps> = ({ settings, onPatch }) => {
   return (
     <div className="card">
       <h2 style={{ marginTop: 0 }}>{t.bsxIntegration}</h2>
+      {saveError && (
+        <div className="error-text" style={{ marginBottom: 8 }}>
+          {saveError}
+        </div>
+      )}
       <div className="form-row">
         <label>{t.bsxCloudKey}</label>
         <input

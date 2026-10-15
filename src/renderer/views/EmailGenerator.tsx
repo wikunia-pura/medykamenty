@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n';
+import type { T } from '../translations';
 import { VIEW_ICONS } from '../viewIcons';
 import { HeaderNav, useNavigation } from '../navigation';
 import type {
@@ -63,11 +64,15 @@ export const resetEmailGeneratorFocus = () => {
   cache.focus = null;
 };
 
-const formatReportLabel = (e: ShortageReportEntry): string => {
+const formatReportLabel = (e: ShortageReportEntry, t: T): string => {
   const groups = e.report.groups.length;
-  const suffix = groups === 0 ? ' — brak braków' : ` — ${groups}`;
+  const suffix = groups === 0 ? ` — ${t.reportLabelNoShortages}` : ` — ${groups}`;
   return `${e.reportName}${suffix}`;
 };
+
+// Typing in an email body is saved this long after the last keystroke (and
+// immediately on blur), not on every keystroke.
+const BODY_SAVE_DEBOUNCE_MS = 800;
 
 const EmailGenerator: React.FC<Props> = ({
   defaultLanguage,
@@ -103,7 +108,25 @@ const EmailGenerator: React.FC<Props> = ({
   const [listQuery, setListQuery] = useState('');
   const [focusQuery, setFocusQuery] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<EmailBatch | null>(null);
-  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  // Ids of the batches the "delete all" confirm will remove — the rows visible
+  // when it was opened, never the hidden (archived / filtered-out) ones.
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState<string[] | null>(null);
+  // Unsaved email-body edits, keyed `${batchId}:${emailId}`. They overlay the
+  // stored body, so replacing the batch (e.g. after "mark sent") never wipes
+  // what is being typed. Mirrored in a ref for the async save loop.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftsRef = useRef<Record<string, string>>({});
+  const [bodySaveState, setBodySaveState] = useState<
+    Record<string, { saving?: boolean; error?: string }>
+  >({});
+  const bodySaveTimers = useRef(
+    new Map<string, { timer: number; batchId: string; emailId: string }>(),
+  );
+  const bodySaveRuns = useRef(new Map<string, Promise<void>>());
+  // Emails whose "mark sent" toggle is in flight — a double click must not
+  // mark and immediately unmark.
+  const sentBusyRef = useRef(new Set<string>());
+  const [sentBusyKeys, setSentBusyKeys] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
@@ -172,10 +195,10 @@ const EmailGenerator: React.FC<Props> = ({
     const su = suppliersRes.status === 'fulfilled' ? suppliersRes.value : [];
     if (reportsRes.status === 'rejected') {
       console.error('listShortageReports failed', reportsRes.reason);
-      setError((reportsRes.reason as Error)?.message ?? 'Failed to load reports');
+      setError((reportsRes.reason as Error)?.message ?? t.loadReportsFailed);
     } else if (batchesRes.status === 'rejected') {
       console.error('listEmailBatches failed', batchesRes.reason);
-      setError((batchesRes.reason as Error)?.message ?? 'Failed to load batches');
+      setError((batchesRes.reason as Error)?.message ?? t.loadEmailBatchesFailed);
     }
     setReports(r);
     setBatches(b);
@@ -214,7 +237,7 @@ const EmailGenerator: React.FC<Props> = ({
         language: defaultLanguage,
         useAI: useAiByDefault && aiAvailable,
       });
-      await loadAll();
+      setBatches((prev) => [batch, ...prev.filter((b) => b.id !== batch.id)]);
       setFocusAndCache({ batch, originFromNav });
       if (typeof window !== 'undefined') {
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -286,6 +309,27 @@ const EmailGenerator: React.FC<Props> = ({
     }
   };
 
+  // Write fields of one batch / one email into the local copies (the batch
+  // list and the focused batch) instead of replacing the whole batch with a
+  // server copy — a server copy can be older than a body save that finished
+  // first, and would put already-typed text back. Reads the module cache so
+  // a save that completes after the view unmounted still lands there.
+  const patchBatchLocal = (batchId: string, fn: (b: EmailBatch) => EmailBatch) => {
+    setBatches((prev) => prev.map((b) => (b.id === batchId ? fn(b) : b)));
+    const cur = cache.focus;
+    if (cur && cur.batch.id === batchId) setFocusAndCache({ ...cur, batch: fn(cur.batch) });
+  };
+
+  const patchEmailLocal = (
+    batchId: string,
+    emailId: string,
+    patch: Partial<RFQEmailRecord>,
+  ) =>
+    patchBatchLocal(batchId, (b) => ({
+      ...b,
+      emails: b.emails.map((e) => (e.id === emailId ? { ...e, ...patch } : e)),
+    }));
+
   const commitBatchNameRename = async () => {
     if (!focus || batchNameDraft === null) return;
     const next = batchNameDraft.trim();
@@ -295,10 +339,8 @@ const EmailGenerator: React.FC<Props> = ({
       const updated = await window.electronAPI.updateEmailBatch(focus.batch.id, {
         batchName: next,
       });
-      if (updated) {
-        setFocusAndCache({ batch: updated, originFromNav: focus.originFromNav });
-      }
-      await loadAll();
+      if (!updated) throw new Error(t.emailBatchMissing);
+      patchBatchLocal(updated.id, (b) => ({ ...b, batchName: updated.batchName }));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -316,16 +358,25 @@ const EmailGenerator: React.FC<Props> = ({
     if (!newSupplierId) return;
     const next = suppliers.find((s) => s.id === newSupplierId);
     if (!next) return;
-    const updated = await window.electronAPI.updateBatchEmail(batchId, email.id, {
-      supplierId: next.id,
-      supplierName: next.name,
-      to: next.email ?? '',
-    });
-    if (updated) {
-      setFocusAndCache({ batch: updated, originFromNav: focus?.originFromNav });
+    setError(null);
+    try {
+      const updated = await window.electronAPI.updateBatchEmail(batchId, email.id, {
+        supplierId: next.id,
+        supplierName: next.name,
+        to: next.email ?? '',
+      });
+      if (!updated) throw new Error(t.emailBatchMissing);
+      const fresh = updated.emails.find((e) => e.id === email.id);
+      patchEmailLocal(batchId, email.id, {
+        supplierId: fresh?.supplierId ?? next.id,
+        supplierName: fresh?.supplierName ?? next.name,
+        to: fresh?.to ?? next.email ?? '',
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSupplierPickerTarget(null);
     }
-    await loadAll();
-    setSupplierPickerTarget(null);
   };
 
   // Pick the picker's type filter from the email's line mix — pure-raw emails
@@ -341,33 +392,127 @@ const EmailGenerator: React.FC<Props> = ({
     return undefined;
   };
 
-  const refreshFocus = async (batchId: string) => {
-    const fresh = await window.electronAPI.getEmailBatch(batchId);
-    if (fresh) setFocusAndCache({ batch: fresh, originFromNav: focus?.originFromNav });
-    await loadAll();
-  };
-
   const toggleSent = async (
     batchId: string,
     emailId: string,
     currentSentAt?: string,
   ) => {
-    const next = currentSentAt ? null : new Date().toISOString();
-    await window.electronAPI.markEmailSent(batchId, emailId, next);
-    await refreshFocus(batchId);
+    const key = `${batchId}:${emailId}`;
+    if (sentBusyRef.current.has(key)) return;
+    sentBusyRef.current.add(key);
+    setSentBusyKeys(new Set(sentBusyRef.current));
+    setError(null);
+    try {
+      const next = currentSentAt ? null : new Date().toISOString();
+      const updated = await window.electronAPI.markEmailSent(batchId, emailId, next);
+      if (!updated) throw new Error(t.emailBatchMissing);
+      // Only the sent flag comes from the returned batch — the body may have
+      // an unsaved draft or a newer save in flight.
+      const fresh = updated.emails.find((e) => e.id === emailId);
+      patchEmailLocal(batchId, emailId, { sentAt: fresh?.sentAt });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      sentBusyRef.current.delete(key);
+      setSentBusyKeys(new Set(sentBusyRef.current));
+    }
   };
 
-  const updateBody = async (batchId: string, emailId: string, body: string) => {
-    if (!focus) return;
-    const updatedEmails = focus.batch.emails.map((e) =>
-      e.id === emailId ? { ...e, body } : e,
-    );
-    setFocusAndCache({
-      batch: { ...focus.batch, emails: updatedEmails },
-      originFromNav: focus.originFromNav,
-    });
-    await window.electronAPI.updateBatchEmail(batchId, emailId, { body });
+  const setDraft = (key: string, text: string | null) => {
+    const next = { ...draftsRef.current };
+    if (text === null) delete next[key];
+    else next[key] = text;
+    draftsRef.current = next;
+    setDrafts(next);
   };
+
+  const clearBodySaveTimer = (key: string) => {
+    const pending = bodySaveTimers.current.get(key);
+    if (pending) {
+      window.clearTimeout(pending.timer);
+      bodySaveTimers.current.delete(key);
+    }
+  };
+
+  // Saves the email's draft body. One save at a time per email: a call while
+  // one is running joins it, and the running loop re-reads the draft when its
+  // request returns, so the latest text always wins and nothing is lost.
+  const saveBody = (batchId: string, emailId: string): Promise<void> => {
+    const key = `${batchId}:${emailId}`;
+    clearBodySaveTimer(key);
+    const running = bodySaveRuns.current.get(key);
+    if (running) return running;
+    if (draftsRef.current[key] === undefined) return Promise.resolve();
+    const run = (async () => {
+      setBodySaveState((prev) => ({ ...prev, [key]: { saving: true } }));
+      try {
+        for (;;) {
+          const text = draftsRef.current[key];
+          if (text === undefined) break;
+          const updated = await window.electronAPI.updateBatchEmail(batchId, emailId, {
+            body: text,
+          });
+          if (!updated) throw new Error(t.emailBatchMissing);
+          patchEmailLocal(batchId, emailId, { body: text });
+          if (draftsRef.current[key] === text) {
+            setDraft(key, null);
+            break;
+          }
+        }
+        setBodySaveState((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      } catch (err) {
+        // The draft stays on screen; the next keystroke or blur retries.
+        setBodySaveState((prev) => ({
+          ...prev,
+          [key]: { error: t.emailBodySaveFailed.replace('{error}', (err as Error).message) },
+        }));
+      } finally {
+        bodySaveRuns.current.delete(key);
+      }
+    })();
+    bodySaveRuns.current.set(key, run);
+    return run;
+  };
+
+  const onBodyChange = (batchId: string, emailId: string, text: string) => {
+    const key = `${batchId}:${emailId}`;
+    setDraft(key, text);
+    // The module cache outlives this view: leaving and coming back before the
+    // save lands must show the text as typed, not the last saved one (and
+    // further typing must not build on the stale body).
+    const cached = cache.focus;
+    if (cached?.batch.id === batchId) {
+      cache.focus = {
+        ...cached,
+        batch: {
+          ...cached.batch,
+          emails: cached.batch.emails.map((e) => (e.id === emailId ? { ...e, body: text } : e)),
+        },
+      };
+    }
+    clearBodySaveTimer(key);
+    const timer = window.setTimeout(() => {
+      bodySaveTimers.current.delete(key);
+      void saveBody(batchId, emailId);
+    }, BODY_SAVE_DEBOUNCE_MS);
+    bodySaveTimers.current.set(key, { timer, batchId, emailId });
+  };
+
+  // Leaving the view (sidebar, history nav) skips the textarea's blur — save
+  // whatever is still waiting for its debounce.
+  useEffect(
+    () => () => {
+      for (const { batchId, emailId } of Array.from(bodySaveTimers.current.values())) {
+        void saveBody(batchId, emailId);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const changeEmailLanguage = async (
     batchId: string,
@@ -378,13 +523,23 @@ const EmailGenerator: React.FC<Props> = ({
     setRegenKey(key);
     setError(null);
     try {
+      // Regenerating replaces the body: drop the draft and let a save that is
+      // already on its way finish first, so it cannot overwrite the new text.
+      clearBodySaveTimer(key);
+      setDraft(key, null);
+      await bodySaveRuns.current.get(key);
+      setBodySaveState((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
       const updated = await window.electronAPI.regenerateBatchEmail(
         batchId,
         emailId,
         { language: nextLang, useAI: useAiByDefault && aiAvailable },
       );
-      setFocusAndCache({ batch: updated, originFromNav: focus?.originFromNav });
-      await loadAll();
+      const fresh = updated.emails.find((e) => e.id === emailId);
+      if (fresh) patchEmailLocal(batchId, emailId, fresh);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -402,34 +557,39 @@ const EmailGenerator: React.FC<Props> = ({
     }
   };
 
-  const mailtoHref = (e: RFQEmailRecord) =>
+  const mailtoHref = (e: RFQEmailRecord, body: string) =>
     `mailto:${encodeURIComponent(e.to)}?subject=${encodeURIComponent(
       e.subject,
-    )}&body=${encodeURIComponent(e.body)}`;
+    )}&body=${encodeURIComponent(body)}`;
 
   const onConfirmDeleteBatch = async () => {
     if (!confirmDelete) return;
     const id = confirmDelete.id;
     setConfirmDelete(null);
-    await window.electronAPI.deleteEmailBatch(id);
-    if (focus?.batch.id === id) setFocusAndCache(null);
-    await loadAll();
+    setError(null);
+    try {
+      await window.electronAPI.deleteEmailBatch(id);
+      setBatches((prev) => prev.filter((b) => b.id !== id));
+      if (cache.focus?.batch.id === id) setFocusAndCache(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
   };
 
   const onConfirmDeleteAll = async () => {
-    setConfirmDeleteAll(false);
+    const ids = confirmDeleteAll ?? [];
+    setConfirmDeleteAll(null);
+    if (ids.length === 0) return;
     setError(null);
     setInfo(null);
     setBusy(true);
     setLoaderMessage(t.deleteAllInProgress);
-    const total = batches.length;
     try {
-      for (const b of batches) {
-        await window.electronAPI.deleteEmailBatch(b.id);
-      }
-      setInfo(t.deleteAllSuccess.replace('{n}', String(total)));
-      setFocusAndCache(null);
-      await loadAll();
+      const { deleted } = await window.electronAPI.deleteEmailBatches(ids);
+      const gone = new Set(ids);
+      setBatches((prev) => prev.filter((b) => !gone.has(b.id)));
+      if (cache.focus && gone.has(cache.focus.batch.id)) setFocusAndCache(null);
+      setInfo(t.deleteAllSuccess.replace('{n}', String(deleted)));
     } catch (err) {
       setError((err as Error).message);
       await loadAll();
@@ -480,11 +640,7 @@ const EmailGenerator: React.FC<Props> = ({
     return (
       <div className="main">
         <div className="focus-bar">
-          <button
-            className="btn"
-            onClick={handleBack}
-            title={t.backToList}
-          >
+          <button className="btn" onClick={handleBack}>
             <IconArrowLeft size={14} /> {t.backToList}
           </button>
           <div className="focus-bar-text">
@@ -511,7 +667,6 @@ const EmailGenerator: React.FC<Props> = ({
                 onClick={() =>
                   setBatchNameDraft(batch.batchName || batch.reportName || '')
                 }
-                title={t.edit}
               >
                 {batch.batchName || batch.reportName || t.emailBatchTitle}
                 <IconEdit size={13} className="focus-bar-title-pencil" />
@@ -519,42 +674,46 @@ const EmailGenerator: React.FC<Props> = ({
             )}
             <span className="focus-bar-meta">
               <span className="hint">{t.reportName}:</span>{' '}
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => onNavigateToReport?.(batch.planId, batch.reportId)}
-                title={reportMissing ? t.linkedReportDeleted : t.goToShortageReport}
-                disabled={!onNavigateToReport || reportMissing}
+              <HoverTooltip
+                className="hover-tooltip-compact"
+                trigger={
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => onNavigateToReport?.(batch.planId, batch.reportId)}
+                    disabled={!onNavigateToReport || reportMissing}
+                  >
+                    {batch.reportName}
+                  </button>
+                }
               >
-                {batch.reportName}
-              </button>
+                {reportMissing ? t.linkedReportDeleted : t.goToShortageReport}
+              </HoverTooltip>
               {reportMissing && (
-                <span
-                  className="tag danger"
-                  style={{ marginLeft: 6 }}
-                  title={t.linkedReportDeleted}
-                >
+                <span className="tag danger" style={{ marginLeft: 6 }}>
                   {t.linkedReportDeletedTag}
                 </span>
               )}
             </span>
             <span className="focus-bar-meta">
               <span className="hint">{t.selectedPlan}:</span>{' '}
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => openPlanModal(batch.planId)}
-                title={planMissing ? t.linkedPlanDeleted : t.openPlan}
-                disabled={planMissing}
+              <HoverTooltip
+                className="hover-tooltip-compact"
+                trigger={
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => openPlanModal(batch.planId)}
+                    disabled={planMissing}
+                  >
+                    {livePlanName}
+                  </button>
+                }
               >
-                {livePlanName}
-              </button>
+                {planMissing ? t.linkedPlanDeleted : t.openPlan}
+              </HoverTooltip>
               {planMissing && (
-                <span
-                  className="tag danger"
-                  style={{ marginLeft: 6 }}
-                  title={t.linkedPlanDeleted}
-                >
+                <span className="tag danger" style={{ marginLeft: 6 }}>
                   {t.linkedPlanDeletedTag}
                 </span>
               )}
@@ -595,6 +754,9 @@ const EmailGenerator: React.FC<Props> = ({
           const key = `${batch.id}:${e.id}`;
           const isSent = !!e.sentAt;
           const isRegen = regenKey === key;
+          const body = drafts[key] ?? e.body;
+          const saveState = bodySaveState[key];
+          const sentBusy = sentBusyKeys.has(key);
           return (
             <div key={e.id} className={`card ${isSent ? 'email-card-sent' : ''}`}>
               <div className="card-header">
@@ -607,10 +769,7 @@ const EmailGenerator: React.FC<Props> = ({
                   )}{' '}
                   {e.refinedByAI && <span className="tag success">AI</span>}
                   {isSent && (
-                    <span
-                      className="tag success"
-                      title={new Date(e.sentAt!).toLocaleString()}
-                    >
+                    <span className="tag success">
                       <IconCheck size={11} /> {t.sentBadge}
                     </span>
                   )}
@@ -619,33 +778,40 @@ const EmailGenerator: React.FC<Props> = ({
                   <button
                     className="btn btn-sm soft-edit"
                     onClick={() => setSupplierPickerTarget(e)}
-                    title={e.supplierId ? t.changeSupplier : t.assignSupplier}
                     disabled={isRegen}
                   >
                     <IconEdit size={13} />{' '}
                     {e.supplierId ? t.changeSupplier : t.assignSupplier}
                   </button>
-                  <select
-                    className="input email-lang-select"
-                    value={e.language}
-                    onChange={(ev) => {
-                      const val = ev.target.value as Lang;
-                      if (val !== e.language) {
-                        void changeEmailLanguage(batch.id, e.id, val);
-                      }
-                    }}
-                    disabled={isRegen}
-                    title={t.preferredEmailLanguage}
+                  <HoverTooltip
+                    align="right"
+                    className="hover-tooltip-compact"
+                    triggerClassName="icon-button-trigger"
+                    trigger={
+                      <select
+                        className="input email-lang-select"
+                        value={e.language}
+                        onChange={(ev) => {
+                          const val = ev.target.value as Lang;
+                          if (val !== e.language) {
+                            void changeEmailLanguage(batch.id, e.id, val);
+                          }
+                        }}
+                        disabled={isRegen}
+                        aria-label={t.emailLanguageLabel}
+                      >
+                        <option value="pl">PL</option>
+                        <option value="en">EN</option>
+                      </select>
+                    }
                   >
-                    <option value="pl">PL</option>
-                    <option value="en">EN</option>
-                  </select>
+                    {t.emailLanguageLabel}
+                  </HoverTooltip>
                   <button
                     className={`btn btn-sm ${
                       copiedKey === key ? 'soft-success' : 'soft-edit'
                     }`}
-                    onClick={() => copy(key, e.body)}
-                    title={t.copy}
+                    onClick={() => copy(key, body)}
                   >
                     {copiedKey === key ? (
                       <IconCheck size={13} />
@@ -657,31 +823,40 @@ const EmailGenerator: React.FC<Props> = ({
                   {e.to && (
                     <a
                       className="btn btn-sm soft-success"
-                      href={mailtoHref(e)}
-                      title={t.openInMailClient}
+                      href={mailtoHref(e, body)}
                     >
                       <IconMail size={13} /> {t.openInMailClient}
                     </a>
                   )}
                   <button
                     className={`btn btn-sm ${isSent ? 'soft-danger' : 'soft-success'}`}
-                    onClick={() => toggleSent(batch.id, e.id, e.sentAt)}
-                    title={isSent ? t.unmarkSent : t.markSent}
+                    onClick={() => void toggleSent(batch.id, e.id, e.sentAt)}
+                    disabled={sentBusy}
                   >
                     <IconCheck size={13} /> {isSent ? t.unmarkSent : t.markSent}
                   </button>
                 </div>
               </div>
               <div className="form-row">
-                <label>Subject</label>
+                <label>{t.emailSubject}</label>
                 <input className="input" readOnly value={e.subject} />
               </div>
               <textarea
-                value={e.body}
-                onChange={(ev) => updateBody(batch.id, e.id, ev.target.value)}
-                rows={Math.min(20, Math.max(8, e.body.split('\n').length + 1))}
+                value={body}
+                onChange={(ev) => onBodyChange(batch.id, e.id, ev.target.value)}
+                onBlur={() => void saveBody(batch.id, e.id)}
+                rows={Math.min(20, Math.max(8, body.split('\n').length + 1))}
                 disabled={isRegen}
               />
+              {saveState?.error ? (
+                <div className="error-text" style={{ marginTop: 6 }}>
+                  {saveState.error}
+                </div>
+              ) : saveState?.saving ? (
+                <div className="hint" style={{ marginTop: 6 }}>
+                  {t.emailBodySaving}
+                </div>
+              ) : null}
               {isSent && (
                 <div className="hint" style={{ marginTop: 6 }}>
                   {t.sentAtLabel}: {new Date(e.sentAt!).toLocaleString()}
@@ -723,7 +898,7 @@ const EmailGenerator: React.FC<Props> = ({
   // ----- List view (default) -----
   const reportOptions = reports.map((e) => ({
     value: e.id,
-    label: formatReportLabel(e),
+    label: formatReportLabel(e, t),
   }));
 
   const selectedHasNoGroups =
@@ -745,16 +920,14 @@ const EmailGenerator: React.FC<Props> = ({
         {batches.length > 0 && (
           <span className="page-header-count">{batches.length}</span>
         )}
-        <button
-          type="button"
-          className="btn btn-sm"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => setSettingsOpen(true)}
-          title={t.settings}
-          aria-label={t.settings}
-        >
-          <IconSettings size={14} />
-        </button>
+        <span style={{ marginLeft: 'auto' }}>
+          <IconButton
+            className="btn-sm"
+            icon={<IconSettings size={14} />}
+            label={t.settings}
+            onClick={() => setSettingsOpen(true)}
+          />
+        </span>
       </div>
       {taskBanner}
 
@@ -827,9 +1000,8 @@ const EmailGenerator: React.FC<Props> = ({
             </div>
             <button
               className="btn btn-sm soft-danger"
-              onClick={() => setConfirmDeleteAll(true)}
+              onClick={() => setConfirmDeleteAll(filteredBatches.map((b) => b.id))}
               disabled={busy}
-              title={t.deleteAll}
             >
               <IconTrash size={13} /> {t.deleteAll}
             </button>
@@ -870,7 +1042,6 @@ const EmailGenerator: React.FC<Props> = ({
                         key={b.id}
                         className={`row-clickable${b.archived ? ' row-archived' : ''}`}
                         onClick={() => setFocusAndCache({ batch: b })}
-                        title={t.preview}
                       >
                         <td className="col-name col-wrap">
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -881,12 +1052,11 @@ const EmailGenerator: React.FC<Props> = ({
                                 ev.stopPropagation();
                                 setFocusAndCache({ batch: b });
                               }}
-                              title={t.preview}
                             >
                               {b.batchName || b.reportName}
                             </button>
                             {b.archived && (
-                              <span className="tag" title={t.archivedTag}>
+                              <span className="tag">
                                 {t.archivedTag}
                               </span>
                             )}
@@ -895,30 +1065,38 @@ const EmailGenerator: React.FC<Props> = ({
                         <td className="col-wrap">
                           <div className="cell-with-end-tag">
                             {rowReportMissing && (
-                              <span
-                                className="tag danger"
-                                title={t.linkedReportDeleted}
+                              <HoverTooltip
+                                className="hover-tooltip-compact"
+                                trigger={
+                                  <span className="tag danger">
+                                    {t.linkedReportDeletedTag}
+                                  </span>
+                                }
                               >
-                                {t.linkedReportDeletedTag}
-                              </span>
+                                {t.linkedReportDeleted}
+                              </HoverTooltip>
                             )}
                             {onNavigateToReport ? (
-                              <button
-                                type="button"
-                                className="link-button"
-                                onClick={(ev) => {
-                                  ev.stopPropagation();
-                                  onNavigateToReport(b.planId, b.reportId);
-                                }}
-                                title={
-                                  rowReportMissing
-                                    ? t.linkedReportDeleted
-                                    : t.goToShortageReport
+                              <HoverTooltip
+                                className="hover-tooltip-compact"
+                                trigger={
+                                  <button
+                                    type="button"
+                                    className="link-button"
+                                    onClick={(ev) => {
+                                      ev.stopPropagation();
+                                      onNavigateToReport(b.planId, b.reportId);
+                                    }}
+                                    disabled={rowReportMissing}
+                                  >
+                                    {b.reportName}
+                                  </button>
                                 }
-                                disabled={rowReportMissing}
                               >
-                                {b.reportName}
-                              </button>
+                                {rowReportMissing
+                                  ? t.linkedReportDeleted
+                                  : t.goToShortageReport}
+                              </HoverTooltip>
                             ) : (
                               <span>{b.reportName}</span>
                             )}
@@ -927,25 +1105,35 @@ const EmailGenerator: React.FC<Props> = ({
                         <td className="col-wrap">
                           <div className="cell-with-end-tag">
                             {rowPlanMissing && (
-                              <span
-                                className="tag danger"
-                                title={t.linkedPlanDeleted}
+                              <HoverTooltip
+                                className="hover-tooltip-compact"
+                                trigger={
+                                  <span className="tag danger">
+                                    {t.linkedPlanDeletedTag}
+                                  </span>
+                                }
                               >
-                                {t.linkedPlanDeletedTag}
-                              </span>
+                                {t.linkedPlanDeleted}
+                              </HoverTooltip>
                             )}
-                            <button
-                              type="button"
-                              className="link-button"
-                              onClick={(ev) => {
-                                ev.stopPropagation();
-                                openPlanModal(b.planId);
-                              }}
-                              title={rowPlanMissing ? t.linkedPlanDeleted : t.openPlan}
-                              disabled={rowPlanMissing}
+                            <HoverTooltip
+                              className="hover-tooltip-compact"
+                              trigger={
+                                <button
+                                  type="button"
+                                  className="link-button"
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    openPlanModal(b.planId);
+                                  }}
+                                  disabled={rowPlanMissing}
+                                >
+                                  {livePlanName}
+                                </button>
+                              }
                             >
-                              {livePlanName}
-                            </button>
+                              {rowPlanMissing ? t.linkedPlanDeleted : t.openPlan}
+                            </HoverTooltip>
                           </div>
                         </td>
                         <td className="hint">
@@ -1011,7 +1199,6 @@ const EmailGenerator: React.FC<Props> = ({
                             <button
                               className="btn btn-sm"
                               onClick={() => setFocusAndCache({ batch: b })}
-                              title={t.preview}
                             >
                               <IconEye size={13} /> {t.preview}
                             </button>
@@ -1040,9 +1227,9 @@ const EmailGenerator: React.FC<Props> = ({
 
       {confirmDeleteAll && (
         <ConfirmDialog
-          message={t.deleteAllConfirm.replace('{n}', String(batches.length))}
+          message={t.deleteAllConfirm.replace('{n}', String(confirmDeleteAll.length))}
           onConfirm={onConfirmDeleteAll}
-          onCancel={() => setConfirmDeleteAll(false)}
+          onCancel={() => setConfirmDeleteAll(null)}
           danger
         />
       )}

@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import Store from 'electron-store';
 import type {
   Supplier,
@@ -10,6 +12,8 @@ import type {
   EmailBatch,
 } from '../shared/types';
 import Database from './database';
+import log from './utils/logger';
+import { localDateIso } from '../shared/dates';
 
 // Reads the legacy electron-store (config.json) where business entities lived
 // before the Supabase migration, and pushes them up to the cloud.
@@ -130,4 +134,40 @@ export async function runMigration(
       emailBatches: emailBatches.length,
     },
   };
+}
+
+const LEGACY_KEYS = [
+  'suppliers',
+  'rawMaterials',
+  'components',
+  'products',
+  'stockSnapshots',
+  'productionPlans',
+  'shortageReports',
+  'emailBatches',
+] as const;
+
+/**
+ * After a finished migration the pre-Supabase business data still sits in
+ * config.json — a stale plain-text copy of suppliers, prices and recipes, and
+ * ~300 KB that electron-store re-reads and parses on every settings access.
+ * Move it once into a dated file in the backups folder, then drop it from the
+ * store. No-op before the migration and once moved. Never throws.
+ */
+export function archiveMigratedLegacyData(backupsDir: string): void {
+  try {
+    const store = getLegacyStore();
+    if (store.get('migration_done') !== true) return;
+    const present = LEGACY_KEYS.filter((k) => store.has(k));
+    if (present.length === 0) return;
+    const legacy: Record<string, unknown> = {};
+    for (const k of present) legacy[k] = store.get(k);
+    fs.mkdirSync(backupsDir, { recursive: true });
+    const target = path.join(backupsDir, `legacy-local-data-${localDateIso()}.json`);
+    fs.writeFileSync(target, JSON.stringify(legacy, null, 2), { encoding: 'utf-8', mode: 0o600 });
+    for (const k of present) store.delete(k);
+    log.info(`[migration] legacy local data moved to ${target}`);
+  } catch (err) {
+    log.warn(`[migration] could not archive legacy data: ${err instanceof Error ? err.message : err}`);
+  }
 }

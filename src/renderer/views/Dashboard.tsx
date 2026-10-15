@@ -11,6 +11,8 @@ import type {
   TaskInstance,
 } from '../../shared/types';
 import TaskNoteDialog from '../components/TaskNoteDialog';
+import HoverTooltip from '../components/HoverTooltip';
+import type { T } from '../translations';
 import TaskProgressBar, { type TaskAction } from '../components/TaskProgressBar';
 import drugsUrl from '../assets/drugs2.webp';
 
@@ -22,7 +24,22 @@ interface Props {
     target: 'stockImport' | 'shortageReport' | 'emailGenerator',
     orderId: string,
     taskId: string,
+    extras?: { order?: Order },
   ) => void;
+}
+
+// "+ 1 pozycja" / "+ 2 pozycje" / "+ 5 pozycji" — Polish plural; English uses
+// the first two forms.
+function moreItemsLabel(t: T, n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  const form =
+    n === 1
+      ? t.dashboardMoreItems1
+      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+        ? t.dashboardMoreItems2
+        : t.dashboardMoreItems5;
+  return form.replace('{n}', String(n));
 }
 
 interface Counts {
@@ -57,6 +74,13 @@ const Dashboard: React.FC<Props> = ({
   const showSkeleton = useMinimumLoading(firstLoad);
   const [editingNote, setEditingNote] =
     useState<{ orderId: string; task: TaskInstance } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+  // A task change returns the updated order — swap it in instead of
+  // re-fetching every list on the dashboard.
+  const patchOrder = (updated: Order) =>
+    setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
 
   const reload = async () => {
     try {
@@ -79,6 +103,8 @@ const Dashboard: React.FC<Props> = ({
       });
       setLatestReport(reports[0] ?? null);
       setOrders(orderList);
+    } catch (err) {
+      setError(t.loadDataFailed.replace('{error}', errText(err)));
     } finally {
       setFirstLoad(false);
     }
@@ -86,13 +112,14 @@ const Dashboard: React.FC<Props> = ({
 
   const onTaskAction = async (order: Order, task: TaskInstance, action: TaskAction) => {
     if (action.kind === 'setStatus') {
+      setError(null);
       try {
-        await window.electronAPI.updateOrderTask(order.id, task.id, {
+        const updated = await window.electronAPI.updateOrderTask(order.id, task.id, {
           status: action.status,
         });
-        await reload();
+        patchOrder(updated);
       } catch (err) {
-        console.error('Failed to update task', err);
+        setError(t.taskStatusUpdateFailed.replace('{error}', errText(err)));
       }
     } else if (action.kind === 'open') {
       const target =
@@ -104,16 +131,17 @@ const Dashboard: React.FC<Props> = ({
               ? 'emailGenerator'
               : null;
       if (!target) return;
+      let current = order;
       if (task.status === 'todo') {
         try {
-          await window.electronAPI.updateOrderTask(order.id, task.id, {
+          current = await window.electronAPI.updateOrderTask(order.id, task.id, {
             status: 'in_progress',
           });
         } catch {
-          /* non-fatal */
+          /* non-fatal — the screen still opens; the task just stays "todo" */
         }
       }
-      onNavigateForTask(target, order.id, task.id);
+      onNavigateForTask(target, order.id, task.id, { order: current });
     } else if (action.kind === 'editNote') {
       setEditingNote({ orderId: order.id, task });
     }
@@ -179,6 +207,11 @@ const Dashboard: React.FC<Props> = ({
 
   return (
     <div className="main dashboard-main">
+      {error && (
+        <div className="alert alert-error" onClick={() => setError(null)}>
+          {error}
+        </div>
+      )}
       <div className="dashboard-welcome-row">
         <section className="dashboard-welcome" aria-label={t.dashboard}>
           <div className="dashboard-welcome-orb dashboard-welcome-orb-a" aria-hidden />
@@ -273,7 +306,6 @@ const Dashboard: React.FC<Props> = ({
                     type="button"
                     className="dashboard-order-head"
                     onClick={() => onOpenOrder(o.id)}
-                    title={t.orderDetails}
                   >
                     <div className="dashboard-order-head-text">
                       <div className="dashboard-order-name">{o.name}</div>
@@ -368,15 +400,24 @@ const Dashboard: React.FC<Props> = ({
                 >
                   <div className="dashboard-shortage-head">
                     <span className="tag">
-                      {line.itemKind === 'raw' ? 'surowiec' : 'komponent'}
+                      {line.itemKind === 'raw' ? t.itemKindRaw : t.itemKindComponent}
                     </span>
-                    <span className="dashboard-shortage-supplier" title={supplier}>
+                    {/* Full name on hover — the tile cuts long names with an ellipsis. */}
+                    <HoverTooltip
+                      className="hover-tooltip-compact"
+                      triggerClassName="dashboard-shortage-supplier"
+                      trigger={supplier}
+                    >
                       {supplier}
-                    </span>
+                    </HoverTooltip>
                   </div>
-                  <div className="dashboard-shortage-name" title={line.itemName}>
+                  <HoverTooltip
+                    className="hover-tooltip-compact"
+                    triggerClassName="dashboard-shortage-name"
+                    trigger={line.itemName}
+                  >
                     {line.itemName}
-                  </div>
+                  </HoverTooltip>
                   <div className="dashboard-shortage-amount">
                     <span className="dashboard-shortage-amount-value">
                       {fmt(line.shortage, line.unit)}
@@ -389,10 +430,7 @@ const Dashboard: React.FC<Props> = ({
                       {fmt(line.suggestedOrder, line.unit)} {line.unit}
                     </strong>
                   </div>
-                  <div
-                    className="dashboard-shortage-source"
-                    title={`${latestReport!.planName} · ${reportDate}`}
-                  >
+                  <div className="dashboard-shortage-source">
                     <span className="dashboard-shortage-source-label">
                       {t.dashboardLastReport} · {reportDate}
                     </span>
@@ -406,9 +444,7 @@ const Dashboard: React.FC<Props> = ({
           </div>
           <div className="dashboard-shortage-more">
             {moreShortages > 0 && (
-              <span className="hint">
-                + {moreShortages} {moreShortages === 1 ? 'pozycja' : 'pozycji'}
-              </span>
+              <span className="hint">{moreItemsLabel(t, moreShortages)}</span>
             )}
             <button className="btn primary" onClick={() => onNavigate('shortageReport')}>
               {t.dashboardSeeFullReport} →
@@ -438,11 +474,14 @@ const Dashboard: React.FC<Props> = ({
           onCancel={() => setEditingNote(null)}
           onSave={async (note) => {
             const { orderId, task } = editingNote;
+            setError(null);
             try {
-              await window.electronAPI.updateOrderTask(orderId, task.id, { note });
-              await reload();
+              const updated = await window.electronAPI.updateOrderTask(orderId, task.id, {
+                note,
+              });
+              patchOrder(updated);
             } catch (err) {
-              console.error('Failed to save task note', err);
+              setError(t.taskNoteSaveFailed.replace('{error}', errText(err)));
             } finally {
               setEditingNote(null);
             }

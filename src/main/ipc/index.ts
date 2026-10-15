@@ -29,6 +29,8 @@ import type {
   RawStockAnalysis,
   RawStockUnmatched,
   StockBatch,
+  PriceChangeSource,
+  RawMaterial,
 } from '../../shared/types';
 import { getBackupsDir, getBackupStatus, validateBackup } from '../backupService';
 import { parseStockXlsx } from '../services/xlsxStockImporter';
@@ -50,14 +52,13 @@ import { generateEmailsForReport, regenerateBatchEmail } from '../services/rfqGe
 import { maxProducible } from '../services/reverseCalculator';
 import { isAiAvailable, getModel, loadCloudAiKey } from '../aiConfig';
 import { rewriteEmail, suggestMatch } from '../services/llmClient';
-import { seedDemo } from '../services/demoSeed';
 import * as authService from '../authService';
 import { getMigrationStatus, runMigration } from '../migrationService';
 import {
   authenticate as bsxAuthenticate,
   fetchStockForWarehouse,
   fetchWarehouses as bsxFetchWarehouses,
-  fetchLatestPzPrices,
+  fetchLatestPzPricesForWarehouses,
   BsxError,
   type BsxStockRow,
   type BsxPzPrice,
@@ -69,6 +70,7 @@ import {
   exposedBsxSettings,
 } from '../bsxConfig';
 import { newId, nowIso } from '../utils/id';
+import { localDateIso } from '../../shared/dates';
 
 // Runs the alias + fuzzy matching pipeline against a freshly built snapshot
 // and persists it. Used by both the xlsx and the BSX import paths.
@@ -100,6 +102,16 @@ async function matchAndPersistSnapshot(
   let matched = 0;
   let ambiguous = 0;
   let unmatched = 0;
+  // Purchase prices go to the catalog only for certain matches — an alias the
+  // user taught, an MP Firma symbol or an identical name. A fuzzy match may be
+  // a different material (Metyloparaben vs Etyloparaben) and must not
+  // overwrite its price; the user confirms those rows first.
+  const prices = new Map<string, { price: number; currency?: string }>();
+  const notePrice = (id: string, row: StockRow) => {
+    if (typeof row.netPrice === 'number' && row.netPrice > 0) {
+      prices.set(id, { price: row.netPrice, currency: row.currency });
+    }
+  };
 
   for (const row of snapshot.rows) {
     const aliasHit = aliasMap.get(normalizeAlias(row.name));
@@ -109,11 +121,7 @@ async function matchAndPersistSnapshot(
       row.matchConfidence = 1;
       row.matchAmbiguous = false;
       matched++;
-      if (typeof row.netPrice === 'number' && row.netPrice > 0) {
-        if (kind === 'raw')
-          await db.setRawMaterialLastPrice(aliasHit, row.netPrice, row.currency);
-        else await db.setComponentLastPrice(aliasHit, row.netPrice, row.currency);
-      }
+      notePrice(aliasHit, row);
       continue;
     }
     const result = matchOne({ name: row.name, mpFirmaSymbol: row.mpFirmaSymbol }, candidates);
@@ -123,11 +131,7 @@ async function matchAndPersistSnapshot(
       if (kind === 'raw') row.matchedRawMaterialId = result.id;
       else row.matchedComponentId = result.id;
       matched++;
-      if (typeof row.netPrice === 'number' && row.netPrice > 0) {
-        if (kind === 'raw')
-          await db.setRawMaterialLastPrice(result.id, row.netPrice, row.currency);
-        else await db.setComponentLastPrice(result.id, row.netPrice, row.currency);
-      }
+      if (result.confidence >= 1) notePrice(result.id, row);
     } else if (result.ambiguous) {
       ambiguous++;
     } else {
@@ -136,6 +140,8 @@ async function matchAndPersistSnapshot(
   }
 
   await db.addStockSnapshot(snapshot);
+  // Prices only after the snapshot is safely stored, in one write per table.
+  await db.setLastPrices(kind, prices);
   // NOTE: catalog stock is NOT updated here. Applying imported quantities to the
   // catalog is an explicit, user-triggered step ("Synchronizuj stany" in the
   // stock import view) — see the STOCK_SYNC_CATALOG handler.
@@ -277,22 +283,30 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
           note: b.note,
         }));
 
+      // One catalog read and one write for the whole file.
+      const existingIds = new Set((await db.listRawMaterials()).map((r) => r.id));
+      const writes: { id?: string; patch: Partial<RawMaterial> }[] = [];
       for (const m of args.analysis.matches) {
-        // Mismatched materials need an explicit decision (default: reject);
-        // consistent ones always import.
-        const action = m.sumMismatch ? (decisionMap.get(m.itemId) ?? 'reject') : 'take';
+        // Mismatched materials, and ones whose stock was set by hand and would
+        // change, need an explicit decision (default: reject); the rest import.
+        const needsDecision = m.sumMismatch || !!m.manualConflict;
+        const action = needsDecision ? (decisionMap.get(m.itemId) ?? 'reject') : 'take';
         if (action === 'reject') {
           out.rejected++;
           continue;
         }
+        if (!existingIds.has(m.itemId)) continue; // deleted since the analysis
         const batches = toBatches(m.batches);
         const total = batches.reduce((s, b) => s + b.qty, 0);
-        await db.updateRawMaterial(m.itemId, {
-          stockBatches: batches,
-          stockQty: total,
-          stockSource: 'import',
-          stockSourceFile: args.sourceFile,
-          stockUpdatedAt: now,
+        writes.push({
+          id: m.itemId,
+          patch: {
+            stockBatches: batches,
+            stockQty: total,
+            stockSource: 'import',
+            stockSourceFile: args.sourceFile,
+            stockUpdatedAt: now,
+          },
         });
         out.imported++;
       }
@@ -302,19 +316,22 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       for (const u of args.createItems ?? []) {
         const batches = toBatches(u.batches);
         const total = batches.reduce((s, b) => s + b.qty, 0);
-        await db.createRawMaterial({
-          name: u.name,
-          unit: u.unit,
-          supplierIds: [],
-          factorySupplied: false,
-          stockBatches: batches,
-          stockQty: total,
-          stockSource: 'import',
-          stockSourceFile: args.sourceFile,
-          stockUpdatedAt: now,
+        writes.push({
+          patch: {
+            name: u.name,
+            unit: u.unit,
+            supplierIds: [],
+            factorySupplied: false,
+            stockBatches: batches,
+            stockQty: total,
+            stockSource: 'import',
+            stockSourceFile: args.sourceFile,
+            stockUpdatedAt: now,
+          },
         });
         out.created++;
       }
+      await db.saveRawMaterials(writes);
       return out;
     },
   );
@@ -397,9 +414,13 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
         created: 0,
       };
       const now = nowIso();
+      // One catalog read and one write for the whole file, instead of a get +
+      // update round trip per row.
+      const byId = new Map((await db.listComponents()).map((c) => [c.id, c]));
+      const writes: { id?: string; patch: Partial<PackagingComponent> }[] = [];
       for (const d of args.decisions) {
-        const existing = await db.getComponent(d.itemId);
-        if (!existing) continue;
+        const existing = byId.get(d.itemId);
+        if (!existing) continue; // deleted since the analysis — skip
         const patch: Partial<PackagingComponent> = {};
 
         // Notes always follow the file when it provides one; an empty cell
@@ -420,25 +441,28 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
           out.kept++;
         }
 
-        if (Object.keys(patch).length > 0) await db.updateComponent(d.itemId, patch);
+        if (Object.keys(patch).length > 0) writes.push({ id: d.itemId, patch });
       }
 
       // Create the unmatched rows the user opted to add. The type is inferred
       // from the name (as in the components-file import); stock/note come from
       // the row. No supplier/price — the user fills those in later.
       for (const u of args.createItems ?? []) {
-        await db.createComponent({
-          name: u.name,
-          type: inferComponentType(u.name, args.section),
-          supplierIds: [],
-          stockQty: u.qty,
-          stockSource: 'import',
-          stockSourceFile: args.sourceFile,
-          stockUpdatedAt: now,
-          stockNote: u.note?.trim() || undefined,
+        writes.push({
+          patch: {
+            name: u.name,
+            type: inferComponentType(u.name, args.section),
+            supplierIds: [],
+            stockQty: u.qty,
+            stockSource: 'import',
+            stockSourceFile: args.sourceFile,
+            stockUpdatedAt: now,
+            stockNote: u.note?.trim() || undefined,
+          },
         });
         out.created++;
       }
+      await db.saveComponents(writes);
       return out;
     },
   );
@@ -493,7 +517,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     const win = getMainWindow();
     const result = await dialog.showSaveDialog(win!, {
       title: 'Eksportuj receptury (xlsx)',
-      defaultPath: `Plik z recepturami ${new Date().toISOString().slice(0, 10)}.xlsx`,
+      defaultPath: `Plik z recepturami ${localDateIso()}.xlsx`,
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
     });
     if (result.canceled || !result.filePath) return { ok: false };
@@ -668,14 +692,21 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       try {
         const cfg = resolveBsxConfig(db);
         const session = await bsxAuthenticate(cfg.cloudKey, cfg.username, cfg.password);
-        const [rawPrices, compPrices] = await Promise.all([
-          snapshotIds.raw
-            ? fetchLatestPzPrices(session.sessionToken, cfg.rawIdstock)
-            : Promise.resolve(new Map<string, BsxPzPrice>()),
-          snapshotIds.component
-            ? fetchLatestPzPrices(session.sessionToken, cfg.componentIdstock)
-            : Promise.resolve(new Map<string, BsxPzPrice>()),
-        ]);
+        // One scan of the PZ headers for both warehouses (it used to run once
+        // per warehouse, each paging through every PZ in the system).
+        const wanted = [
+          ...(snapshotIds.raw ? [cfg.rawIdstock] : []),
+          ...(snapshotIds.component ? [cfg.componentIdstock] : []),
+        ];
+        const byWarehouse = wanted.length
+          ? await fetchLatestPzPricesForWarehouses(session.sessionToken, wanted)
+          : new Map<number, Map<string, BsxPzPrice>>();
+        const rawPrices = snapshotIds.raw
+          ? (byWarehouse.get(cfg.rawIdstock) ?? new Map<string, BsxPzPrice>())
+          : new Map<string, BsxPzPrice>();
+        const compPrices = snapshotIds.component
+          ? (byWarehouse.get(cfg.componentIdstock) ?? new Map<string, BsxPzPrice>())
+          : new Map<string, BsxPzPrice>();
 
         const buildPatches = (
           priceMap: Map<string, BsxPzPrice>,
@@ -853,6 +884,24 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.STOCK_DELETE_KIND, (_e, kind: StockKind) =>
     db.deleteSnapshotsByKind(kind),
   );
+  // Candidate list with stored aliases attached so the matcher can score a row
+  // against alias names too (e.g. "Spirual" stored as alias on "Spirualit"
+  // should bump the latter to the top).
+  const suggestionCandidates = async (kind: StockKind) => {
+    const aliases =
+      kind === 'raw' ? await db.listRawMaterialAliases() : await db.listComponentAliases();
+    const aliasByTarget = new Map<string, string[]>();
+    for (const a of aliases) {
+      const arr = aliasByTarget.get(a.targetId) ?? [];
+      arr.push(a.alias);
+      aliasByTarget.set(a.targetId, arr);
+    }
+    const baseCandidates =
+      kind === 'raw'
+        ? (await db.listRawMaterials()).map((r) => ({ id: r.id, name: r.name, mpFirmaSymbol: r.mpFirmaSymbol }))
+        : (await db.listComponents()).map((c) => ({ id: c.id, name: c.name, mpFirmaSymbol: c.mpFirmaSymbol }));
+    return baseCandidates.map((c) => ({ ...c, aliases: aliasByTarget.get(c.id) }));
+  };
   ipcMain.handle(
     IPC.STOCK_SUGGEST_MATCHES,
     async (
@@ -860,27 +909,19 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       kind: StockKind,
       source: { name: string; mpFirmaSymbol?: string },
       limit?: number,
+    ) => suggestMatches(source, await suggestionCandidates(kind), { limit: limit ?? 3 }),
+  );
+  // Many rows at once: the catalog and aliases are read once, not per row.
+  ipcMain.handle(
+    IPC.STOCK_SUGGEST_MATCHES_BULK,
+    async (
+      _e,
+      kind: StockKind,
+      sources: { name: string; mpFirmaSymbol?: string }[],
+      limit?: number,
     ) => {
-      // Build candidate list with stored aliases attached so the matcher can
-      // score a row against alias names too (e.g. "Spirual" stored as alias on
-      // "Spirualit" should bump the latter to the top).
-      const aliases =
-        kind === 'raw' ? await db.listRawMaterialAliases() : await db.listComponentAliases();
-      const aliasByTarget = new Map<string, string[]>();
-      for (const a of aliases) {
-        const arr = aliasByTarget.get(a.targetId) ?? [];
-        arr.push(a.alias);
-        aliasByTarget.set(a.targetId, arr);
-      }
-      const baseCandidates =
-        kind === 'raw'
-          ? (await db.listRawMaterials()).map((r) => ({ id: r.id, name: r.name, mpFirmaSymbol: r.mpFirmaSymbol }))
-          : (await db.listComponents()).map((c) => ({ id: c.id, name: c.name, mpFirmaSymbol: c.mpFirmaSymbol }));
-      const candidates = baseCandidates.map((c) => ({
-        ...c,
-        aliases: aliasByTarget.get(c.id),
-      }));
-      return suggestMatches(source, candidates, { limit: limit ?? 3 });
+      const candidates = await suggestionCandidates(kind);
+      return sources.map((source) => suggestMatches(source, candidates, { limit: limit ?? 3 }));
     },
   );
 
@@ -920,8 +961,10 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
         acceptedDependencyIds ?? [],
         substitutions ?? {},
       );
-      await db.updatePlan(planId, { status: 'computed', computedAt: report.computedAt });
+      // Store the report first: a plan marked computed without its report
+      // would claim a result that doesn't exist.
       await db.addShortageReport(planId, report, orderId);
+      await db.updatePlan(planId, { status: 'computed', computedAt: report.computedAt });
       return report;
     },
   );
@@ -945,6 +988,34 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.SHORTAGE_REPORT_LIST, () => db.listShortageReports());
   ipcMain.handle(IPC.SHORTAGE_REPORT_GET, (_e, id: string) => db.getShortageReport(id));
   ipcMain.handle(IPC.SHORTAGE_REPORT_DELETE, (_e, id: string) => db.deleteShortageReport(id));
+  ipcMain.handle(IPC.SHORTAGE_REPORT_DELETE_MANY, (_e, ids: string[]) =>
+    db.deleteShortageReports(ids),
+  );
+  // Recompute an existing report in place (edits of an open report) — its
+  // name, order link, archive flag, receipts and warehouse notice survive.
+  ipcMain.handle(
+    IPC.SHORTAGE_REPORT_RECOMPUTE,
+    async (
+      _e,
+      reportId: string,
+      opts?: {
+        includeExpiredBatchIds?: string[];
+        acceptedDependencyIds?: string[];
+        substitutions?: Record<string, string>;
+      },
+    ) => {
+      const entry = await db.getShortageReport(reportId);
+      if (!entry) throw new Error(`Shortage report ${reportId} not found`);
+      const report = await computeShortages(
+        entry.planId,
+        db,
+        opts?.includeExpiredBatchIds ?? [],
+        opts?.acceptedDependencyIds ?? [],
+        opts?.substitutions ?? {},
+      );
+      return db.replaceShortageReportContent(reportId, report);
+    },
+  );
   ipcMain.handle(
     IPC.SHORTAGE_REPORT_UPDATE,
     (
@@ -977,6 +1048,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
   ipcMain.handle(IPC.EMAIL_BATCH_LIST, () => db.listEmailBatches());
   ipcMain.handle(IPC.EMAIL_BATCH_GET, (_e, id: string) => db.getEmailBatch(id));
   ipcMain.handle(IPC.EMAIL_BATCH_DELETE, (_e, id: string) => db.deleteEmailBatch(id));
+  ipcMain.handle(IPC.EMAIL_BATCH_DELETE_MANY, (_e, ids: string[]) => db.deleteEmailBatches(ids));
   ipcMain.handle(
     IPC.EMAIL_BATCH_UPDATE,
     (_e, id: string, patch: { batchName?: string; orderId?: string | null }) =>
@@ -1108,7 +1180,7 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
     const win = getMainWindow();
     const result = await dialog.showSaveDialog(win!, {
       title: 'Eksport danych',
-      defaultPath: `cutis-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      defaultPath: `cutis-backup-${localDateIso()}.json`,
       filters: [{ name: 'JSON', extensions: ['json'] }],
     });
     if (result.canceled || !result.filePath) return { ok: false };
@@ -1219,34 +1291,48 @@ export function registerIpcHandlers(db: Database, getMainWindow: () => BrowserWi
       suggestMatch(sourceName, candidates),
   );
 
-  // ---- Demo ----
-  ipcMain.handle(IPC.DEMO_SEED, () => seedDemo(db));
-
-  // ---- Wipe ----
-  ipcMain.handle(IPC.DATA_WIPE, async () => {
-    await db.importAll(
-      {
-        schemaVersion: 1,
-        suppliers: [],
-        rawMaterials: [],
-        components: [],
-        products: [],
-        stockSnapshots: [],
-        productionPlans: [],
-        shortageReports: [],
-        emailBatches: [],
-        orders: [],
-        workflowTemplates: [],
-        settings: db.getSettings(),
-      },
-      'replace',
-    );
-    return { ok: true };
-  });
+  // ---- Bulk catalog ops ----
+  ipcMain.handle(
+    IPC.CATALOG_DELETE_MANY,
+    (_e, kind: 'supplier' | 'raw' | 'component' | 'product', ids: string[]) =>
+      db.deleteCatalogItems(kind, ids),
+  );
+  ipcMain.handle(
+    IPC.CATALOG_SAVE_MANY,
+    (
+      _e,
+      kind: 'supplier' | 'raw' | 'component' | 'product',
+      items: { id?: string; patch: Record<string, unknown> }[],
+      opts?: { priceSource?: PriceChangeSource },
+    ) => {
+      if (kind === 'supplier') return db.saveSuppliers(items);
+      if (kind === 'raw') return db.saveRawMaterials(items, opts);
+      if (kind === 'component') return db.saveComponents(items, opts);
+      return db.saveProducts(items);
+    },
+  );
+  ipcMain.handle(
+    IPC.CATALOG_SET_PREFERRED_SUPPLIER,
+    (_e, items: { kind: StockKind; id: string }[], supplierId: string | null) =>
+      db.setPreferredSupplier(items, supplierId),
+  );
 
   // ---- App ----
   ipcMain.handle(IPC.APP_GET_VERSION, () => app.getVersion());
-  ipcMain.handle(IPC.APP_OPEN_EXTERNAL, (_e, url: string) => shell.openExternal(url));
+  // Only mail drafts and web pages — never file:, smb: or app-specific schemes
+  // that could launch something on the machine.
+  ipcMain.handle(IPC.APP_OPEN_EXTERNAL, (_e, url: string) => {
+    let scheme: string;
+    try {
+      scheme = new URL(url).protocol;
+    } catch {
+      throw new Error('Nieprawidłowy adres.');
+    }
+    if (scheme !== 'mailto:' && scheme !== 'https:') {
+      throw new Error(`Nieobsługiwany adres: ${scheme}`);
+    }
+    return shell.openExternal(url);
+  });
 
   ipcMain.handle(IPC.APP_CHECK_UPDATES, async () => {
     if (!app.isPackaged) {

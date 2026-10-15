@@ -38,41 +38,9 @@ import type {
 } from '../../shared/types';
 import { isSecondaryComponent } from '../../shared/types';
 import { matchOne } from './matcher';
+import { normalize as normalizeAlias } from './smartMatcher';
+import { asNumber, asString } from './xlsxCells';
 import log from '../utils/logger';
-
-function asString(v: unknown): string | undefined {
-  if (v === null || v === undefined) return undefined;
-  if (typeof v === 'string') {
-    const t = v.trim();
-    return t.length === 0 ? undefined : t;
-  }
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'object' && v !== null) {
-    if ('text' in v) return asString((v as { text: unknown }).text);
-    if ('richText' in v) {
-      const parts = (v as { richText?: { text?: string }[] }).richText ?? [];
-      const joined = parts.map((p) => p?.text ?? '').join('').trim();
-      return joined.length === 0 ? undefined : joined;
-    }
-    if ('result' in v) return asString((v as { result: unknown }).result);
-    if ('hyperlink' in v) return asString((v as { hyperlink: unknown }).hyperlink);
-  }
-  return undefined;
-}
-
-function asNumber(v: unknown): number | undefined {
-  if (v === null || v === undefined || v === '') return undefined;
-  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
-  if (typeof v === 'string') {
-    const cleaned = v.replace(/\s/g, '').replace(',', '.');
-    const n = parseFloat(cleaned);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  if (typeof v === 'object' && v !== null && 'result' in v) {
-    return asNumber((v as { result: unknown }).result);
-  }
-  return undefined;
-}
 
 // Pick the sheet for the given catalog section. 'primary' looks for the first
 // non-archival worksheet whose name mentions "komponent" ("Stan komponentów"),
@@ -156,6 +124,15 @@ export async function analyzeMagazynStock(
   }));
   const byId = new Map<string, PackagingComponent>(components.map((c) => [c.id, c]));
 
+  // Saved aliases (an explicit user decision) win over fuzzy matching, like
+  // every other import path. An alias whose target is in the OTHER section
+  // is ignored here (byId holds this section only) and the row falls through
+  // to matchOne — a run never links across sections.
+  const aliasMap = new Map<string, string>();
+  for (const a of await db.listComponentAliases()) {
+    aliasMap.set(normalizeAlias(a.alias), a.targetId);
+  }
+
   // A catalog component can appear only once in the file, but guard anyway: if
   // two rows match the same component, sum their quantities and merge notes.
   const matchesById = new Map<string, MagazynStockMatch>();
@@ -170,7 +147,11 @@ export async function analyzeMagazynStock(
     const importedQty = asNumber(r.getCell(layout.qtyCol).value) ?? 0;
     const note = asString(r.getCell(layout.noteCol).value);
 
-    const result = matchOne({ name }, candidates);
+    const aliasTarget = aliasMap.get(normalizeAlias(name));
+    const aliasItem = aliasTarget ? byId.get(aliasTarget) : undefined;
+    const result = aliasItem
+      ? { id: aliasItem.id, confidence: 1, ambiguous: false }
+      : matchOne({ name }, candidates);
     const item = result.id && !result.ambiguous ? byId.get(result.id) : undefined;
     if (!item) {
       if (result.ambiguous) {

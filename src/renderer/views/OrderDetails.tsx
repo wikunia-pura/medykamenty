@@ -36,6 +36,21 @@ import PlanEditorModal from '../components/PlanEditorModal';
 import TaskNoteDialog from '../components/TaskNoteDialog';
 import TaskProgressBar, { type TaskAction } from '../components/TaskProgressBar';
 import { useEscapeKey } from '../utils/useEscapeKey';
+import type { T } from '../translations';
+
+// "1 email" / "2 emaile" / "5 emaili" — Polish plural; English uses the
+// first two forms.
+function emailCountLabel(t: T, n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  const form =
+    n === 1
+      ? t.emailCount1
+      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+        ? t.emailCount2
+        : t.emailCount5;
+  return form.replace('{n}', String(n));
+}
 
 interface Props {
   orderId: string;
@@ -47,7 +62,12 @@ interface Props {
     view: 'stockImport' | 'shortageReport' | 'emailGenerator',
     orderId: string,
     taskId: string,
-    extras?: { focusReportId?: string; focusBatchId?: string; planId?: string },
+    extras?: {
+      focusReportId?: string;
+      focusBatchId?: string;
+      planId?: string;
+      order?: Order;
+    },
   ) => void;
 }
 
@@ -90,6 +110,10 @@ const OrderDetails: React.FC<Props> = ({
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  // "Mark done" on a task while earlier ones are still open — asks first.
+  const [pendingSkip, setPendingSkip] = useState<{ task: TaskInstance; next: TaskStatus } | null>(
+    null,
+  );
 
   const reload = async () => {
     try {
@@ -178,9 +202,14 @@ const OrderDetails: React.FC<Props> = ({
         .slice(0, idx)
         .some((tk) => tk.status !== 'done');
       if (earlierUndone) {
-        if (!confirm(t.taskSkipWarning)) return;
+        setPendingSkip({ task, next });
+        return;
       }
     }
+    await commitTaskStatus(task, next);
+  };
+
+  const commitTaskStatus = async (task: TaskInstance, next: TaskStatus) => {
     setBusy(true);
     try {
       const updated = await window.electronAPI.updateOrderTask(orderId, task.id, {
@@ -196,6 +225,8 @@ const OrderDetails: React.FC<Props> = ({
 
   const onTaskClick = async (task: TaskInstance) => {
     if (task.type === 'custom') return;
+    // The freshest copy of the order, handed to the task screen's banner.
+    let current: Order = order;
     // Auto-start when entering the linked screen.
     if (task.status === 'todo') {
       try {
@@ -203,6 +234,7 @@ const OrderDetails: React.FC<Props> = ({
           status: 'in_progress',
         });
         setOrder(updated);
+        current = updated;
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         return;
@@ -217,6 +249,7 @@ const OrderDetails: React.FC<Props> = ({
         onNavigateForTask('shortageReport', orderId, task.id, {
           focusReportId: r.id,
           planId: r.planId,
+          order: current,
         });
         return;
       }
@@ -230,6 +263,7 @@ const OrderDetails: React.FC<Props> = ({
         onNavigateForTask('emailGenerator', orderId, task.id, {
           focusBatchId: b.id,
           planId: b.planId,
+          order: current,
         });
         return;
       }
@@ -244,7 +278,7 @@ const OrderDetails: React.FC<Props> = ({
         : task.type === 'generate_shortage'
           ? 'shortageReport'
           : 'emailGenerator';
-    onNavigateForTask(view, orderId, task.id);
+    onNavigateForTask(view, orderId, task.id, { order: current });
   };
 
   const onDragStart = (idx: number) => (e: React.DragEvent) => {
@@ -325,7 +359,7 @@ const OrderDetails: React.FC<Props> = ({
   return (
     <div className="main">
       <div className="focus-bar">
-          <button className="btn" onClick={onBack} title={t.orders}>
+          <button className="btn" onClick={onBack}>
             <IconArrowLeft size={14} /> {t.orders}
           </button>
           <div className="focus-bar-text">
@@ -350,7 +384,6 @@ const OrderDetails: React.FC<Props> = ({
               <h1
                 className="focus-bar-title focus-bar-title-editable"
                 onClick={() => setTitleDraft(order.name)}
-                title={t.edit}
               >
                 {order.name}
                 <IconEdit size={13} className="focus-bar-title-pencil" />
@@ -530,7 +563,6 @@ const OrderDetails: React.FC<Props> = ({
                         type="button"
                         className="btn btn-sm soft-edit"
                         onClick={() => setTaskStatus(task, 'in_progress')}
-                        title={t.markInProgress}
                       >
                         ▶ {t.markInProgress}
                       </button>
@@ -541,7 +573,6 @@ const OrderDetails: React.FC<Props> = ({
                           type="button"
                           className="btn btn-sm"
                           onClick={() => setTaskStatus(task, 'todo')}
-                          title={t.markTodo}
                         >
                           ↺ {t.markTodo}
                         </button>
@@ -549,7 +580,6 @@ const OrderDetails: React.FC<Props> = ({
                           type="button"
                           className="btn btn-sm soft-success"
                           onClick={() => setTaskStatus(task, 'done')}
-                          title={t.markDone}
                         >
                           <IconCheck size={13} /> {t.markDone}
                         </button>
@@ -560,7 +590,6 @@ const OrderDetails: React.FC<Props> = ({
                         type="button"
                         className="btn btn-sm"
                         onClick={() => setTaskStatus(task, 'todo')}
-                        title={t.markTodo}
                       >
                         ↺ {t.markTodo}
                       </button>
@@ -569,7 +598,6 @@ const OrderDetails: React.FC<Props> = ({
                       type="button"
                       className={`btn btn-sm task-note-btn${task.note ? ' has-note' : ''}`}
                       onClick={() => setEditingNoteFor(task)}
-                      title={task.note ? t.taskEditNote : t.taskAddNote}
                     >
                       <IconNote size={13} />{' '}
                       {task.note ? t.taskEditNote : t.taskAddNote}
@@ -634,25 +662,33 @@ const OrderDetails: React.FC<Props> = ({
                     key={r.id}
                     className="row-clickable"
                     onClick={() => onNavigateToReport(r.planId, r.id)}
-                    title={t.preview}
                   >
                     <td className="col-name col-wrap">{r.reportName}</td>
                     <td className="col-wrap" onClick={(ev) => ev.stopPropagation()}>
                       <div className="cell-with-end-tag">
                         {planMissing && (
-                          <span className="tag danger" title={t.linkedPlanDeleted}>
-                            {t.linkedPlanDeletedTag}
-                          </span>
+                          <HoverTooltip
+                            className="hover-tooltip-compact"
+                            trigger={<span className="tag danger">{t.linkedPlanDeletedTag}</span>}
+                          >
+                            {t.linkedPlanDeleted}
+                          </HoverTooltip>
                         )}
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => openPlanModal(r.planId)}
-                          title={planMissing ? t.linkedPlanDeleted : t.openPlan}
-                          disabled={planMissing}
+                        <HoverTooltip
+                          className="hover-tooltip-compact"
+                          trigger={
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => openPlanModal(r.planId)}
+                              disabled={planMissing}
+                            >
+                              {livePlanName}
+                            </button>
+                          }
                         >
-                          {livePlanName}
-                        </button>
+                          {planMissing ? t.linkedPlanDeleted : t.openPlan}
+                        </HoverTooltip>
                       </div>
                     </td>
                     <td className="hint">
@@ -677,18 +713,14 @@ const OrderDetails: React.FC<Props> = ({
                           onClick={async () => {
                             setBusy(true);
                             try {
+                              // The server also clears the order link on the
+                              // report's email batches (updateShortageReport
+                              // cascades it), so no per-batch calls here.
                               await window.electronAPI.updateShortageReport(r.id, {
                                 orderId: null,
                               });
-                              const inherited = batches.filter(
-                                (b) => b.reportId === r.id,
-                              );
-                              for (const b of inherited) {
-                                await window.electronAPI.updateEmailBatch(b.id, {
-                                  orderId: null,
-                                });
-                              }
-                              await reload();
+                              setReports((prev) => prev.filter((x) => x.id !== r.id));
+                              setBatches((prev) => prev.filter((b) => b.reportId !== r.id));
                             } catch (err) {
                               setError(
                                 err instanceof Error ? err.message : String(err),
@@ -697,7 +729,6 @@ const OrderDetails: React.FC<Props> = ({
                               setBusy(false);
                             }
                           }}
-                          title={t.unlinkOrder}
                         >
                           <IconClose size={13} /> {t.unlinkOrder}
                         </button>
@@ -769,17 +800,16 @@ const OrderDetails: React.FC<Props> = ({
                     key={b.id}
                     className="row-clickable"
                     onClick={() => onNavigateToBatch(b.id)}
-                    title={t.preview}
                   >
                     <td className="col-name col-wrap">
                       <div className="cell-with-end-tag">
                         {reportMissing && (
-                          <span
-                            className="tag danger"
-                            title={t.linkedReportDeleted}
+                          <HoverTooltip
+                            className="hover-tooltip-compact"
+                            trigger={<span className="tag danger">{t.linkedReportDeletedTag}</span>}
                           >
-                            {t.linkedReportDeletedTag}
-                          </span>
+                            {t.linkedReportDeleted}
+                          </HoverTooltip>
                         )}
                         <button
                           type="button"
@@ -788,7 +818,6 @@ const OrderDetails: React.FC<Props> = ({
                             ev.stopPropagation();
                             onNavigateToBatch(b.id);
                           }}
-                          title={t.preview}
                         >
                           {b.batchName || b.reportName}
                         </button>
@@ -797,37 +826,55 @@ const OrderDetails: React.FC<Props> = ({
                     <td className="col-wrap" onClick={(ev) => ev.stopPropagation()}>
                       <div className="cell-with-end-tag">
                         {reportMissing && (
-                          <span className="tag danger" title={t.linkedReportDeleted}>
-                            {t.linkedReportDeletedTag}
-                          </span>
+                          <HoverTooltip
+                            className="hover-tooltip-compact"
+                            trigger={<span className="tag danger">{t.linkedReportDeletedTag}</span>}
+                          >
+                            {t.linkedReportDeleted}
+                          </HoverTooltip>
                         )}
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => onNavigateToReport(b.planId, b.reportId)}
-                          title={reportMissing ? t.linkedReportDeleted : t.goToShortageReport}
-                          disabled={reportMissing}
+                        <HoverTooltip
+                          className="hover-tooltip-compact"
+                          trigger={
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => onNavigateToReport(b.planId, b.reportId)}
+                              disabled={reportMissing}
+                            >
+                              {b.reportName}
+                            </button>
+                          }
                         >
-                          {b.reportName}
-                        </button>
+                          {reportMissing ? t.linkedReportDeleted : t.goToShortageReport}
+                        </HoverTooltip>
                       </div>
                     </td>
                     <td className="col-wrap" onClick={(ev) => ev.stopPropagation()}>
                       <div className="cell-with-end-tag">
                         {planMissing && (
-                          <span className="tag danger" title={t.linkedPlanDeleted}>
-                            {t.linkedPlanDeletedTag}
-                          </span>
+                          <HoverTooltip
+                            className="hover-tooltip-compact"
+                            trigger={<span className="tag danger">{t.linkedPlanDeletedTag}</span>}
+                          >
+                            {t.linkedPlanDeleted}
+                          </HoverTooltip>
                         )}
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => openPlanModal(b.planId)}
-                          title={planMissing ? t.linkedPlanDeleted : t.openPlan}
-                          disabled={planMissing}
+                        <HoverTooltip
+                          className="hover-tooltip-compact"
+                          trigger={
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => openPlanModal(b.planId)}
+                              disabled={planMissing}
+                            >
+                              {livePlanName}
+                            </button>
+                          }
                         >
-                          {livePlanName}
-                        </button>
+                          {planMissing ? t.linkedPlanDeleted : t.openPlan}
+                        </HoverTooltip>
                       </div>
                     </td>
                     <td className="hint">
@@ -890,7 +937,6 @@ const OrderDetails: React.FC<Props> = ({
                         <button
                           className="btn btn-sm"
                           onClick={() => onNavigateToBatch(b.id)}
-                          title={t.preview}
                         >
                           <IconMail size={13} /> {t.preview}
                         </button>
@@ -970,6 +1016,7 @@ const OrderDetails: React.FC<Props> = ({
               onNavigateForTask('shortageReport', orderId, task.id, {
                 focusReportId: r.id,
                 planId: r.planId,
+                order,
               });
             }
           }}
@@ -983,9 +1030,10 @@ const OrderDetails: React.FC<Props> = ({
           options={batches.map((b) => ({
             id: b.id,
             label: b.batchName || b.reportName,
-            sub: `${new Date(b.generatedAt).toLocaleString()} · ${b.emails.length} ${
-              b.emails.length === 1 ? 'email' : 'emaile'
-            }`,
+            sub: `${new Date(b.generatedAt).toLocaleString()} · ${emailCountLabel(
+              t,
+              b.emails.length,
+            )}`,
           }))}
           onCancel={() => setPickingTaskTarget(null)}
           onPick={(id) => {
@@ -996,6 +1044,7 @@ const OrderDetails: React.FC<Props> = ({
               onNavigateForTask('emailGenerator', orderId, task.id, {
                 focusBatchId: b.id,
                 planId: b.planId,
+                order,
               });
             }
           }}
@@ -1073,6 +1122,18 @@ const OrderDetails: React.FC<Props> = ({
         />
       )}
 
+      {pendingSkip && (
+        <ConfirmDialog
+          message={t.taskSkipWarning}
+          onConfirm={() => {
+            const { task, next } = pendingSkip;
+            setPendingSkip(null);
+            void commitTaskStatus(task, next);
+          }}
+          onCancel={() => setPendingSkip(null)}
+        />
+      )}
+
       {confirmDeleteReport && (
         <ConfirmDialog
           message={`${t.deleteReportConfirm}: ${confirmDeleteReport.reportName}?`}
@@ -1083,7 +1144,7 @@ const OrderDetails: React.FC<Props> = ({
             setBusy(true);
             try {
               await window.electronAPI.deleteShortageReport(id);
-              await reload();
+              setReports((prev) => prev.filter((r) => r.id !== id));
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -1106,7 +1167,7 @@ const OrderDetails: React.FC<Props> = ({
             setBusy(true);
             try {
               await window.electronAPI.deleteEmailBatch(id);
-              await reload();
+              setBatches((prev) => prev.filter((b) => b.id !== id));
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {

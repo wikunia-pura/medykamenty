@@ -20,6 +20,7 @@ const WorkflowTemplates: React.FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<WorkflowTemplate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
   const reload = async () => {
@@ -80,6 +81,20 @@ const WorkflowTemplates: React.FC = () => {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onDuplicate = async (wt: WorkflowTemplate) => {
+    if (duplicatingId) return;
+    setDuplicatingId(wt.id);
+    setError(null);
+    try {
+      await window.electronAPI.duplicateWorkflowTemplate(wt.id);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDuplicatingId(null);
     }
   };
 
@@ -154,7 +169,6 @@ const WorkflowTemplates: React.FC = () => {
                     key={wt.id}
                     className="row-clickable"
                     onClick={() => onEdit(wt)}
-                    title={t.edit}
                   >
                     <td className="col-name col-wrap">{wt.name}</td>
                     <td className="num">
@@ -213,10 +227,8 @@ const WorkflowTemplates: React.FC = () => {
                           className="btn-sm soft-success"
                           icon={<IconDuplicate size={14} />}
                           label={t.duplicate}
-                          onClick={async () => {
-                            await window.electronAPI.duplicateWorkflowTemplate(wt.id);
-                            await reload();
-                          }}
+                          disabled={duplicatingId !== null}
+                          onClick={() => void onDuplicate(wt)}
                         />
                       </div>
                     </td>

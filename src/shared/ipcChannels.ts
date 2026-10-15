@@ -54,6 +54,7 @@ export const IPC = {
   STOCK_DELETE_SNAPSHOT: 'stock:delete-snapshot',
   STOCK_DELETE_KIND: 'stock:delete-kind',
   STOCK_SUGGEST_MATCHES: 'stock:suggest-matches',
+  STOCK_SUGGEST_MATCHES_BULK: 'stock:suggest-matches-bulk',
   STOCK_IMPORT_BSX: 'stock:import-bsx',
   STOCK_LOAD_BSX_PRICES: 'stock:load-bsx-prices',
 
@@ -87,6 +88,8 @@ export const IPC = {
   SHORTAGE_REPORT_LIST: 'shortageReport:list',
   SHORTAGE_REPORT_GET: 'shortageReport:get',
   SHORTAGE_REPORT_DELETE: 'shortageReport:delete',
+  SHORTAGE_REPORT_DELETE_MANY: 'shortageReport:delete-many',
+  SHORTAGE_REPORT_RECOMPUTE: 'shortageReport:recompute',
   SHORTAGE_REPORT_UPDATE: 'shortageReport:update',
   SHORTAGE_REPORT_SET_SUPPLIER_RECEIVED: 'shortageReport:set-supplier-received',
 
@@ -95,6 +98,7 @@ export const IPC = {
   EMAIL_BATCH_LIST: 'emailBatch:list',
   EMAIL_BATCH_GET: 'emailBatch:get',
   EMAIL_BATCH_DELETE: 'emailBatch:delete',
+  EMAIL_BATCH_DELETE_MANY: 'emailBatch:delete-many',
   EMAIL_BATCH_UPDATE: 'emailBatch:update',
   EMAIL_BATCH_UPDATE_EMAIL: 'emailBatch:update-email',
   EMAIL_BATCH_MARK_SENT: 'emailBatch:mark-sent',
@@ -155,8 +159,9 @@ export const IPC = {
   LLM_MATCH_SUGGEST: 'llm:match-suggest',
 
   // Demo / data
-  DEMO_SEED: 'demo:seed',
-  DATA_WIPE: 'data:wipe',
+  CATALOG_DELETE_MANY: 'catalog:delete-many',
+  CATALOG_SAVE_MANY: 'catalog:save-many',
+  CATALOG_SET_PREFERRED_SUPPLIER: 'catalog:set-preferred-supplier',
 
   // App
   APP_GET_VERSION: 'app:get-version',

@@ -31,7 +31,12 @@ import {
   saveFile,
   openFile,
   formatStats,
+  ImportSaveError,
 } from '../utils/exportImport';
+import { localDateIso } from '../../shared/dates';
+
+const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
 interface Props {
   editPlanId?: string;
@@ -61,6 +66,11 @@ const ProductionPlanView: React.FC<Props> = ({
   const [confirmDelete, setConfirmDelete] = useState<ProductionPlan | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // A failed first load — must not read as "no products / no plans yet".
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Save error of the plan editor, shown inside the modal.
+  const [editError, setEditError] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
@@ -70,7 +80,7 @@ const ProductionPlanView: React.FC<Props> = ({
   const COLUMNS: ColumnDef[] = useMemo(
     () => [
       { id: 'name', label: t.planName, required: true },
-      { id: 'status', label: 'Status', defaultVisible: true },
+      { id: 'status', label: t.planStatusColumn, defaultVisible: true },
       { id: 'items', label: t.planItems, defaultVisible: true },
       { id: 'bulk', label: t.bulkMass, defaultVisible: false },
       { id: 'created', label: t.planCreatedAt, defaultVisible: false },
@@ -147,8 +157,11 @@ const ProductionPlanView: React.FC<Props> = ({
       // First load shows skeleton rows in the table (see SkeletonRows), not a
       // blocking overlay.
       setInitialLoading(true);
+      setLoadError(null);
       try {
         await reload();
+      } catch (err) {
+        setLoadError(`${t.loadFailed}: ${errorMessage(err)}`);
       } finally {
         setInitialLoading(false);
       }
@@ -161,6 +174,7 @@ const ProductionPlanView: React.FC<Props> = ({
     if (!editPlanId) return;
     const target = plans.find((p) => p.id === editPlanId);
     if (target) {
+      setEditError(null);
       setEditing(target);
       onEditPlanIdConsumed?.();
     }
@@ -173,35 +187,51 @@ const ProductionPlanView: React.FC<Props> = ({
     onInitialSearchConsumed?.();
   }, [initialSearch]);
 
+  const openEditor = (p: Partial<ProductionPlan>) => {
+    setEditError(null);
+    setEditing(p);
+  };
+
   const onAdd = () =>
-    setEditing({
-      name: `Plan ${new Date().toISOString().slice(0, 10)}`,
+    openEditor({
+      name: `Plan ${localDateIso()}`,
       items: [],
       bulkMass: [],
       status: 'draft',
     });
 
+  // Double submit is guarded inside PlanEditorModal (saving flag).
   const onSave = async () => {
     if (!editing || !editing.name?.trim()) return;
+    setEditError(null);
     const payload = {
       name: editing.name.trim(),
       items: editing.items ?? [],
       bulkMass: editing.bulkMass ?? [],
       status: editing.status ?? 'draft',
     };
-    if (editing.id) {
-      await window.electronAPI.updatePlan(editing.id, payload);
-    } else {
-      await window.electronAPI.createPlan(payload);
+    try {
+      if (editing.id) {
+        await window.electronAPI.updatePlan(editing.id, payload);
+      } else {
+        await window.electronAPI.createPlan(payload);
+      }
+      setEditing(null);
+      await reload();
+    } catch (err) {
+      setEditError(errorMessage(err));
     }
-    setEditing(null);
-    await reload();
   };
 
   const onDelete = async (p: ProductionPlan) => {
     setConfirmDelete(null);
-    await window.electronAPI.deletePlan(p.id);
-    await reload();
+    setError(null);
+    try {
+      await window.electronAPI.deletePlan(p.id);
+      setPlans((prev) => prev.filter((x) => x.id !== p.id));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
   };
 
   const onExport = async () => {
@@ -216,6 +246,8 @@ const ProductionPlanView: React.FC<Props> = ({
     try {
       const { content, filename } = exportPlansJson(plans, products);
       await saveFile(filename, content, 'json');
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
       setLoaderMessage(null);
@@ -235,7 +267,13 @@ const ProductionPlanView: React.FC<Props> = ({
         setInfo(formatStats(stats));
         await reload();
       } catch (err) {
-        setError(`${t.importInvalidFile}: ${(err as Error).message}`);
+        if (err instanceof ImportSaveError) {
+          setError(`${t.importSaveFailed}: ${err.message}`);
+          // Plans saved before the failure are kept — show what landed.
+          await reload().catch(() => undefined);
+        } else {
+          setError(`${t.importInvalidFile}: ${errorMessage(err)}`);
+        }
       }
     } finally {
       setBusy(false);
@@ -244,9 +282,18 @@ const ProductionPlanView: React.FC<Props> = ({
   };
 
   const onDuplicate = async (p: ProductionPlan) => {
-    const copy = await window.electronAPI.duplicatePlan(p.id);
-    setEditing(copy);
-    await reload();
+    if (duplicatingId) return;
+    setDuplicatingId(p.id);
+    setError(null);
+    try {
+      const copy = await window.electronAPI.duplicatePlan(p.id);
+      openEditor(copy);
+      await reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setDuplicatingId(null);
+    }
   };
 
   const statusInfo = (
@@ -290,6 +337,22 @@ const ProductionPlanView: React.FC<Props> = ({
     [filteredPlans, sort, t],
   );
 
+  // A failed load leaves the lists empty too — that is an error, not the
+  // "add your first product / plan" empty state.
+  if (!showSkeleton && loadError) {
+    return (
+      <div className="main">
+        <div className="page-header">
+          <HeaderNav />
+          <h1>{t.productionPlan}</h1>
+        </div>
+        <div className="card">
+          <div className="error-text">{loadError}</div>
+        </div>
+      </div>
+    );
+  }
+
   // While loading, the lists are empty for a moment — not an empty state.
   if (!showSkeleton && products.length === 0) {
     return (
@@ -319,6 +382,7 @@ const ProductionPlanView: React.FC<Props> = ({
             setEditing={setEditing}
             onCancel={() => setEditing(null)}
             onSave={onSave}
+            error={editError}
           />
         )}
         {loaderMessage && <LoadingOverlay message={loaderMessage} />}
@@ -372,7 +436,7 @@ const ProductionPlanView: React.FC<Props> = ({
                       case 'name':
                         return <th key={id} className="col-w-xl">{t.planName}</th>;
                       case 'status':
-                        return <th key={id} className="col-w-md">Status</th>;
+                        return <th key={id} className="col-w-md">{t.planStatusColumn}</th>;
                       case 'items':
                         return <th key={id} className="num col-w-sm">{t.planItems}</th>;
                       case 'bulk':
@@ -415,8 +479,7 @@ const ProductionPlanView: React.FC<Props> = ({
                         <td
                           key={id}
                           className="col-name col-wrap clickable"
-                          onClick={() => setEditing(p)}
-                          title={t.edit}
+                          onClick={() => openEditor(p)}
                         >
                           {p.name}
                         </td>
@@ -432,7 +495,6 @@ const ProductionPlanView: React.FC<Props> = ({
                           {showPopover ? (
                             <PlanReportsPopover
                               triggerClassName={`tag ${info.cls} tag-clickable`}
-                              triggerTitle={info.tooltip}
                               trigger={info.label}
                               reports={planReports}
                               batches={planBatches}
@@ -442,9 +504,11 @@ const ProductionPlanView: React.FC<Props> = ({
                               onSelectBatch={(b) => onNavigateToBatch?.(b.id)}
                             />
                           ) : (
-                            <span className={`tag ${info.cls}`} title={info.tooltip}>
-                              {info.label}
-                            </span>
+                            <HoverTooltip
+                              trigger={<span className={`tag ${info.cls}`}>{info.label}</span>}
+                            >
+                              <div className="shortage-tooltip-explain">{info.tooltip}</div>
+                            </HoverTooltip>
                           )}
                         </td>
                       );
@@ -471,7 +535,7 @@ const ProductionPlanView: React.FC<Props> = ({
                                     {productName(it.productId)}
                                   </span>
                                   <span className="list-tooltip-amount">
-                                    {it.qtyUnits.toLocaleString()} szt.
+                                    {it.qtyUnits.toLocaleString()} {t.unitsShort}
                                   </span>
                                 </li>
                               ))}
@@ -539,13 +603,14 @@ const ProductionPlanView: React.FC<Props> = ({
                           className="btn-sm soft-edit"
                           icon={<IconEdit size={14} />}
                           label={t.edit}
-                          onClick={() => setEditing(p)}
+                          onClick={() => openEditor(p)}
                         />
                         <IconButton
                           className="btn-sm soft-success"
                           icon={<IconDuplicate size={14} />}
                           label={t.duplicate}
-                          onClick={() => onDuplicate(p)}
+                          disabled={duplicatingId !== null}
+                          onClick={() => void onDuplicate(p)}
                         />
                       </div>
                     </td>
@@ -564,6 +629,7 @@ const ProductionPlanView: React.FC<Props> = ({
           setEditing={setEditing}
           onCancel={() => setEditing(null)}
           onSave={onSave}
+          error={editError}
         />
       )}
 

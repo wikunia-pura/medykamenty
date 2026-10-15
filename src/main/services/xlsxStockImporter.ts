@@ -3,6 +3,7 @@ import path from 'path';
 import type { StockKind, StockRow, StockSnapshot } from '../../shared/types';
 import { newId, nowIso } from '../utils/id';
 import log from '../utils/logger';
+import { asNumber, asString } from './xlsxCells';
 
 interface ColumnMap {
   name: number;
@@ -56,33 +57,6 @@ function findHeaderRow(ws: ExcelJS.Worksheet): { row: ExcelJS.Row; columns: Colu
     }
   }
   return null;
-}
-
-function asNumber(v: unknown): number | undefined {
-  if (v === null || v === undefined || v === '') return undefined;
-  if (typeof v === 'number') return v;
-  if (typeof v === 'string') {
-    const cleaned = v.replace(/\s/g, '').replace(',', '.');
-    const n = parseFloat(cleaned);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  if (typeof v === 'object' && v !== null && 'result' in v) {
-    return asNumber((v as { result: unknown }).result);
-  }
-  return undefined;
-}
-
-function asString(v: unknown): string | undefined {
-  if (v === null || v === undefined) return undefined;
-  if (typeof v === 'string') {
-    const trimmed = v.trim();
-    return trimmed.length === 0 ? undefined : trimmed;
-  }
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'object' && v !== null && 'text' in v) {
-    return asString((v as { text: unknown }).text);
-  }
-  return undefined;
 }
 
 export async function parseStockXlsx(filePath: string, kind: StockKind): Promise<StockSnapshot> {

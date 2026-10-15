@@ -8,6 +8,7 @@ import type {
   PackagingComponent,
 } from '../../shared/types';
 import { nowIso } from '../utils/id';
+import { totalStockQty } from '../../shared/expiry';
 
 // Sums matched import rows per catalog item. A catalog entry can be matched by
 // several rows (e.g. the same material across multiple warehouses), so we add
@@ -64,13 +65,25 @@ export async function reconcileStock(
     const item = byId.get(itemId);
     if (!item) continue; // matched to a deleted catalog entry — skip
 
-    if (item.stockSource === 'manual') {
-      if (qtyEquals(item.stockQty, importedQty)) continue; // agrees → nothing to do
+    // The stock the catalog shows: for a raw material with batches that is
+    // the batch total, expired included (totalStockQty — the same figure the
+    // catalog displays), not a possibly stale flat stockQty.
+    const currentQty =
+      kind === 'raw' ? totalStockQty(item as RawMaterial) : item.stockQty;
+
+    // Stock set by hand, or set after this snapshot was taken (e.g. expiry
+    // batches imported from the warehouse file later): never overwrite it
+    // silently — the snapshot would bring back an older flat total and drop
+    // the batches.
+    const newerThanSnapshot =
+      !!item.stockUpdatedAt && item.stockUpdatedAt > snapshot.importedAt;
+    if (item.stockSource === 'manual' || newerThanSnapshot) {
+      if (qtyEquals(currentQty, importedQty)) continue; // agrees → nothing to do
       conflicts.push({
         itemId,
         kind,
         name: item.name,
-        currentQty: item.stockQty,
+        currentQty,
         currentUpdatedAt: item.stockUpdatedAt,
         importedQty,
         importSourceFile: snapshot.sourceFile,
@@ -79,9 +92,14 @@ export async function reconcileStock(
       continue;
     }
 
-    // Last set by import (or never set) → overwrite silently.
+    // Last set by import (or never set) → overwrite silently. The import
+    // carries one flat total, so a raw material's old batches go — otherwise
+    // the calculators (which prefer batches) would keep using them. The bulk
+    // upsert writes whole entities and bypasses updateRawMaterial, which
+    // clears them on its own.
     toApply.push({
       ...item,
+      ...(kind === 'raw' ? { stockBatches: [] } : {}),
       stockQty: importedQty,
       stockSource: 'import',
       stockSourceFile: snapshot.sourceFile,

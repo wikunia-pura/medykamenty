@@ -41,6 +41,17 @@ const ProductEditorModal: React.FC<Props> = ({
   const t = useT();
   useEscapeKey(onCancel);
   const [activeTab, setActiveTab] = useState<Tab>('basics');
+  // In-flight guard: a double click must not create the product twice.
+  const [saving, setSaving] = useState(false);
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave();
+    } finally {
+      setSaving(false);
+    }
+  };
   const ingredientCount = (editing.ingredients ?? []).length;
   const packagingCount = (editing.packaging ?? []).length;
   const tierCount = editing.packingScheme?.tiers.length ?? 0;
@@ -265,8 +276,8 @@ const ProductEditorModal: React.FC<Props> = ({
               </button>
               <button
                 className="btn primary-filled"
-                onClick={() => void onSave()}
-                disabled={!editing.name?.trim()}
+                onClick={() => void handleSave()}
+                disabled={saving || !editing.name?.trim()}
               >
                 {t.save}
               </button>

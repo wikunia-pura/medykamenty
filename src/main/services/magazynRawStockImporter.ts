@@ -35,61 +35,71 @@ import type {
   RawMaterial,
 } from '../../shared/types';
 import { matchOne } from './matcher';
+import { normalize as normalizeAlias } from './smartMatcher';
+import { asNumber, asString, excelDateIso } from './xlsxCells';
 import log from '../utils/logger';
 
-function asString(v: unknown): string | undefined {
-  if (v === null || v === undefined) return undefined;
-  if (typeof v === 'string') {
-    const t = v.trim();
-    return t.length === 0 ? undefined : t;
-  }
-  if (typeof v === 'number') return String(v);
-  if (v instanceof Date) return undefined; // dates handled by asDate
-  if (typeof v === 'object') {
-    if ('text' in v) return asString((v as { text: unknown }).text);
-    if ('richText' in v) {
-      const parts = (v as { richText?: { text?: string }[] }).richText ?? [];
-      const joined = parts.map((p) => p?.text ?? '').join('').trim();
-      return joined.length === 0 ? undefined : joined;
-    }
-    if ('result' in v) return asString((v as { result: unknown }).result);
-    if ('hyperlink' in v) return asString((v as { hyperlink: unknown }).hyperlink);
-  }
-  return undefined;
-}
-
-function asNumber(v: unknown): number | undefined {
-  if (v === null || v === undefined || v === '') return undefined;
-  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
-  if (typeof v === 'string') {
-    const cleaned = v.replace(/\s/g, '').replace(',', '.');
-    const n = parseFloat(cleaned);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  if (typeof v === 'object' && v !== null && 'result' in v) {
-    return asNumber((v as { result: unknown }).result);
-  }
-  return undefined;
-}
-
-// Excel date cells come back as JS Date (exceljs), sometimes as a formula
-// result, occasionally as an ISO/locale string. Normalize to YYYY-MM-DD, or
-// undefined when the cell isn't a real date.
-function asDate(v: unknown): string | undefined {
-  if (v === null || v === undefined || v === '') return undefined;
+// Excel date cells come back as JS Date (exceljs, UTC midnight of the sheet's
+// wall-clock day), sometimes as a formula result, occasionally as text typed
+// by hand ("05.03.2025"). Normalize to YYYY-MM-DD. `ok: false` means the cell
+// is non-empty but not a date — the caller reports it instead of dropping it
+// silently.
+function asDate(v: unknown): { ok: true; value?: string } | { ok: false } {
+  if (v === null || v === undefined || v === '') return { ok: true };
   if (v instanceof Date) {
-    if (Number.isNaN(v.getTime())) return undefined;
-    return v.toISOString().slice(0, 10);
+    const iso = excelDateIso(v);
+    return iso ? { ok: true, value: iso } : { ok: false };
+  }
+  if (typeof v === 'number') {
+    // A date serial in a cell without a date format (1900 date system).
+    // 20000..80000 ≈ 1954..2119 — anything else isn't a plausible date.
+    if (!Number.isFinite(v) || v < 20000 || v > 80000) return { ok: false };
+    return { ok: true, value: excelDateIso(new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000)) };
   }
   if (typeof v === 'object') {
+    if ('error' in v) return { ok: false };
     if ('result' in v) return asDate((v as { result: unknown }).result);
-    if ('text' in v) return asDate((v as { text: unknown }).text);
   }
-  if (typeof v === 'string') {
-    const d = new Date(v.trim());
-    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  const text = asString(v);
+  if (text === undefined) return { ok: true };
+  return parseDateText(text);
+}
+
+// "DD.MM.YYYY" (also "/" or "-" as separator, 2-digit year → 20YY) — the
+// Polish order, always; and ISO "YYYY-MM-DD". `new Date("05.03.2025")` used to
+// read it as US month-first (and drop any day > 12), then toISOString shifted
+// it a day back in Polish time.
+function parseDateText(text: string): { ok: true; value: string } | { ok: false } {
+  let y: number;
+  let m: number;
+  let d: number;
+  const pl = /^(\d{1,2})[./-](\d{1,2})[./-](\d{2}|\d{4})(?:\s.*)?$/.exec(text);
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s].*)?$/.exec(text);
+  if (iso) {
+    y = Number(iso[1]);
+    m = Number(iso[2]);
+    d = Number(iso[3]);
+  } else if (pl) {
+    d = Number(pl[1]);
+    m = Number(pl[2]);
+    y = Number(pl[3]);
+    if (pl[3].length === 2) y += 2000;
+  } else {
+    return { ok: false };
   }
-  return undefined;
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) {
+    return { ok: false }; // 31.02.2025 and the like
+  }
+  return { ok: true, value: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}` };
+}
+
+function columnLetter(col: number): string {
+  let out = '';
+  for (let n = col; n > 0; n = Math.floor((n - 1) / 26)) {
+    out = String.fromCharCode(65 + ((n - 1) % 26)) + out;
+  }
+  return out;
 }
 
 function findSurowceSheet(wb: ExcelJS.Workbook): ExcelJS.Worksheet | undefined {
@@ -164,6 +174,13 @@ export async function analyzeRawStock(filePath: string, db: Database): Promise<R
   const materials = await db.listRawMaterials();
   const candidates = materials.map((m) => ({ id: m.id, name: m.name, mpFirmaSymbol: m.mpFirmaSymbol }));
   const byId = new Map<string, RawMaterial>(materials.map((m) => [m.id, m]));
+  // Saved aliases (an explicit user decision) win over fuzzy matching, like
+  // every other import path.
+  const aliasMap = new Map<string, string>();
+  for (const a of await db.listRawMaterialAliases()) {
+    aliasMap.set(normalizeAlias(a.alias), a.targetId);
+  }
+  const warnings: string[] = [];
 
   interface Agg {
     item?: RawMaterial; // undefined for unmatched (create-candidate) materials
@@ -182,17 +199,32 @@ export async function analyzeRawStock(filePath: string, db: Database): Promise<R
     const name = asString(r.getCell(layout.nameCol).value);
     if (!name) continue;
 
+    // A date cell that holds something other than a date ("?", a remark) is
+    // imported as "no date" — but reported, never dropped silently.
+    const dateAt = (col: number, label: string): string | undefined => {
+      const cell = r.getCell(col).value;
+      const res = asDate(cell);
+      if (res.ok) return res.value;
+      warnings.push(
+        `Wiersz ${i}, kolumna ${columnLetter(col)} (${label}) dla „${name}": „${asString(cell) ?? '?'}" nie jest datą — pominięto tę datę.`,
+      );
+      return undefined;
+    };
     const batch: RawStockBatchRow = {
       qty: asNumber(r.getCell(layout.qtyCol).value) ?? 0,
-      productionDate: asDate(r.getCell(layout.prodCol).value),
-      expiryDate: asDate(r.getCell(layout.expiryCol).value),
-      microTestDate: asDate(r.getCell(layout.microCol).value),
-      retestExpiryDate: asDate(r.getCell(layout.retestCol).value),
+      productionDate: dateAt(layout.prodCol, 'data produkcji'),
+      expiryDate: dateAt(layout.expiryCol, 'data ważności'),
+      microTestDate: dateAt(layout.microCol, 'badania mikrobiologiczne'),
+      retestExpiryDate: dateAt(layout.retestCol, 'data ważności po reteście'),
       note: asString(r.getCell(layout.noteCol).value),
     };
     const reportedTotal = asNumber(r.getCell(layout.totalCol).value);
 
-    const result = matchOne({ name }, candidates);
+    const aliasTarget = aliasMap.get(normalizeAlias(name));
+    const aliasItem = aliasTarget ? byId.get(aliasTarget) : undefined;
+    const result = aliasItem
+      ? { id: aliasItem.id, confidence: 1, ambiguous: false }
+      : matchOne({ name }, candidates);
     const item = result.id && !result.ambiguous ? byId.get(result.id) : undefined;
     if (!item) {
       if (result.ambiguous) {
@@ -232,6 +264,10 @@ export async function analyzeRawStock(filePath: string, db: Database): Promise<R
       const batchSum = agg.batches.reduce((s, b) => s + b.qty, 0);
       const sumMismatch =
         agg.reportedTotal !== undefined && Math.abs(batchSum - agg.reportedTotal) > SUM_EPS;
+      // Stock typed in by hand must not be overwritten without a decision.
+      const manualConflict =
+        agg.item!.stockSource === 'manual' &&
+        Math.abs(batchSum - (agg.item!.stockQty ?? 0)) > SUM_EPS;
       return {
         itemId: agg.item!.id,
         name: agg.item!.name,
@@ -242,6 +278,7 @@ export async function analyzeRawStock(filePath: string, db: Database): Promise<R
         batchSum,
         reportedTotal: agg.reportedTotal,
         sumMismatch,
+        manualConflict,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
@@ -259,7 +296,8 @@ export async function analyzeRawStock(filePath: string, db: Database): Promise<R
   log.info(
     `[magazyn-raw] ${path.basename(filePath)} → ${matches.length} matched materials, ` +
       `${matches.filter((m) => m.sumMismatch).length} sum-mismatch, ${unmatched.length} unmatched, ` +
-      `${ambiguousNames.size} ambiguous`,
+      `${ambiguousNames.size} ambiguous, ` +
+      `${matches.filter((m) => m.manualConflict).length} manual-conflict, ${warnings.length} warnings`,
   );
 
   return {
@@ -267,5 +305,6 @@ export async function analyzeRawStock(filePath: string, db: Database): Promise<R
     matches,
     unmatched,
     ambiguousNames: Array.from(ambiguousNames),
+    warnings,
   };
 }

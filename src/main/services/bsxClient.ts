@@ -53,19 +53,58 @@ function parseBsxJson(raw: string): { resultCode: number; errorStr?: string; [k:
   return JSON.parse(raw.replace(CTRL_RE, ''));
 }
 
+// Per-request timeout. BSX normally answers in well under a second; a hung
+// connection must not freeze an import forever.
+const REQUEST_TIMEOUT_MS = 30_000;
+
+// The BSX API takes credentials (cloud key, password) and tokens in the GET
+// query string, so a URL must never reach an error message, the log or the UI
+// with its query: keep only the path ("…/mp/core/login").
+function safeUrl(url: string): string {
+  const q = url.search(/[?#]/);
+  return (q === -1 ? url : url.slice(0, q)).replace(BASE_URL, '');
+}
+
 async function bsxFetch(url: string, token?: string): Promise<{ resultCode: number; errorStr?: string; [k: string]: unknown }> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(url, { method: 'GET', headers });
-  const body = await res.text();
+  const where = safeUrl(url);
+  let res: Response;
+  let body: string;
+  try {
+    res = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    body = await res.text();
+  } catch (err) {
+    const name = (err as Error)?.name;
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      throw new BsxError(
+        `BSX nie odpowiedział w ciągu ${REQUEST_TIMEOUT_MS / 1000} s (${where}). Spróbuj ponownie później.`,
+      );
+    }
+    // Network-level failure (DNS, TLS, connection reset). The underlying
+    // error may echo the request URL, so its message is not passed on.
+    throw new BsxError(`Brak połączenia z BSX (${where}) — sprawdź połączenie z internetem.`);
+  }
   if (!res.ok && body.length === 0) {
-    throw new BsxError(`HTTP ${res.status} from ${url}`);
+    throw new BsxError(`BSX zwrócił błąd HTTP ${res.status} (${where}).`);
   }
   try {
     return parseBsxJson(body);
-  } catch (err) {
-    throw new BsxError(`Invalid JSON from BSX (${(err as Error).message}): ${body.slice(0, 200)}`);
+  } catch {
+    // Never echo the body: it can carry a token or credentials.
+    throw new BsxError(
+      `BSX zwrócił nieprawidłową odpowiedź (HTTP ${res.status}, ${where}, ${body.length} B) — to nie jest JSON.`,
+    );
   }
+}
+
+// `count` from a list endpoint — BSX sometimes sends it as a string. Returns
+// undefined when it isn't a usable number, so callers keep paging until a
+// short page instead of stopping after page 1.
+function parseCount(v: unknown): number | undefined {
+  if (v === null || v === undefined || v === '') return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
 async function verifyCloudKey(cloudKey: string): Promise<string> {
@@ -104,7 +143,7 @@ async function stockListPage(
   idstock: number,
   start: number,
   limit: number,
-): Promise<{ rows: BsxStockRow[]; count: number }> {
+): Promise<{ rows: BsxStockRow[]; count?: number }> {
   const params = new URLSearchParams({
     idstock: String(idstock),
     start: String(start),
@@ -120,8 +159,7 @@ async function stockListPage(
     );
   }
   const rows = (data.rows as BsxStockRow[] | undefined) ?? [];
-  const count = typeof data.count === 'number' ? data.count : rows.length;
-  return { rows, count };
+  return { rows, count: parseCount(data.count) };
 }
 
 export async function fetchStockForWarehouse(
@@ -136,7 +174,9 @@ export async function fetchStockForWarehouse(
   for (let i = 0; i < 1000; i++) {
     const { rows, count } = await stockListPage(sessionToken, idstock, start, pageSize);
     all.push(...rows);
-    if (all.length >= count || rows.length < pageSize) break;
+    // A short (or empty) page is always the last one; a known total ends the
+    // loop as soon as it is reached.
+    if (rows.length < pageSize || (count !== undefined && all.length >= count)) break;
     start += pageSize;
   }
   return all;
@@ -194,7 +234,7 @@ async function listStockDocsPage(
   sessionToken: string,
   start: number,
   limit: number,
-): Promise<{ rows: PzHeader[]; count: number }> {
+): Promise<{ rows: PzHeader[]; count?: number }> {
   const params = new URLSearchParams({
     ntype: '0', // PZ
     nstatus: '2', // Zatwierdzony
@@ -212,8 +252,7 @@ async function listStockDocsPage(
     );
   }
   const rows = ((data.rows as PzHeader[] | undefined) ?? []) as PzHeader[];
-  const count = typeof data.count === 'number' ? data.count : rows.length;
-  return { rows, count };
+  return { rows, count: parseCount(data.count) };
 }
 
 async function fetchStockDoc(sessionToken: string, id: string): Promise<Record<string, unknown>> {
@@ -254,48 +293,112 @@ function parseNum(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/**
- * Builds a map: idproduct → latest PZ line price, scoped to PZ documents
- * that landed in the given warehouse (`idm1`). "Latest" is determined by
- * `ndate_issue` DESC, then PZ `id` DESC as tiebreaker. Status is hard-coded
- * to 2 (Zatwierdzony) so unfinished drafts never leak into pricing.
- *
- * This is the implementation of Model A — "ostatnia cena zakupu". It pulls
- * ALL matching PZ headers (paginated) and fetches their details concurrently
- * because the list endpoint doesn't return line items.
- */
-export async function fetchLatestPzPrices(
+// A line price, or undefined when the field is missing / not a number. A
+// missing price must not become a "latest price" of 0.
+function parsePrice(v: unknown): number | undefined {
+  if (v === null || v === undefined || v === '') return undefined;
+  const n = typeof v === 'number' ? v : Number(String(v).trim().replace(',', '.'));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+// PZ ids are numeric strings: "100" is newer than "99". Compare numerically,
+// falling back to string order only when an id isn't a number.
+function comparePzId(a: string, b: string): number {
+  const na = Number(a);
+  const nb = Number(b);
+  if (a !== '' && b !== '' && Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+async function fetchStockDocWithRetry(
   sessionToken: string,
-  idm1: number,
-): Promise<Map<string, BsxPzPrice>> {
-  // 1) Paginate headers, filtering to our warehouse.
+  id: string,
+  attempts = 3,
+): Promise<Record<string, unknown>> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fetchStockDoc(sessionToken, id);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < attempts) await new Promise((r) => setTimeout(r, 500 * attempt));
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Builds, for each requested warehouse (`idm1`), a map idproduct → latest PZ
+ * line price. "Latest" is `ndate_issue` DESC, then PZ `id` DESC (numeric) as
+ * tiebreaker. Status is hard-coded to 2 (Zatwierdzony) so unfinished drafts
+ * never leak into pricing.
+ *
+ * This is the implementation of Model A — "ostatnia cena zakupu". The PZ
+ * headers are paged ONCE for all warehouses (the list endpoint has no
+ * warehouse filter) and split by `idm1`; each matching document is then
+ * fetched for its line items (the list doesn't return them). A document that
+ * still fails after a few retries is logged and skipped — one bad PZ must not
+ * sink the whole price refresh. Every requested id gets a (possibly empty)
+ * map in the result.
+ */
+export async function fetchLatestPzPricesForWarehouses(
+  sessionToken: string,
+  warehouseIds: number[],
+): Promise<Map<number, Map<string, BsxPzPrice>>> {
+  const wanted = Array.from(new Set(warehouseIds));
+  const result = new Map<number, Map<string, BsxPzPrice>>();
+  for (const id of wanted) result.set(id, new Map());
+  if (wanted.length === 0) return result;
+  const wantedByKey = new Map(wanted.map((id) => [String(id), id]));
+
+  // 1) Paginate headers once, keeping those of the requested warehouses.
   const pageSize = 100;
-  const matching: PzHeader[] = [];
+  const matching: { header: PzHeader; warehouseId: number }[] = [];
   let start = 0;
+  let seen = 0;
   for (let i = 0; i < 1000; i++) {
     const { rows, count } = await listStockDocsPage(sessionToken, start, pageSize);
+    seen += rows.length;
     for (const r of rows) {
-      if (String(r.idm1) === String(idm1)) matching.push(r);
+      const warehouseId = wantedByKey.get(String(r.idm1));
+      if (warehouseId !== undefined) matching.push({ header: r, warehouseId });
     }
     start += pageSize;
-    if (start >= count || rows.length < pageSize) break;
+    if (rows.length < pageSize || (count !== undefined && seen >= count)) break;
   }
 
-  log.info(`[bsx] PZ headers for idm1=${idm1}: ${matching.length} matching`);
+  log.info(
+    `[bsx] PZ headers: ${seen} scanned, ${matching.length} in warehouses ${wanted.join(', ')}`,
+  );
 
   // 2) Fetch details concurrently. BSX is happy with ~10 parallel requests on
   // the same session token. Each successful request refreshes the token
   // server-side so we don't have to ping during the loop.
-  const details = await runConcurrent(matching, 10, async (h) => {
-    const row = await fetchStockDoc(sessionToken, h.id);
-    return { header: h, row };
+  let failed = 0;
+  const details = await runConcurrent(matching, 10, async ({ header, warehouseId }) => {
+    try {
+      const row = await fetchStockDocWithRetry(sessionToken, header.id);
+      return { header, warehouseId, row };
+    } catch (err) {
+      failed++;
+      log.warn(`[bsx] PZ id=${header.id} skipped: ${(err as Error)?.message ?? 'unknown error'}`);
+      return undefined;
+    }
   });
+  if (failed > 0) log.warn(`[bsx] ${failed} of ${matching.length} PZ documents could not be read`);
+  // A few unreadable documents only cost older prices for their products;
+  // none readable (expired session, BSX down) must be an error, not a silent
+  // "0 prices loaded".
+  if (matching.length > 0 && failed === matching.length) {
+    throw new BsxError(`Nie udało się pobrać żadnego z ${matching.length} dokumentów PZ.`);
+  }
 
-  // 3) Reduce to "latest per idproduct" using ndate_issue then id as the
-  // ordering key — string comparison works for "YYYY-MM-DD" and numeric ids
-  // are padded by ndate's same length, so we just compare the tuple.
-  const latest = new Map<string, BsxPzPrice>();
-  for (const { header, row } of details) {
+  // 3) Reduce to "latest per idproduct" per warehouse: ndate_issue
+  // ("YYYY-MM-DD…", string order is date order), then numeric PZ id.
+  for (const d of details) {
+    if (!d) continue;
+    const { header, warehouseId, row } = d;
+    const latest = result.get(warehouseId)!;
     const items = ((row.items as { rows?: unknown[] } | undefined)?.rows ?? []) as Array<
       Record<string, unknown>
     >;
@@ -307,15 +410,19 @@ export async function fetchLatestPzPrices(
     for (const it of items) {
       const idproduct = String(it.idproduct ?? '');
       if (!idproduct) continue;
+      // A line without a real (positive) net price — missing, garbage, or a
+      // free-of-charge delivery — can't be the "latest purchase price".
+      const netPrice = parsePrice(it.psprice_n);
+      if (netPrice === undefined || netPrice <= 0) continue;
       const existing = latest.get(idproduct);
       const isNewer =
         !existing ||
         pzDate > existing.pzDate ||
-        (pzDate === existing.pzDate && pzId > existing.pzId);
+        (pzDate === existing.pzDate && comparePzId(pzId, existing.pzId) > 0);
       if (!isNewer) continue;
       latest.set(idproduct, {
         idproduct,
-        netPrice: parseNum(it.psprice_n),
+        netPrice,
         vatPrice: parseNum(it.psprice_v),
         grossPrice: parseNum(it.psprice_b),
         vatRate: parseNum(it.psrate_v),
@@ -328,7 +435,20 @@ export async function fetchLatestPzPrices(
     }
   }
 
-  return latest;
+  return result;
+}
+
+/**
+ * Single-warehouse variant, kept for existing callers. Prefer
+ * fetchLatestPzPricesForWarehouses when pricing several warehouses — it scans
+ * the PZ headers once instead of once per warehouse.
+ */
+export async function fetchLatestPzPrices(
+  sessionToken: string,
+  idm1: number,
+): Promise<Map<string, BsxPzPrice>> {
+  const all = await fetchLatestPzPricesForWarehouses(sessionToken, [idm1]);
+  return all.get(idm1) ?? new Map();
 }
 
 export interface BsxSession {

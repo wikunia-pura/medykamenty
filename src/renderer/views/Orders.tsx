@@ -47,6 +47,7 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
   const [confirmDelete, setConfirmDelete] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -126,14 +127,34 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
     }
   };
 
+  // Swap one saved order into the list — task/status edits return the full
+  // updated order, so there is no need to re-fetch every order.
+  const patchOrder = (updated: Order) =>
+    setItems((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+
+  const onDuplicate = async (o: Order) => {
+    if (duplicatingId) return;
+    setDuplicatingId(o.id);
+    setError(null);
+    try {
+      await window.electronAPI.duplicateOrder(o.id);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
+
   const onTaskAction = async (order: Order, task: TaskInstance, action: TaskAction) => {
     if (action.kind === 'setStatus') {
       setBusy(true);
       try {
-        await window.electronAPI.updateOrderTask(order.id, task.id, {
-          status: action.status,
-        });
-        await reload();
+        patchOrder(
+          await window.electronAPI.updateOrderTask(order.id, task.id, {
+            status: action.status,
+          }),
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -168,8 +189,7 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
   const onPickStatus = async (o: Order, status: OrderStatus) => {
     setBusy(true);
     try {
-      await window.electronAPI.updateOrder(o.id, { status });
-      await reload();
+      patchOrder(await window.electronAPI.updateOrder(o.id, { status }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -194,16 +214,14 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
         <HeaderNav />
         <h1>{t.orders}</h1>
         <span className="page-header-count">{items.length}</span>
-        <button
-          type="button"
-          className="btn btn-sm"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => setSettingsOpen(true)}
-          title={t.settings}
-          aria-label={t.settings}
-        >
-          <IconSettings size={14} />
-        </button>
+        <div style={{ marginLeft: 'auto' }}>
+          <IconButton
+            className="btn-sm"
+            icon={<IconSettings size={14} />}
+            label={t.settings}
+            onClick={() => setSettingsOpen(true)}
+          />
+        </div>
       </div>
 
       <div className="card card-fill">
@@ -257,15 +275,12 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
                     key={o.id}
                     className={`row-clickable${o.archived ? ' row-archived' : ''}`}
                     onClick={() => onOpenOrder(o.id)}
-                    title={t.orderDetails}
                   >
                     <td className="col-name">
                       <div className="orders-name-cell">
                         <span className="orders-name-text">{o.name}</span>
                         {o.archived && (
-                          <span className="tag" title={t.archivedTag}>
-                            {t.archivedTag}
-                          </span>
+                          <span className="tag">{t.archivedTag}</span>
                         )}
                         <BadgeSelect
                           className={`order-status-${o.status}`}
@@ -315,10 +330,8 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
                           className="btn-sm soft-success"
                           icon={<IconDuplicate size={14} />}
                           label={t.duplicate}
-                          onClick={async () => {
-                            await window.electronAPI.duplicateOrder(o.id);
-                            await reload();
-                          }}
+                          disabled={duplicatingId !== null}
+                          onClick={() => void onDuplicate(o)}
                         />
                       </div>
                     </td>
@@ -356,8 +369,9 @@ const Orders: React.FC<Props> = ({ onOpenOrder, onNavigateForTask }) => {
             const { orderId, task } = editingNote;
             setBusy(true);
             try {
-              await window.electronAPI.updateOrderTask(orderId, task.id, { note });
-              await reload();
+              patchOrder(
+                await window.electronAPI.updateOrderTask(orderId, task.id, { note }),
+              );
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {

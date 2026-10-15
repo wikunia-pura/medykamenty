@@ -60,6 +60,7 @@ export interface T {
   deleteBlockedByRawMaterials: string;
   deleteBlockedByComponents: string;
   deleteBlockedByProducts: string;
+  deleteBlockedByPlans: string;
   blockedByTitle: string;
   blockedBySubtitle: string;
   loaderImporting: string;
@@ -771,6 +772,79 @@ export interface T {
   pickReportToOpen: string;
   pickEmailBatchToOpen: string;
   batchName: string;
+  // --- audit fixes: reports/email/stock ---
+  reportLabelNoShortages: string;
+  loadReportsFailed: string;
+  loadEmailBatchesFailed: string;
+  loadDataFailed: string;
+  emailBatchMissing: string;
+  emailBodySaving: string;
+  emailBodySaveFailed: string;
+  emailLanguageLabel: string;
+  reportRenameUnsaved: string;
+  stockMatchColumn: string;
+  stockNoSnapshot: string;
+  stockImportSubtitle: string;
+  bulkApplyFailedRows: string;
+  actionFailed: string;
+  aiStatusLoadFailed: string;
+  settingsLoadFailed: string;
+  emailBatchesCheckFailed: string;
+  taskStatusUpdateFailed: string;
+  taskNoteSaveFailed: string;
+  migrationBannerText: string;
+  migrationBannerButton: string;
+  migrationDoneTitle: string;
+  migrationDoneDetails: string;
+  migrationFailedTitle: string;
+  errorBoundaryTitle: string;
+  errorBoundaryHint: string;
+  errorBoundaryReload: string;
+  dashboardMoreItems1: string;
+  dashboardMoreItems2: string;
+  dashboardMoreItems5: string;
+  emailCount1: string;
+  emailCount2: string;
+  emailCount5: string;
+  missingItemsCount1: string;
+  missingItemsCount2: string;
+  missingItemsCount5: string;
+  supplierCount1: string;
+  supplierCount2: string;
+  supplierCount5: string;
+  itemCount1: string;
+  itemCount2: string;
+  itemCount5: string;
+  // --- audit fixes: catalog ---
+  loadFailed: string;
+  importSaveFailed: string;
+  settingsSaveFailed: string;
+  componentTypeLabel: string;
+  componentNoCapacityWarning: string;
+  componentNoCapacityTooltip: string;
+  rawStockDecisionTitle: string;
+  rawStockManualConflictIntro: string;
+  rawStockReasonCol: string;
+  rawStockReasonManual: string;
+  rawStockReasonSumMismatch: string;
+  planStatusColumn: string;
+  planEditorSubtitle: string;
+  planNoItemsHint: string;
+  planNoBulkHint: string;
+  qtyPerPackUnit: string;
+  consumptionPerKgMass: string;
+  consumptionPerPiece: string;
+  recipesImportCapacityReview: string;
+  calcWarningsTitle: string;
+  costItemsOverageNote: string;
+  costBulkItemsHint: string;
+  costBulkMassKg: string;
+  costPerKg: string;
+  costItemQtyPerKg: string;
+  costBulkTotal: string;
+  rawStockParseWarnings: string;
+  recipeImportWarningsIntro: string;
+  recipeImportContinue: string;
 }
 
 const pl: T = {
@@ -837,6 +911,7 @@ const pl: T = {
   deleteBlockedByRawMaterials: 'Surowce',
   deleteBlockedByComponents: 'Komponenty',
   deleteBlockedByProducts: 'Produkty',
+  deleteBlockedByPlans: 'Plany produkcji',
   blockedByTitle: 'Nie można usunąć',
   blockedBySubtitle:
     'Pozycja jest używana w innych miejscach ({n}). Usuń lub odepnij powiązania, aby kontynuować.',
@@ -1587,6 +1662,84 @@ const pl: T = {
   pickReportToOpen: 'Wybierz raport do otwarcia',
   pickEmailBatchToOpen: 'Wybierz wpis mailowy do otwarcia',
   batchName: 'Nazwa paczki',
+  // --- audit fixes: reports/email/stock ---
+  reportLabelNoShortages: 'brak braków',
+  loadReportsFailed: 'Nie udało się wczytać raportów.',
+  loadEmailBatchesFailed: 'Nie udało się wczytać wysyłek maili.',
+  loadDataFailed: 'Nie udało się wczytać danych: {error}',
+  emailBatchMissing: 'Ta wysyłka maili już nie istnieje.',
+  emailBodySaving: 'Zapisywanie…',
+  emailBodySaveFailed: 'Treść nie została zapisana: {error}. Zapis zostanie ponowiony przy kolejnej zmianie lub po kliknięciu poza polem.',
+  emailLanguageLabel: 'Język maila',
+  reportRenameUnsaved: 'Nie można zmienić nazwy raportu, który nie został jeszcze zapisany.',
+  stockMatchColumn: 'Dopasowanie',
+  stockNoSnapshot: 'Brak zaimportowanego stanu, do którego można przypisać pozycję.',
+  stockImportSubtitle: 'Import xlsx z MP Firma. Aplikacja dopasuje pozycje do istniejących surowców i komponentów po symbolu lub nazwie. Pozycje wieloznaczne lub nierozpoznane można rozstrzygnąć ręcznie.',
+  bulkApplyFailedRows: 'Nie udało się zastosować {n} pozycji — pozostały na liście, pozostałe zostały zapisane:',
+  actionFailed: 'Operacja nie powiodła się: {error}',
+  aiStatusLoadFailed: 'Nie udało się sprawdzić dostępności AI: {error}',
+  settingsLoadFailed: 'Nie udało się wczytać ustawień: {error}',
+  emailBatchesCheckFailed: 'Nie udało się sprawdzić istniejących wysyłek maili ({error}) — utworzono nową.',
+  taskStatusUpdateFailed: 'Nie udało się zmienić statusu zadania: {error}',
+  taskNoteSaveFailed: 'Nie udało się zapisać notatki: {error}',
+  migrationBannerText: 'Wykryto dane z poprzedniej wersji aplikacji. Prześlij je raz do chmury, aby były współdzielone z innymi użytkownikami.',
+  migrationBannerButton: 'Prześlij dane do chmury',
+  migrationDoneTitle: 'Przeniesiono do chmury',
+  migrationDoneDetails: '• Dostawcy: {suppliers}\n• Surowce: {rawMaterials}\n• Komponenty: {components}\n• Produkty: {products}\n• Plany: {plans}\n• Stany magazynowe: {snapshots}\n• Raporty: {reports}\n• Maile RFQ: {emailBatches}',
+  migrationFailedTitle: 'Błąd migracji',
+  errorBoundaryTitle: 'Coś poszło nie tak',
+  errorBoundaryHint: 'Ten ekran napotkał błąd. Przeładuj aplikację — zapisane dane są bezpieczne.',
+  errorBoundaryReload: 'Przeładuj',
+  dashboardMoreItems1: '+ {n} pozycja',
+  dashboardMoreItems2: '+ {n} pozycje',
+  dashboardMoreItems5: '+ {n} pozycji',
+  emailCount1: '{n} email',
+  emailCount2: '{n} emaile',
+  emailCount5: '{n} emaili',
+  missingItemsCount1: 'brakująca pozycja',
+  missingItemsCount2: 'brakujące pozycje',
+  missingItemsCount5: 'brakujących pozycji',
+  supplierCount1: '{n} dostawca',
+  supplierCount2: '{n} dostawców',
+  supplierCount5: '{n} dostawców',
+  itemCount1: '{n} pozycja',
+  itemCount2: '{n} pozycje',
+  itemCount5: '{n} pozycji',
+  // --- audit fixes: catalog ---
+  loadFailed: 'Nie udało się wczytać danych',
+  importSaveFailed:
+    'Plik wczytany, ale zapis importu się nie powiódł — część wierszy mogła zostać zapisana',
+  settingsSaveFailed: 'Nie udało się zapisać ustawień',
+  componentTypeLabel: 'Typ',
+  componentNoCapacityWarning:
+    'Bez pojemności ten komponent jest pomijany we wszystkich kalkulatorach (koszt, braki, maksymalna produkcja). Uzupełnij pojemność.',
+  componentNoCapacityTooltip: 'Brak pojemności — kalkulatory pomijają ten komponent.',
+  rawStockDecisionTitle: 'Import stanów surowców — wymagana decyzja',
+  rawStockManualConflictIntro:
+    'Stan części surowców ustawiono ręcznie, a plik magazynowy by go zmienił. Wybierz „Importuj z pliku”, aby przyjąć stan z pliku, albo „Odrzuć”, aby zachować ręczną wartość (domyślnie zachowana).',
+  rawStockReasonCol: 'Powód',
+  rawStockReasonManual: 'Stan ustawiony ręcznie',
+  rawStockReasonSumMismatch: 'Σ partii ≠ suma z pliku',
+  planStatusColumn: 'Status',
+  planEditorSubtitle: 'Zaplanuj produkcję: dodaj produkty pakowane oraz, opcjonalnie, masę luzem.',
+  planNoItemsHint: 'Brak produktów. Dodaj pierwszy, aby zaplanować pakowanie.',
+  planNoBulkHint: 'Brak masy luzem. Dodaj jeśli planujesz hurt lub saszetki.',
+  qtyPerPackUnit: '{qty} szt./op.',
+  consumptionPerKgMass: '{qty} {unit}/kg masy',
+  consumptionPerPiece: '{qty} {unit}/szt.',
+  recipesImportCapacityReview: 'Pojemność do sprawdzenia (przyjęto 1)',
+  calcWarningsTitle: 'Wynik może być niepełny',
+  costItemsOverageNote: 'Zużycie uwzględnia naddatek.',
+  costBulkItemsHint:
+    'Wszystko, co składa się na koszt 1 kg masy luzem: surowce i opakowania masowe.',
+  costBulkMassKg: 'Masa [kg]',
+  costPerKg: 'Koszt / kg',
+  costItemQtyPerKg: 'Zużycie / kg',
+  costBulkTotal: 'Koszt łącznie',
+  rawStockParseWarnings: 'Problemy w pliku (partie zaimportowane bez tych danych)',
+  recipeImportWarningsIntro:
+    'Plik receptur zawiera problemy opisane poniżej. Sprawdź je przed importem — możesz go jeszcze anulować.',
+  recipeImportContinue: 'Kontynuuj import',
 };
 
 const en: T = {
@@ -1654,6 +1807,7 @@ const en: T = {
   deleteBlockedByRawMaterials: 'Raw materials',
   deleteBlockedByComponents: 'Components',
   deleteBlockedByProducts: 'Products',
+  deleteBlockedByPlans: 'Production plans',
   blockedByTitle: 'Cannot delete',
   blockedBySubtitle:
     'This item is referenced elsewhere ({n}). Remove or detach the references first to continue.',
@@ -2393,6 +2547,84 @@ const en: T = {
   pickReportToOpen: 'Pick a report to open',
   pickEmailBatchToOpen: 'Pick an email batch to open',
   batchName: 'Email batch name',
+  // --- audit fixes: reports/email/stock ---
+  reportLabelNoShortages: 'no shortages',
+  loadReportsFailed: 'Failed to load the reports.',
+  loadEmailBatchesFailed: 'Failed to load the email batches.',
+  loadDataFailed: 'Failed to load the data: {error}',
+  emailBatchMissing: 'This email batch no longer exists.',
+  emailBodySaving: 'Saving…',
+  emailBodySaveFailed: 'The text was not saved: {error}. It is retried on the next change or when you click outside the field.',
+  emailLanguageLabel: 'Email language',
+  reportRenameUnsaved: 'A report that has not been saved yet cannot be renamed.',
+  stockMatchColumn: 'Match',
+  stockNoSnapshot: 'There is no imported stock to resolve this row against.',
+  stockImportSubtitle: 'Import xlsx files from MP Firma. The app matches rows to existing raw materials and components by symbol or name. Ambiguous or unrecognised rows can be resolved by hand.',
+  bulkApplyFailedRows: '{n} rows could not be applied — they stay in the list, the rest were saved:',
+  actionFailed: 'The action failed: {error}',
+  aiStatusLoadFailed: 'Could not check whether AI is available: {error}',
+  settingsLoadFailed: 'Failed to load the settings: {error}',
+  emailBatchesCheckFailed: 'Could not check for existing email batches ({error}) — a new one was created.',
+  taskStatusUpdateFailed: 'Could not change the task status: {error}',
+  taskNoteSaveFailed: 'Could not save the note: {error}',
+  migrationBannerText: 'Data from a previous version of the app was found. Upload it to the cloud once so it is shared with other users.',
+  migrationBannerButton: 'Upload data to the cloud',
+  migrationDoneTitle: 'Moved to the cloud',
+  migrationDoneDetails: '• Suppliers: {suppliers}\n• Raw materials: {rawMaterials}\n• Components: {components}\n• Products: {products}\n• Plans: {plans}\n• Stock snapshots: {snapshots}\n• Reports: {reports}\n• RFQ emails: {emailBatches}',
+  migrationFailedTitle: 'Migration failed',
+  errorBoundaryTitle: 'Something went wrong',
+  errorBoundaryHint: 'This screen ran into an error. Reload the app — saved data is safe.',
+  errorBoundaryReload: 'Reload',
+  dashboardMoreItems1: '+ {n} item',
+  dashboardMoreItems2: '+ {n} items',
+  dashboardMoreItems5: '+ {n} items',
+  emailCount1: '{n} email',
+  emailCount2: '{n} emails',
+  emailCount5: '{n} emails',
+  missingItemsCount1: 'missing item',
+  missingItemsCount2: 'missing items',
+  missingItemsCount5: 'missing items',
+  supplierCount1: '{n} supplier',
+  supplierCount2: '{n} suppliers',
+  supplierCount5: '{n} suppliers',
+  itemCount1: '{n} item',
+  itemCount2: '{n} items',
+  itemCount5: '{n} items',
+  // --- audit fixes: catalog ---
+  loadFailed: 'Failed to load data',
+  importSaveFailed:
+    'The file was read, but saving the import failed — some rows may already be saved',
+  settingsSaveFailed: 'Failed to save settings',
+  componentTypeLabel: 'Type',
+  componentNoCapacityWarning:
+    'Without a capacity this component is skipped by every calculator (cost, shortages, max producible). Fill in the capacity.',
+  componentNoCapacityTooltip: 'No capacity — the calculators skip this component.',
+  rawStockDecisionTitle: 'Import raw-material stock — decision needed',
+  rawStockManualConflictIntro:
+    'Some raw materials have stock set by hand that the warehouse file would change. Choose “Import from file” to take the file’s stock, or “Reject” to keep the manual value (kept by default).',
+  rawStockReasonCol: 'Reason',
+  rawStockReasonManual: 'Stock set by hand',
+  rawStockReasonSumMismatch: 'Batch sum ≠ file total',
+  planStatusColumn: 'Status',
+  planEditorSubtitle: 'Plan production: add packed products and, optionally, bulk mass.',
+  planNoItemsHint: 'No products yet. Add the first one to plan packing.',
+  planNoBulkHint: 'No bulk mass. Add it if you plan wholesale or sachets.',
+  qtyPerPackUnit: '{qty} pcs/unit',
+  consumptionPerKgMass: '{qty} {unit}/kg of bulk',
+  consumptionPerPiece: '{qty} {unit}/pc',
+  recipesImportCapacityReview: 'Capacity to review (1 assumed)',
+  calcWarningsTitle: 'The result may be incomplete',
+  costItemsOverageNote: 'Usage includes overage.',
+  costBulkItemsHint:
+    'Everything that makes up the cost of 1 kg of bulk mass: raw materials and mass packaging.',
+  costBulkMassKg: 'Mass [kg]',
+  costPerKg: 'Cost / kg',
+  costItemQtyPerKg: 'Usage / kg',
+  costBulkTotal: 'Total cost',
+  rawStockParseWarnings: 'Problems in the file (batches imported without this data)',
+  recipeImportWarningsIntro:
+    'The recipe file has the problems listed below. Review them before importing — you can still cancel.',
+  recipeImportContinue: 'Continue import',
 };
 
 export const translations: Record<Lang, T> = { pl, en };

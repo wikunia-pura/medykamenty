@@ -56,6 +56,7 @@ import {
   saveFile,
   openFile,
   formatStats,
+  ImportSaveError,
 } from '../utils/exportImport';
 
 const PRIMARY_TYPES: ComponentType[] = [
@@ -72,6 +73,14 @@ const PRIMARY_TYPES: ComponentType[] = [
 ];
 
 const SECONDARY_TYPES: ComponentType[] = [...SECONDARY_COMPONENT_TYPES];
+
+const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
+
+// Secondary packaging without a capacity is skipped by every calculator
+// (cost, shortages, max producible) — flagged in the list and the editor.
+const lacksCapacity = (c: Partial<PackagingComponent>): boolean =>
+  !!c.type && isSecondaryComponent(c.type) && !((c.capacity ?? 0) > 0);
 
 export type ComponentsViewKind = 'primary' | 'secondary';
 
@@ -99,6 +108,13 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   const [initialLoading, setInitialLoading] = useState(true);
   const showSkeleton = useMinimumLoading(initialLoading);
   const [error, setError] = useState<string | null>(null);
+  // A failed first load — shown in the table instead of "no data".
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Save error of the edit modal, shown inside it (the page banner sits under
+  // the modal overlay).
+  const [editError, setEditError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
@@ -126,6 +142,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     setEditing(null);
     setEditingReadOnly(false);
     setModalTab('basics');
+    setEditError(null);
   };
 
   useEscapeKey(closeEditor, !!editing);
@@ -141,7 +158,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       // For secondary we no longer treat the type as a meaningful axis;
       // capacity + dependencies carry the relevant information.
       ...(kind === 'primary'
-        ? [{ id: 'type', label: 'Typ', defaultVisible: true } as ColumnDef]
+        ? [{ id: 'type', label: t.componentTypeLabel, defaultVisible: true } as ColumnDef]
         : []),
       { id: 'stock', label: t.stock, defaultVisible: true },
       { id: 'suppliers', label: t.suppliers, defaultVisible: true },
@@ -199,7 +216,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       case 'type':
         return (
           <th key={id} className="col-w-sm">
-            Typ
+            {t.componentTypeLabel}
           </th>
         );
       case 'suppliers':
@@ -278,14 +295,24 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       case 'name':
         return (
           <td key={id} className="col-name col-wrap">
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => openPreview(c)}
-              title={t.preview}
+            <HoverTooltip
+              className="hover-tooltip-compact"
+              trigger={
+                <button type="button" className="link-button" onClick={() => openPreview(c)}>
+                  {c.name}
+                </button>
+              }
             >
-              {c.name}
-            </button>
+              {t.preview}
+            </HoverTooltip>
+            {lacksCapacity(c) && (
+              <HoverTooltip
+                triggerClassName="stock-note-icon stock-note-icon-warn"
+                trigger={<span aria-label={t.componentNoCapacityTooltip}>⚠</span>}
+              >
+                <div className="shortage-tooltip-explain">{t.componentNoCapacityTooltip}</div>
+              </HoverTooltip>
+            )}
           </td>
         );
       case 'symbol':
@@ -425,23 +452,34 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     setDefaultOveragePct(s.defaultOveragePctComponent);
   };
 
+  // Swap one saved item into the list — inline edits return the updated
+  // entity (always of this view's kind), so there is no need to re-fetch.
+  const patchItem = (updated: PackagingComponent) =>
+    setItems((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+
   const onChangeDefaultOverage = async (v: number | undefined) => {
     const next = v ?? 0;
+    const previous = defaultOveragePct;
     setDefaultOveragePct(next);
-    const updated: AppSettings = await window.electronAPI.updateSettings({
-      defaultOveragePctComponent: next,
-    });
-    setDefaultOveragePct(updated.defaultOveragePctComponent);
+    setError(null);
+    try {
+      const updated: AppSettings = await window.electronAPI.updateSettings({
+        defaultOveragePctComponent: next,
+      });
+      setDefaultOveragePct(updated.defaultOveragePctComponent);
+    } catch (err) {
+      setDefaultOveragePct(previous);
+      setError(errorMessage(err));
+    }
   };
 
   // Per-item overage edit from the grid. `undefined` clears it → inherit default.
   const onSetOverage = async (id: string, pct: number | undefined) => {
     setError(null);
     try {
-      await window.electronAPI.updateComponent(id, { overagePct: pct });
-      await reload();
+      patchItem(await window.electronAPI.updateComponent(id, { overagePct: pct }));
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -450,10 +488,11 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   const onSetPrice = async (id: string, price: number | undefined) => {
     setError(null);
     try {
-      await window.electronAPI.updateComponent(id, { lastPurchasePriceNet: price });
-      await reload();
+      patchItem(
+        await window.electronAPI.updateComponent(id, { lastPurchasePriceNet: price }),
+      );
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -489,10 +528,10 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   const onSetStock = async (id: string, qty: number) => {
     setError(null);
     try {
-      await window.electronAPI.setManualStock('component', id, qty);
-      await reload();
+      const updated = await window.electronAPI.setManualStock('component', id, qty);
+      patchItem(updated as PackagingComponent);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -501,8 +540,11 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       // First load shows skeleton rows in the table (see SkeletonRows), not a
       // blocking overlay.
       setInitialLoading(true);
+      setLoadError(null);
       try {
         await reload();
+      } catch (err) {
+        setLoadError(`${t.loadFailed}: ${errorMessage(err)}`);
       } finally {
         setInitialLoading(false);
       }
@@ -571,7 +613,8 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     [filtered, sort, suppliers, defaultOveragePct, t],
   );
 
-  const onAdd = () =>
+  const onAdd = () => {
+    setEditError(null);
     setEditing({
       name: '',
       type: defaultType,
@@ -587,6 +630,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
           }
         : {}),
     });
+  };
 
   // Build the same payload that onSave persists — extracted so doPropagate can
   // save the component first (it can't call onSave because that closes the
@@ -614,8 +658,8 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
   });
 
   const onSave = async () => {
-    if (!editing || !editing.name?.trim()) return;
-    setError(null);
+    if (!editing || !editing.name?.trim() || saving) return;
+    setEditError(null);
     const payload = buildEditingPayload(editing);
     // A stock change goes through the same path as the inline list edit
     // (setManualStock → source 'manual' + date), and only when it changed, so
@@ -623,6 +667,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     const original = editing.id ? items.find((c) => c.id === editing.id) : undefined;
     const stockChanged =
       editing.stockQty !== undefined && editing.stockQty !== original?.stockQty;
+    setSaving(true);
     try {
       if (editing.id) {
         await window.electronAPI.updateComponent(editing.id, payload);
@@ -635,10 +680,12 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
           await window.electronAPI.setManualStock('component', created.id, editing.stockQty ?? 0);
         }
       }
-      setEditing(null);
+      closeEditor();
       await reload();
     } catch (err) {
-      setError((err as Error).message);
+      setEditError(errorMessage(err));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -652,8 +699,12 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     setBusy(true);
     setLoaderMessage(t.loaderExporting);
     try {
-      const { content, filename } = exportComponentsCsv(items, suppliers);
+      // The full catalog names dependency targets outside this view.
+      const all = await window.electronAPI.listComponents();
+      const { content, filename } = exportComponentsCsv(items, suppliers, all);
       await saveFile(filename, content, 'csv');
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
       setLoaderMessage(null);
@@ -668,12 +719,28 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     try {
       const r = await openFile('csv');
       if (!r.ok || !r.content) return;
+      // Match against the whole catalog, not just this view's kind: a row may
+      // name a component that lives in the other view (and must update it, not
+      // duplicate it), and dependencies can point across.
+      let all: PackagingComponent[];
       try {
-        const stats = await importComponentsCsv(r.content, [...items], suppliers);
+        all = await window.electronAPI.listComponents();
+      } catch (err) {
+        setError(`${t.loadFailed}: ${errorMessage(err)}`);
+        return;
+      }
+      try {
+        const stats = await importComponentsCsv(r.content, all, suppliers);
         setInfo(formatStats(stats));
         await reload();
       } catch (err) {
-        setError(`${t.importInvalidFile}: ${(err as Error).message}`);
+        if (err instanceof ImportSaveError) {
+          setError(`${t.importSaveFailed}: ${err.message}`);
+          // Part of the file may already be saved — show what landed.
+          await reload().catch(() => undefined);
+        } else {
+          setError(`${t.importInvalidFile}: ${errorMessage(err)}`);
+        }
       }
     } finally {
       setBusy(false);
@@ -813,11 +880,30 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
 
   const onDelete = async (c: PackagingComponent) => {
     setConfirmDelete(null);
-    const result = await window.electronAPI.deleteComponent(c.id);
-    if (!result.ok) {
-      setBlockedBy(result.blockedBy ?? []);
-    } else {
+    setError(null);
+    try {
+      const result = await window.electronAPI.deleteComponent(c.id);
+      if (!result.ok) {
+        setBlockedBy(result.blockedBy ?? []);
+      } else {
+        await reload();
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const onDuplicate = async (c: PackagingComponent) => {
+    if (duplicatingId) return;
+    setDuplicatingId(c.id);
+    setError(null);
+    try {
+      await window.electronAPI.duplicateComponent(c.id);
       await reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setDuplicatingId(null);
     }
   };
 
@@ -828,18 +914,16 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
     setBusy(true);
     setLoaderMessage(t.deleteAllInProgress);
     const total = items.length;
-    let deleted = 0;
-    let blocked = 0;
-    const blockers: string[] = [];
     try {
-      for (const c of items) {
-        const result = await window.electronAPI.deleteComponent(c.id);
-        if (result.ok) deleted++;
-        else {
-          blocked++;
-          if (result.blockedBy) blockers.push(...result.blockedBy);
-        }
-      }
+      // One call; components still used by a product or another component
+      // are skipped and reported.
+      const res = await window.electronAPI.deleteCatalogItems(
+        'component',
+        items.map((c) => c.id),
+      );
+      const deleted = res.deleted;
+      const blocked = res.blocked.length;
+      const blockers = res.blocked.flatMap((b) => b.blockedBy);
       if (blocked === 0) {
         setInfo(t.deleteAllSuccess.replace('{n}', String(deleted)));
       } else {
@@ -852,6 +936,9 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         setBlockedBy(Array.from(new Set(blockers)));
       }
       await reload();
+    } catch (err) {
+      setError(errorMessage(err));
+      await reload().catch(() => undefined);
     } finally {
       setBusy(false);
       setLoaderMessage(null);
@@ -871,12 +958,8 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
       <span className="supplier-chips">
         {ordered.map((id) => {
           const isPreferred = id === c.preferredSupplierId;
-          return (
-            <span
-              key={id}
-              className={`supplier-chip ${isPreferred ? 'preferred' : ''}`}
-              title={isPreferred ? t.preferredSupplier : undefined}
-            >
+          const chip = (
+            <span key={id} className={`supplier-chip ${isPreferred ? 'preferred' : ''}`}>
               {isPreferred && (
                 <span className="supplier-chip-star">
                   <IconStar size={11} />
@@ -884,6 +967,13 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
               )}
               {supplierName(id)}
             </span>
+          );
+          return isPreferred ? (
+            <HoverTooltip key={id} className="hover-tooltip-compact" trigger={chip}>
+              {t.preferredSupplier}
+            </HoverTooltip>
+          ) : (
+            chip
           );
         })}
       </span>
@@ -896,38 +986,40 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
         <HeaderNav />
         <h1>{heading}</h1>
         <span className="page-header-count">{items.length}</span>
-        <button
-          type="button"
-          className="btn btn-sm"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => setSettingsOpen(true)}
-          title={t.settings}
-          aria-label={t.settings}
-        >
-          <IconSettings size={14} />
-        </button>
+        <div style={{ marginLeft: 'auto' }}>
+          <IconButton
+            className="btn-sm"
+            icon={<IconSettings size={14} />}
+            label={t.settings}
+            onClick={() => setSettingsOpen(true)}
+          />
+        </div>
       </div>
 
       <div className="card card-fill">
         <div className="toolbar">
           <div className="toolbar-actions">
             <ExportImportButtons format="csv" onExport={onExport} onImport={onImport} busy={busy} />
-            <button
-              className="btn btn-import"
-              onClick={onClickImportXlsx}
-              disabled={busy}
-              title={t.componentsImportXlsxHint}
+            <HoverTooltip
+              triggerClassName="icon-button-trigger"
+              trigger={
+                <button className="btn btn-import" onClick={onClickImportXlsx} disabled={busy}>
+                  <IconImport size={13} /> {t.componentsImportXlsx}
+                </button>
+              }
             >
-              <IconImport size={13} /> {t.componentsImportXlsx}
-            </button>
-            <button
-              className="btn btn-import"
-              onClick={onClickImportMagazyn}
-              disabled={busy}
-              title={t.magazynStockImportHint.replace('{tab}', magazynSheetName)}
+              {t.componentsImportXlsxHint}
+            </HoverTooltip>
+            <HoverTooltip
+              triggerClassName="icon-button-trigger"
+              trigger={
+                <button className="btn btn-import" onClick={onClickImportMagazyn} disabled={busy}>
+                  <IconImport size={13} /> {t.magazynStockImport}
+                </button>
+              }
             >
-              <IconImport size={13} /> {t.magazynStockImport}
-            </button>
+              {t.magazynStockImportHint.replace('{tab}', magazynSheetName)}
+            </HoverTooltip>
             <ColumnPicker
               columns={orderedColumns}
               isVisible={isVisible}
@@ -941,7 +1033,6 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
               className="btn danger"
               onClick={() => setConfirmDeleteAll(true)}
               disabled={busy || items.length === 0}
-              title={t.deleteAll}
             >
               <IconTrash size={13} /> {t.deleteAll}
             </button>
@@ -981,8 +1072,11 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
               ) : (
                 sorted.length === 0 && (
                   <tr>
-                    <td colSpan={orderedVisibleIds.length + 2} className="hint">
-                      {query ? '—' : t.noData}
+                    <td
+                      colSpan={orderedVisibleIds.length + 2}
+                      className={loadError ? 'error-text' : 'hint'}
+                    >
+                      {loadError ?? (query ? '—' : t.noData)}
                     </td>
                   </tr>
                 )
@@ -1006,6 +1100,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
                         onClick={() => {
                           setEditingReadOnly(false);
                           setModalTab('basics');
+                          setEditError(null);
                           setEditing(c);
                         }}
                       />
@@ -1013,10 +1108,8 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
                         className="btn-sm soft-success"
                         icon={<IconDuplicate size={14} />}
                         label={t.duplicate}
-                        onClick={async () => {
-                          await window.electronAPI.duplicateComponent(c.id);
-                          await reload();
-                        }}
+                        disabled={duplicatingId !== null}
+                        onClick={() => void onDuplicate(c)}
                       />
                     </div>
                   </td>
@@ -1113,6 +1206,11 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
                           disabled={editingReadOnly}
                         />
                       </div>
+                      {lacksCapacity(editing) && (
+                        <div className="warn-text" style={{ marginTop: -4, marginBottom: 8, fontSize: 12 }}>
+                          {t.componentNoCapacityWarning}
+                        </div>
+                      )}
                       <div className="form-row">
                         <label>{t.packingCapacityUnit}</label>
                         <select
@@ -1136,7 +1234,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
                   )}
                   {kind === 'primary' && (
                     <div className="form-row">
-                      <label>Typ</label>
+                      <label>{t.componentTypeLabel}</label>
                       <SearchableSelect
                         options={TYPES.map((tt) => ({ value: tt, label: tt }))}
                         value={editing.type ?? 'other'}
@@ -1263,6 +1361,7 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
                   t={t}
                 />
               )}
+              {editError && <div className="error-text">{editError}</div>}
             </div>
             <div className="modal-footer">
               {editingReadOnly ? (
@@ -1274,7 +1373,11 @@ const Components: React.FC<Props> = ({ kind = 'primary' }) => {
                   <button className="btn" onClick={closeEditor}>
                     {t.cancel}
                   </button>
-                  <button className="btn primary-filled" onClick={onSave}>
+                  <button
+                    className="btn primary-filled"
+                    onClick={() => void onSave()}
+                    disabled={saving || !editing.name?.trim()}
+                  >
                     {t.save}
                   </button>
                 </>
@@ -1552,14 +1655,12 @@ const DependenciesEditor: React.FC<DependenciesEditorProps> = ({
                       />
                     </div>
                     {depComp && onOpenComponent && (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-icon-only"
+                      <IconButton
+                        className="btn-sm"
+                        icon={<IconEye size={13} />}
+                        label={t.preview}
                         onClick={() => onOpenComponent(depComp)}
-                        title={t.preview}
-                      >
-                        <IconEye size={13} />
-                      </button>
+                      />
                     )}
                   </div>
                 </td>
@@ -1578,13 +1679,12 @@ const DependenciesEditor: React.FC<DependenciesEditorProps> = ({
                 </td>
                 {!readOnly && (
                   <td className="actions">
-                    <button
-                      className="btn btn-sm soft-danger btn-icon-only"
+                    <IconButton
+                      className="btn-sm soft-danger"
+                      icon={<IconClose size={12} />}
+                      label={t.delete}
                       onClick={() => remove(idx)}
-                      title={t.delete}
-                    >
-                      <IconClose size={12} />
-                    </button>
+                    />
                   </td>
                 )}
               </tr>

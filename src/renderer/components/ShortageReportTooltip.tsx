@@ -7,6 +7,28 @@ import type {
 } from '../../shared/types';
 import HoverTooltip from './HoverTooltip';
 import { IconCheck } from './Icons';
+import type { T } from '../translations';
+
+// Polish plural ("1 pozycja" / "2 pozycje" / "5 pozycji"); English uses the
+// first two forms. `forms` are the three translated templates with {n}.
+function pluralLabel(n: number, forms: [string, string, string]): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  const form =
+    n === 1
+      ? forms[0]
+      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+        ? forms[1]
+        : forms[2];
+  return form.replace('{n}', String(n));
+}
+
+const missingLabel = (t: T, n: number) =>
+  pluralLabel(n, [t.missingItemsCount1, t.missingItemsCount2, t.missingItemsCount5]);
+const supplierLabel = (t: T, n: number) =>
+  pluralLabel(n, [t.supplierCount1, t.supplierCount2, t.supplierCount5]);
+const itemLabel = (t: T, n: number) =>
+  pluralLabel(n, [t.itemCount1, t.itemCount2, t.itemCount5]);
 
 interface Props {
   entry: ShortageReportEntry;
@@ -86,16 +108,15 @@ const ShortageReportTooltip: React.FC<Props> = ({ entry, batches }) => {
         <span className="shortage-summary">
           <strong className="shortage-count">{missing.length}</strong>
           <span className="hint">
-            {missing.length === 1 ? 'brakująca pozycja' : 'brakujących pozycji'}
+            {missingLabel(t, missing.length)}
             {' · '}
-            {groups} {groups === 1 ? 'dostawca' : 'dostawców'}
+            {supplierLabel(t, groups)}
           </span>
         </span>
       }
     >
       <div className="shortage-tooltip-header">
-        {t.shortageReport} — {missing.length}{' '}
-        {missing.length === 1 ? 'pozycja' : 'pozycji'}
+        {t.shortageReport} — {itemLabel(t, missing.length)}
       </div>
       <ul className="shortage-tooltip-list">
         {missing.map((line) => {
@@ -114,20 +135,14 @@ const ShortageReportTooltip: React.FC<Props> = ({ entry, batches }) => {
               >
                 <span className="shortage-tooltip-status-slot">
                   {lineStatus?.sentAt && (
-                    <span
-                      className="tag success"
-                      title={`${t.sentAtLabel}: ${new Date(lineStatus.sentAt).toLocaleString()}`}
-                    >
+                    <span className="tag success">
                       <IconCheck size={10} /> {t.mailSentBadge}
                     </span>
                   )}
                 </span>
                 <span className="shortage-tooltip-status-slot">
                   {lineStatus?.receivedAt && (
-                    <span
-                      className="tag success"
-                      title={`${t.receivedAtLabel}: ${new Date(lineStatus.receivedAt).toLocaleString()}`}
-                    >
+                    <span className="tag success">
                       <IconCheck size={10} /> {t.receivedBadge}
                     </span>
                   )}
@@ -146,20 +161,15 @@ const ShortageReportTooltip: React.FC<Props> = ({ entry, batches }) => {
                 <span className="shortage-tooltip-name">{s.supplierName}</span>
                 <span className="shortage-tooltip-amount">
                   {s.sentAt && (
-                    <span
-                      className="tag success"
-                      title={`${t.sentAtLabel}: ${new Date(s.sentAt).toLocaleString()}`}
-                    >
-                      <IconCheck size={10} /> {t.mailSentBadge}
+                    <span className="tag success">
+                      <IconCheck size={10} /> {t.mailSentBadge}{' '}
+                      {new Date(s.sentAt).toLocaleDateString()}
                     </span>
                   )}
                   {s.receivedAt && (
-                    <span
-                      className="tag success"
-                      style={{ marginLeft: 4 }}
-                      title={`${t.receivedAtLabel}: ${new Date(s.receivedAt).toLocaleString()}`}
-                    >
-                      <IconCheck size={10} /> {t.receivedBadge}
+                    <span className="tag success" style={{ marginLeft: 4 }}>
+                      <IconCheck size={10} /> {t.receivedBadge}{' '}
+                      {new Date(s.receivedAt).toLocaleDateString()}
                     </span>
                   )}
                 </span>

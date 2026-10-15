@@ -1,5 +1,11 @@
 import type { Unit } from '../../shared/types';
 
+// Mass units convert to grams directly; volume units (ml/l) would need a
+// density the catalog doesn't carry.
+export function isMassUnit(unit: Unit): boolean {
+  return unit === 'g' || unit === 'kg';
+}
+
 export function toGrams(value: number, unit: Unit): number {
   switch (unit) {
     case 'g':

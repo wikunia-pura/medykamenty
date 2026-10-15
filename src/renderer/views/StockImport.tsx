@@ -36,6 +36,7 @@ import { useEscapeKey } from '../utils/useEscapeKey';
 import UnmatchedRowModal, { type ResolveAction } from '../components/UnmatchedRowModal';
 import BulkUnmatchedModal from '../components/BulkUnmatchedModal';
 import SegmentedControl from '../components/SegmentedControl';
+import HoverTooltip from '../components/HoverTooltip';
 
 interface Props {
   onNavigate?: (key: ViewKey) => void;
@@ -110,12 +111,14 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
   const [bulkResolve, setBulkResolve] = useState<{
     rows: StockRow[];
     kind: 'raw' | 'component';
+    // Rows whose decision failed on the last "apply" — shown inside the modal.
+    errors?: { rowKey: string; name: string; message: string }[];
   } | null>(null);
 
   const STOCK_COLUMNS: ColumnDef[] = useMemo(
     () => [
       { id: 'name', label: t.name, required: true },
-      { id: 'match', label: 'Match', required: true },
+      { id: 'match', label: t.stockMatchColumn, required: true },
       { id: 'qty', label: t.quantity, defaultVisible: true },
       { id: 'netUnit', label: t.stockNetUnit, defaultVisible: true },
       { id: 'vatUnit', label: t.stockVatUnit, defaultVisible: true },
@@ -137,20 +140,35 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     toggleSort: stockColumns.toggleSort,
   });
 
-  const loadCurrent = async () => {
-    const [stock, rms, cs, settings] = await Promise.all([
-      window.electronAPI.getCurrentStock(),
-      window.electronAPI.listRawMaterials(),
-      window.electronAPI.listComponents(),
-      window.electronAPI.getSettings(),
-    ]);
-    setRawRows(stock.raw);
-    setCompRows(stock.components);
-    setRawMaterials(rms);
-    setComponents(cs);
-    setRawSnapshot(stock.rawSnapshot);
-    setCompSnapshot(stock.componentSnapshot);
-    setBsxSettings(settings.bsx);
+  // Never throws: a failed load keeps what is on screen and shows the error,
+  // rather than leaving empty tables that read as "no stock".
+  const loadCurrent = async (): Promise<boolean> => {
+    try {
+      const [stock, rms, cs, settings] = await Promise.all([
+        window.electronAPI.getCurrentStock(),
+        window.electronAPI.listRawMaterials(),
+        window.electronAPI.listComponents(),
+        window.electronAPI.getSettings(),
+      ]);
+      setRawRows(stock.raw);
+      setCompRows(stock.components);
+      setRawMaterials(rms);
+      setComponents(cs);
+      setRawSnapshot(stock.rawSnapshot);
+      setCompSnapshot(stock.componentSnapshot);
+      setBsxSettings(settings.bsx);
+      return true;
+    } catch (err) {
+      setError(t.loadDataFailed.replace('{error}', (err as Error).message));
+      return false;
+    }
+  };
+
+  // Local edits of the current snapshot rows, instead of re-fetching stock,
+  // catalog and settings after a single-row change.
+  const patchRows = (kind: 'raw' | 'component', fn: (rows: StockRow[]) => StockRow[]) => {
+    if (kind === 'raw') setRawRows(fn);
+    else setCompRows(fn);
   };
 
   // Creates a brand-new catalog entry from the row and links the snapshot to it.
@@ -204,7 +222,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
   // the single-row modal and the bulk-apply loop.
   const applyDecision = async (row: StockRow, kind: 'raw' | 'component', action: ResolveAction) => {
     const snapshotId = kind === 'raw' ? rawSnapshot?.id : compSnapshot?.id;
-    if (!snapshotId) throw new Error('No snapshot to resolve against');
+    if (!snapshotId) throw new Error(t.stockNoSnapshot);
     if (action.type === 'add-new') {
       await adoptRowAsNew(row, kind);
       return;
@@ -249,35 +267,56 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     await window.electronAPI.resolveStockMatch(snapshotId, row.rowKey, kind, action.targetId);
   };
 
+  const [resolveError, setResolveError] = useState<string | null>(null);
   const handleResolve = async (action: ResolveAction) => {
     if (resolveQueue.length === 0) return;
     const head = resolveQueue[0];
     setAdoptBusy(true);
+    setResolveError(null);
     try {
       await applyDecision(head.row, head.kind, action);
       advanceQueue();
       await loadCurrent();
     } catch (err) {
-      setError((err as Error).message);
+      // Shown inside the resolve modal — the page banner sits behind it.
+      setResolveError((err as Error).message);
     } finally {
       setAdoptBusy(false);
     }
   };
 
+  // Applies every decision, carrying on past individual failures. Applied rows
+  // leave the modal at once — pressing "Apply" again must never re-apply them
+  // (an "add new" would create a duplicate catalog item). Failed rows stay,
+  // with their errors shown inside the modal.
   const handleBulkApply = async (decisions: { row: StockRow; action: ResolveAction }[]) => {
     if (!bulkResolve) return;
+    const kind = bulkResolve.kind;
     setError(null);
     setAdoptBusy(true);
     setLoaderMessage(t.loaderProcessing);
+    const applied = new Set<string>();
+    const errors: { rowKey: string; name: string; message: string }[] = [];
     try {
       for (const d of decisions) {
-        await applyDecision(d.row, bulkResolve.kind, d.action);
+        try {
+          await applyDecision(d.row, kind, d.action);
+          applied.add(d.row.rowKey);
+        } catch (err) {
+          errors.push({ rowKey: d.row.rowKey, name: d.row.name, message: (err as Error).message });
+        }
       }
-      setBulkResolve(null);
-      await loadCurrent();
-    } catch (err) {
-      setError((err as Error).message);
     } finally {
+      setBulkResolve((prev) => {
+        if (!prev) return prev;
+        if (errors.length === 0) return null;
+        return {
+          ...prev,
+          rows: prev.rows.filter((r) => !applied.has(r.rowKey)),
+          errors,
+        };
+      });
+      await loadCurrent();
       setAdoptBusy(false);
       setLoaderMessage(null);
     }
@@ -291,33 +330,56 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     if (!confirmDeleteRow) return;
     const { row, snapshotId } = confirmDeleteRow;
     setConfirmDeleteRow(null);
-    await window.electronAPI.deleteStockRow(snapshotId, row.rowKey);
-    await loadCurrent();
+    setError(null);
+    try {
+      await window.electronAPI.deleteStockRow(snapshotId, row.rowKey);
+      const kind = snapshotId === rawSnapshot?.id ? 'raw' : 'component';
+      patchRows(kind, (rows) => rows.filter((r) => r.rowKey !== row.rowKey));
+    } catch (err) {
+      setError((err as Error).message);
+    }
   };
 
   const onDeleteSnapshot = async () => {
     if (!confirmDeleteSnapshot) return;
     const kind = confirmDeleteSnapshot;
     setConfirmDeleteSnapshot(null);
-    // Delete every snapshot of this kind (not just the latest) — there can be
-    // older retained snapshots that would otherwise resurface as "current".
-    await window.electronAPI.deleteStockSnapshotsByKind(kind);
-    if (kind === 'raw') {
-      setRawRows([]);
-      setRawSnapshot(null);
-    } else {
-      setCompRows([]);
-      setCompSnapshot(null);
+    setError(null);
+    try {
+      // Delete every snapshot of this kind (not just the latest) — there can be
+      // older retained snapshots that would otherwise resurface as "current".
+      await window.electronAPI.deleteStockSnapshotsByKind(kind);
+      if (kind === 'raw') {
+        setRawRows([]);
+        setRawSnapshot(null);
+      } else {
+        setCompRows([]);
+        setCompSnapshot(null);
+      }
+    } catch (err) {
+      setError((err as Error).message);
     }
-    await loadCurrent();
   };
 
   const onSaveEditing = async () => {
     if (!editingRow) return;
-    const { row, snapshotId } = editingRow;
-    await window.electronAPI.updateStockRow(snapshotId, row.rowKey, row);
-    setEditingRow(null);
-    await loadCurrent();
+    const { row, snapshotId, kind } = editingRow;
+    setError(null);
+    try {
+      const saved = await window.electronAPI.updateStockRow(snapshotId, row.rowKey, row);
+      if (!saved) {
+        // The snapshot or the row is gone (deleted meanwhile) — nothing was
+        // written; don't pretend it was.
+        setError(t.actionFailed.replace('{error}', t.stockNoSnapshot));
+        setEditingRow(null);
+        await loadCurrent();
+        return;
+      }
+      patchRows(kind, (rows) => rows.map((r) => (r.rowKey === row.rowKey ? saved : r)));
+      setEditingRow(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
   };
 
   useEffect(() => {
@@ -412,10 +474,10 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
   const handleResolveConflicts = async (resolutions: StockConflictResolution[]) => {
     setError(null);
     try {
+      // Only catalog quantities change — the snapshot rows on screen stay valid.
       await window.electronAPI.resolveStockConflicts(resolutions);
       setConflicts([]);
       setSyncPending(false);
-      await loadCurrent();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -430,8 +492,9 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
     setBusy(true);
     setLoaderMessage(t.stockSyncInProgress);
     try {
+      // Writes snapshot quantities into the catalog; the snapshot rows shown
+      // here are unchanged, so no reload.
       const res = await window.electronAPI.syncStockCatalog();
-      await loadCurrent();
       if (res.conflicts.length > 0) {
         setConflicts(res.conflicts);
       } else {
@@ -563,7 +626,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
         case 'match':
           return (
             <th key={id} className="col-w-match">
-              Match
+              {t.stockMatchColumn}
             </th>
           );
         case 'qty':
@@ -647,28 +710,48 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
       const matchedRow = r.matchedRawMaterialId || r.matchedComponentId;
       if (r.matchAmbiguous) {
         return (
-          <span className="match-badge warn" title={t.rowsAmbiguous} aria-label={t.rowsAmbiguous}>
-            ?
-          </span>
+          <HoverTooltip
+            className="hover-tooltip-compact"
+            trigger={
+              <span className="match-badge warn" aria-label={t.rowsAmbiguous}>
+                ?
+              </span>
+            }
+          >
+            {t.rowsAmbiguous}
+          </HoverTooltip>
         );
       }
       if (matchedRow) {
         return (
-          <span className="match-badge success" title={t.rowsMatched} aria-label={t.rowsMatched}>
-            <IconCheck size={12} />
-          </span>
+          <HoverTooltip
+            className="hover-tooltip-compact"
+            trigger={
+              <span className="match-badge success" aria-label={t.rowsMatched}>
+                <IconCheck size={12} />
+              </span>
+            }
+          >
+            {t.rowsMatched}
+          </HoverTooltip>
         );
       }
       return (
-        <button
-          className="match-badge danger as-button"
-          disabled={adoptBusy}
-          onClick={() => openResolveModalFor(r, kind)}
-          title={kind === 'raw' ? t.adoptAsRaw : t.adoptAsComponent}
-          aria-label={kind === 'raw' ? t.adoptAsRaw : t.adoptAsComponent}
+        <HoverTooltip
+          className="hover-tooltip-compact"
+          trigger={
+            <button
+              className="match-badge danger as-button"
+              disabled={adoptBusy}
+              onClick={() => openResolveModalFor(r, kind)}
+              aria-label={kind === 'raw' ? t.adoptAsRaw : t.adoptAsComponent}
+            >
+              <IconPlus size={12} />
+            </button>
+          }
         >
-          <IconPlus size={12} />
-        </button>
+          {kind === 'raw' ? t.adoptAsRaw : t.adoptAsComponent}
+        </HoverTooltip>
       );
     };
 
@@ -791,7 +874,6 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
                     type="button"
                     className={`filter-chip ${unmatchedOnly ? 'active' : ''}`}
                     onClick={() => setUnmatchedOnly(!unmatchedOnly)}
-                    title={t.stockUnmatchedOnly}
                   >
                     {t.stockUnmatchedOnly}
                     <span className="filter-chip-count">{unmatched}</span>
@@ -911,7 +993,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
               </span>
             )}
             {pricesLoading && snapshot.sourceFile.startsWith('BSX') && (
-              <span className="tag pricing-loading" title={t.bsxPricesLoading}>
+              <span className="tag pricing-loading">
                 <span className="spinner-dot" aria-hidden="true" />
                 {t.bsxPricesLoading}
               </span>
@@ -927,7 +1009,6 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
               e.stopPropagation();
               setConfirmDeleteSnapshot(kind);
             }}
-            title={t.stockDeleteSnapshot}
           >
             <IconTrash size={13} /> {t.stockDeleteSnapshot}
           </button>
@@ -952,10 +1033,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
           {info}
         </div>
       )}
-      <p className="subtitle">
-        Import xlsx z MP Firma. Aplikacja dopasuje pozycje do istniejących surowców i komponentów po
-        symbolu lub nazwie. Pozycje wieloznaczne lub nierozpoznane można rozstrzygnąć ręcznie.
-      </p>
+      <p className="subtitle">{t.stockImportSubtitle}</p>
 
       {(() => {
         const bsxConfigured = Boolean(
@@ -1060,7 +1138,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
                   <thead>
                     <tr>
                       <th className="col-w-xl">{t.name}</th>
-                      <th className="col-w-md">Typ</th>
+                      <th className="col-w-md">{t.itemKind}</th>
                       <th className="actions">{t.actionsHeader}</th>
                     </tr>
                   </thead>
@@ -1161,8 +1239,12 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
           row={resolveQueue[0].row}
           kind={resolveQueue[0].kind}
           busy={adoptBusy}
+          error={resolveError}
           onResolve={(action) => void handleResolve(action)}
-          onCancel={handleCancelQueue}
+          onCancel={() => {
+            setResolveError(null);
+            handleCancelQueue();
+          }}
         />
       )}
 
@@ -1171,6 +1253,7 @@ const StockImport: React.FC<Props> = ({ onNavigate, taskBanner }) => {
           rows={bulkResolve.rows}
           kind={bulkResolve.kind}
           busy={adoptBusy}
+          errors={bulkResolve.errors}
           onApply={(decisions) => void handleBulkApply(decisions)}
           onCancel={() => setBulkResolve(null)}
         />

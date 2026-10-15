@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLang, useT } from '../i18n';
 import { VIEW_ICONS } from '../viewIcons';
 import { HeaderNav, useNavigation } from '../navigation';
@@ -54,6 +54,8 @@ import SegmentedControl from '../components/SegmentedControl';
 import WarehouseMailModal from '../components/WarehouseMailModal';
 import { useEscapeKey } from '../utils/useEscapeKey';
 import { formatPrepareDate } from '../utils/warehouseMail';
+import { localDateIso } from '../../shared/dates';
+import HoverTooltip from '../components/HoverTooltip';
 
 interface Props {
   selectedPlanId: string;
@@ -75,13 +77,6 @@ interface Props {
 
 type ReportMode = 'preview' | 'edit';
 type RequirementFilter = 'all' | 'short';
-
-// Today as 'YYYY-MM-DD' in local time — the floor for a usable "prepare for" day.
-const todayDateOnly = () => {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
 
 interface FocusState {
   report: ShortageReport;
@@ -133,12 +128,18 @@ const ShortageReportView: React.FC<Props> = ({
   // First load: skeleton list instead of a blocking overlay.
   const [initialLoading, setInitialLoading] = useState(true);
   const showSkeleton = useMinimumLoading(initialLoading);
-  const [reassigningKey, setReassigningKey] = useState<string | null>(null);
+  // A supplier reassign (one line or a whole group) is running. Only one at a
+  // time: every supplier picker is disabled meanwhile, and the ref guards
+  // against a second pick landing before the re-render.
+  const [reassigning, setReassigning] = useState(false);
+  const reassigningRef = useRef(false);
   // Group whose supplier the user is currently changing via the modal.
   // null = modal closed.
   const [groupPickerTarget, setGroupPickerTarget] = useState<ShortageGroup | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ShortageReportEntry | null>(null);
-  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  // Ids the "delete all" confirm will remove — the rows visible when it was
+  // opened, never the hidden archived ones.
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState<string[] | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
@@ -183,7 +184,11 @@ const ShortageReportView: React.FC<Props> = ({
   // Re-seed the expired-batch draft from whichever report is in focus.
   useEffect(() => {
     const eb = focus?.report?.expiredBatches ?? [];
-    setExpiredDraft(new Set(eb.filter((b) => b.included).map((b) => b.batchId)));
+    const included = eb.filter((b) => b.included).map((b) => b.batchId);
+    setExpiredDraft(new Set(included));
+    // Also the ids an in-place recompute (supplier reassign) runs with, so a
+    // report opened from history keeps its own expired-batch decisions.
+    setExpiredIncludeIds(included);
   }, [focus?.report?.computedAt, focus?.entryId]);
 
   // Re-seed the packaging-decision draft the same way. This also refreshes the
@@ -225,34 +230,48 @@ const ShortageReportView: React.FC<Props> = ({
     return list;
   };
 
+  // Put an updated report (as returned by the mutation) into the history list
+  // instead of re-fetching every report.
+  const patchEntry = (entry: ShortageReportEntry | undefined) => {
+    if (!entry) return;
+    setHistory((prev) =>
+      prev.some((e) => e.id === entry.id)
+        ? prev.map((e) => (e.id === entry.id ? entry : e))
+        : [entry, ...prev],
+    );
+  };
+
+  // Batches carry a copy of their report's order link / archived flag; the
+  // server cascades those changes, this mirrors them locally.
+  const patchBatchesOfReport = (reportId: string, patch: Partial<EmailBatch>) =>
+    setBatches((prev) =>
+      prev.map((b) => {
+        if (b.reportId !== reportId) return b;
+        const next: EmailBatch = { ...b, ...patch };
+        if (patch.orderId === undefined && 'orderId' in patch) delete next.orderId;
+        if (patch.archived === false) delete next.archived;
+        return next;
+      }),
+    );
+
   const reloadPlans = async () => {
     const ps = await window.electronAPI.listPlans();
     setPlans(ps);
     return ps;
   };
 
-  const loadBatches = async () => {
-    try {
-      const bs = await window.electronAPI.listEmailBatches();
-      setBatches(bs);
-      return bs;
-    } catch (err) {
-      console.error('Failed to load email batches', err);
-      return [];
-    }
-  };
-
   useEffect(() => {
     void (async () => {
       setInitialLoading(true);
       try {
-        const [ps, ss, pr, os, bs, cs] = await Promise.all([
+        const [ps, ss, pr, os, bs, cs, hs] = await Promise.all([
           window.electronAPI.listPlans(),
           window.electronAPI.listSuppliers(),
           window.electronAPI.listProducts(),
           window.electronAPI.listOrders().catch(() => [] as Order[]),
           window.electronAPI.listEmailBatches().catch(() => [] as EmailBatch[]),
           window.electronAPI.listComponents().catch(() => [] as PackagingComponent[]),
+          window.electronAPI.listShortageReports(),
         ]);
         setPlans(ps);
         setSuppliers(ss);
@@ -260,9 +279,11 @@ const ShortageReportView: React.FC<Props> = ({
         setOrders(os);
         setBatches(bs);
         setComponents(cs);
+        setHistory(hs);
         if (!selectedPlanId && ps[0]) onSelectPlan(ps[0].id);
-        await loadHistory();
         setDataLoaded(true);
+      } catch (err) {
+        setError(t.loadDataFailed.replace('{error}', (err as Error).message));
       } finally {
         setInitialLoading(false);
       }
@@ -282,7 +303,7 @@ const ShortageReportView: React.FC<Props> = ({
   const openAddPlan = () => {
     setPlanModalReadOnly(false);
     setEditingPlan({
-      name: `Plan ${new Date().toISOString().slice(0, 10)}`,
+      name: `Plan ${localDateIso()}`,
       items: [],
       bulkMass: [],
       status: 'draft',
@@ -351,6 +372,45 @@ const ShortageReportView: React.FC<Props> = ({
     }
   };
 
+  // "Przelicz ponownie" on an open report (expired-batch / packaging panels).
+  // In edit mode the report is recomputed IN PLACE — same id, name, order
+  // link, archive flag, receipts and warehouse notice. A report merely viewed
+  // from history is a record of what was computed then: recomputing it from
+  // today's stock creates a new report instead of rewriting the old one.
+  const regenerateFocused = async (
+    includeExpiredBatchIds: string[],
+    acceptedDependencyIds: string[],
+    substitutions: Record<string, string>,
+  ) => {
+    const cur = cache.focus;
+    if (!cur) return;
+    if (!cur.entryId || cur.mode !== 'edit') {
+      await runCompute(cur.planId, includeExpiredBatchIds, acceptedDependencyIds, substitutions);
+      return;
+    }
+    const entryId = cur.entryId;
+    setBusy(true);
+    setLoaderMessage(t.loaderComputing);
+    setError(null);
+    try {
+      const entry = await window.electronAPI.recomputeShortageReport(entryId, {
+        includeExpiredBatchIds,
+        acceptedDependencyIds,
+        substitutions,
+      });
+      patchEntry(entry);
+      const latest = cache.focus;
+      if (latest && latest.entryId === entryId) {
+        setFocusAndCache({ ...latest, report: entry.report, reportName: entry.reportName });
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      setLoaderMessage(null);
+    }
+  };
+
   // Second gate (after the expired one): shortages of components consumed
   // only via the "zużywa" cascade. If any exist, ask the user before the real
   // compute; otherwise compute straight away with nothing accepted.
@@ -396,98 +456,74 @@ const ShortageReportView: React.FC<Props> = ({
     await gateDependencyShortages(selectedPlanId, []);
   };
 
-  const reassignSupplier = async (line: ShortageLine, newSupplierId: string) => {
-    if (!focus || focus.mode !== 'edit') return;
-    const key = `${line.itemKind}-${line.itemId}`;
-    setReassigningKey(key);
+  // Makes `supplierId` the preferred supplier of `lines`' items, then
+  // recomputes the focused report IN PLACE (same id, name, order link, archive
+  // flag, receipts and warehouse notice) so the lines move to their new group.
+  // A report that was never saved falls back to computing a fresh one.
+  const reassignLines = async (lines: ShortageLine[], supplierId: string | null) => {
+    if (!focus || focus.mode !== 'edit' || reassigningRef.current) return;
+    if (lines.length === 0) return;
+    reassigningRef.current = true;
+    setReassigning(true);
     setError(null);
+    const entryId = focus.entryId;
+    const planId = focus.planId;
     try {
-      const next = newSupplierId || undefined;
-      if (line.itemKind === 'raw') {
-        const rm = await window.electronAPI.getRawMaterial(line.itemId);
-        if (!rm) throw new Error(`Raw material ${line.itemId} not found`);
-        const merged = next
-          ? Array.from(new Set([...(rm.supplierIds ?? []), next]))
-          : rm.supplierIds ?? [];
-        await window.electronAPI.updateRawMaterial(line.itemId, {
-          supplierIds: merged,
-          preferredSupplierId: next,
-        });
-      } else {
-        const c = await window.electronAPI.getComponent(line.itemId);
-        if (!c) throw new Error(`Component ${line.itemId} not found`);
-        const merged = next
-          ? Array.from(new Set([...(c.supplierIds ?? []), next]))
-          : c.supplierIds ?? [];
-        await window.electronAPI.updateComponent(line.itemId, {
-          supplierIds: merged,
-          preferredSupplierId: next,
-        });
-      }
-      const r = await window.electronAPI.computeShortages(
-        focus.planId,
-        orderTaskContextOrderId,
-        expiredIncludeIds,
-        acceptedDepIds,
-        depSubstitutions,
+      await window.electronAPI.setPreferredSupplier(
+        lines.map((l) => ({ kind: l.itemKind, id: l.itemId })),
+        supplierId,
       );
-      const list = await loadHistory();
-      const newest = list.find((e) => e.planId === focus.planId);
-      setFocusAndCache({ ...focus, report: r, entryId: newest?.id ?? null });
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setReassigningKey(null);
-    }
-  };
-
-  // Bulk-reassign every line in `group` to `newSupplierId` — propagates the
-  // change to each underlying raw material / component (adds the supplier to
-  // `supplierIds`, sets it as `preferredSupplierId`) and re-runs the shortage
-  // compute so the line moves to the new group on screen.
-  const reassignGroup = async (group: ShortageGroup, newSupplierId: string) => {
-    if (!focus || focus.mode !== 'edit') return;
-    if (!newSupplierId || newSupplierId === group.supplierId) return;
-    setBusy(true);
-    setLoaderMessage(t.loading);
-    setError(null);
-    try {
-      const lines = [...group.rawLines, ...group.componentLines];
-      for (const line of lines) {
-        if (line.itemKind === 'raw') {
-          const rm = await window.electronAPI.getRawMaterial(line.itemId);
-          if (!rm) continue;
-          const merged = Array.from(new Set([...(rm.supplierIds ?? []), newSupplierId]));
-          await window.electronAPI.updateRawMaterial(line.itemId, {
-            supplierIds: merged,
-            preferredSupplierId: newSupplierId,
-          });
-        } else {
-          const c = await window.electronAPI.getComponent(line.itemId);
-          if (!c) continue;
-          const merged = Array.from(new Set([...(c.supplierIds ?? []), newSupplierId]));
-          await window.electronAPI.updateComponent(line.itemId, {
-            supplierIds: merged,
-            preferredSupplierId: newSupplierId,
+      if (entryId) {
+        const entry = await window.electronAPI.recomputeShortageReport(entryId, {
+          includeExpiredBatchIds: expiredIncludeIds,
+          acceptedDependencyIds: acceptedDepIds,
+          substitutions: depSubstitutions,
+        });
+        patchEntry(entry);
+        const cur = cache.focus;
+        if (cur && cur.entryId === entryId) {
+          setFocusAndCache({ ...cur, report: entry.report, reportName: entry.reportName });
+        }
+      } else {
+        const r = await window.electronAPI.computeShortages(
+          planId,
+          orderTaskContextOrderId,
+          expiredIncludeIds,
+          acceptedDepIds,
+          depSubstitutions,
+        );
+        const list = await loadHistory();
+        const newest = list.find((e) => e.planId === planId);
+        const cur = cache.focus;
+        if (cur && cur.planId === planId && !cur.entryId) {
+          setFocusAndCache({
+            ...cur,
+            report: r,
+            reportName: newest?.reportName ?? cur.reportName,
+            entryId: newest?.id ?? null,
           });
         }
       }
-      const r = await window.electronAPI.computeShortages(
-        focus.planId,
-        orderTaskContextOrderId,
-        expiredIncludeIds,
-        acceptedDepIds,
-        depSubstitutions,
-      );
-      const list = await loadHistory();
-      const newest = list.find((e) => e.planId === focus.planId);
-      setFocusAndCache({ ...focus, report: r, entryId: newest?.id ?? null });
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setBusy(false);
+      reassigningRef.current = false;
+      setReassigning(false);
+    }
+  };
+
+  const reassignSupplier = (line: ShortageLine, newSupplierId: string) =>
+    reassignLines([line], newSupplierId || null);
+
+  // Bulk-reassign every line in `group` to `newSupplierId`.
+  const reassignGroup = async (group: ShortageGroup, newSupplierId: string) => {
+    setGroupPickerTarget(null);
+    if (!newSupplierId || newSupplierId === group.supplierId) return;
+    setLoaderMessage(t.loading);
+    try {
+      await reassignLines([...group.rawLines, ...group.componentLines], newSupplierId);
+    } finally {
       setLoaderMessage(null);
-      setGroupPickerTarget(null);
     }
   };
 
@@ -542,13 +578,18 @@ const ShortageReportView: React.FC<Props> = ({
     setTitleDraft(null);
     if (!next || next === focus.reportName) return;
     if (!focus.entryId) {
-      setError('Cannot rename a report that has not been saved yet.');
+      setError(t.reportRenameUnsaved);
       return;
     }
     try {
-      await window.electronAPI.updateShortageReport(focus.entryId, { reportName: next });
-      setFocusAndCache({ ...focus, reportName: next });
-      await loadHistory();
+      const entry = await window.electronAPI.updateShortageReport(focus.entryId, {
+        reportName: next,
+      });
+      patchEntry(entry);
+      const cur = cache.focus;
+      if (cur && cur.entryId === focus.entryId) {
+        setFocusAndCache({ ...cur, reportName: entry?.reportName ?? next });
+      }
     } catch (err) {
       setError((err as Error).message);
     }
@@ -558,25 +599,30 @@ const ShortageReportView: React.FC<Props> = ({
     if (!confirmDelete) return;
     const id = confirmDelete.id;
     setConfirmDelete(null);
-    await window.electronAPI.deleteShortageReport(id);
-    if (focus?.entryId === id) setFocusAndCache(null);
-    await loadHistory();
+    setError(null);
+    try {
+      await window.electronAPI.deleteShortageReport(id);
+      setHistory((prev) => prev.filter((e) => e.id !== id));
+      if (cache.focus?.entryId === id) setFocusAndCache(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
   };
 
   const onConfirmDeleteAll = async () => {
-    setConfirmDeleteAll(false);
+    const ids = confirmDeleteAll ?? [];
+    setConfirmDeleteAll(null);
+    if (ids.length === 0) return;
     setError(null);
     setInfo(null);
     setBusy(true);
     setLoaderMessage(t.deleteAllInProgress);
-    const total = history.length;
     try {
-      for (const e of history) {
-        await window.electronAPI.deleteShortageReport(e.id);
-      }
-      setInfo(t.deleteAllSuccess.replace('{n}', String(total)));
-      setFocusAndCache(null);
-      await loadHistory();
+      const { deleted } = await window.electronAPI.deleteShortageReports(ids);
+      const gone = new Set(ids);
+      setHistory((prev) => prev.filter((e) => !gone.has(e.id)));
+      if (cache.focus?.entryId && gone.has(cache.focus.entryId)) setFocusAndCache(null);
+      setInfo(t.deleteAllSuccess.replace('{n}', String(deleted)));
     } catch (err) {
       setError((err as Error).message);
       await loadHistory();
@@ -599,16 +645,10 @@ const ShortageReportView: React.FC<Props> = ({
   const setReportOrder = async (entryId: string, orderId: string | null) => {
     setBusy(true);
     try {
-      await window.electronAPI.updateShortageReport(entryId, { orderId });
-      const list = await loadHistory();
-      if (focus?.entryId === entryId) {
-        const updated = list.find((e) => e.id === entryId);
-        if (updated) {
-          // Keep the focused state aligned with the new orderId so the meta
-          // line refreshes immediately.
-          setFocusAndCache({ ...focus, entryId: updated.id });
-        }
-      }
+      // The focus bar reads the order link from the history entry.
+      const entry = await window.electronAPI.updateShortageReport(entryId, { orderId });
+      patchEntry(entry);
+      patchBatchesOfReport(entryId, { orderId: orderId ?? undefined });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -620,11 +660,10 @@ const ShortageReportView: React.FC<Props> = ({
   const setReportArchived = async (entryId: string, archived: boolean) => {
     setBusy(true);
     try {
-      await window.electronAPI.updateShortageReport(entryId, { archived });
-      await loadHistory();
-      // The cascade also flips the archived flag on linked email batches,
-      // so refresh that cache too.
-      await loadBatches();
+      const entry = await window.electronAPI.updateShortageReport(entryId, { archived });
+      patchEntry(entry);
+      // The server cascades the archived flag to linked email batches.
+      patchBatchesOfReport(entryId, { archived });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -678,12 +717,12 @@ const ShortageReportView: React.FC<Props> = ({
     setError(null);
     try {
       const nextSentAt = match.email.sentAt ? null : new Date().toISOString();
-      await window.electronAPI.markEmailSent(
+      const updated = await window.electronAPI.markEmailSent(
         match.batch.id,
         match.email.id,
         nextSentAt,
       );
-      await loadBatches();
+      if (updated) setBatches((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -699,12 +738,12 @@ const ShortageReportView: React.FC<Props> = ({
     try {
       const current = getGroupReceipt(g);
       const nextReceivedAt = current ? null : new Date().toISOString();
-      await window.electronAPI.setReportSupplierReceived(
+      const entry = await window.electronAPI.setReportSupplierReceived(
         focus.entryId,
         supplierReceiptKey(g),
         nextReceivedAt,
       );
-      await loadHistory();
+      patchEntry(entry);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -715,10 +754,10 @@ const ShortageReportView: React.FC<Props> = ({
   // Marks (or, with null, unmarks) the warehouse pick-list mail as sent.
   // Errors propagate to the mail modal, which shows them in place.
   const setWarehouseNotice = async (entryId: string, prepareFor: string | null) => {
-    await window.electronAPI.updateShortageReport(entryId, {
+    const entry = await window.electronAPI.updateShortageReport(entryId, {
       warehouseNotice: prepareFor ? { prepareFor, sentAt: new Date().toISOString() } : null,
     });
-    await loadHistory();
+    patchEntry(entry);
   };
 
   // Suppliers whose delivery is not yet marked as received. Empty = everything
@@ -751,7 +790,7 @@ const ShortageReportView: React.FC<Props> = ({
     // start date while it still lies ahead, else left for the user to pick.
     const orderStart = order?.startDate;
     const initialDate =
-      notice?.prepareFor ?? (orderStart && orderStart >= todayDateOnly() ? orderStart : '');
+      notice?.prepareFor ?? (orderStart && orderStart >= localDateIso() ? orderStart : '');
     return (
       <WarehouseMailModal
         key={entry.id}
@@ -833,13 +872,13 @@ const ShortageReportView: React.FC<Props> = ({
       setExpiredIncludeIds(expiredIds);
       setAcceptedDepIds(acceptedIds);
       setDepSubstitutions(subs);
-      void runCompute(focus.planId, expiredIds, acceptedIds, subs);
+      void regenerateFocused(expiredIds, acceptedIds, subs);
     };
 
     return (
       <div className="main">
         <div className="focus-bar">
-          <button className="btn" onClick={handleBack} title={t.backToList}>
+          <button className="btn" onClick={handleBack}>
             <IconArrowLeft size={14} /> {t.backToList}
           </button>
           <div className="focus-bar-text">
@@ -864,7 +903,6 @@ const ShortageReportView: React.FC<Props> = ({
               <h1
                 className="focus-bar-title focus-bar-title-editable"
                 onClick={() => setTitleDraft(reportName || '')}
-                title={t.edit}
               >
                 {reportName || t.shortageReport}
                 <IconEdit size={13} className="focus-bar-title-pencil" />
@@ -873,21 +911,23 @@ const ShortageReportView: React.FC<Props> = ({
             {focus.planId && livePlanName && (
               <span className="focus-bar-meta">
                 <span className="hint">{t.selectedPlan}:</span>{' '}
-                <button
-                  type="button"
-                  className="link-button"
-                  onClick={() => openPlanModal(focus.planId)}
-                  title={planMissing ? t.linkedPlanDeleted : t.openPlan}
-                  disabled={planMissing}
+                <HoverTooltip
+                  className="hover-tooltip-compact"
+                  trigger={
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => openPlanModal(focus.planId)}
+                      disabled={planMissing}
+                    >
+                      {livePlanName}
+                    </button>
+                  }
                 >
-                  {livePlanName}
-                </button>
+                  {planMissing ? t.linkedPlanDeleted : t.openPlan}
+                </HoverTooltip>
                 {planMissing && (
-                  <span
-                    className="tag danger"
-                    style={{ marginLeft: 6 }}
-                    title={t.linkedPlanDeleted}
-                  >
+                  <span className="tag danger" style={{ marginLeft: 6 }}>
                     {t.linkedPlanDeletedTag}
                   </span>
                 )}
@@ -899,18 +939,27 @@ const ShortageReportView: React.FC<Props> = ({
               <span className="focus-bar-meta">
                 <span className="hint">{t.orders}:</span>{' '}
                 {linkedOrder ? (
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => onNavigateToOrder?.(linkedOrder.id)}
-                    title={t.orderDetails}
+                  <HoverTooltip
+                    className="hover-tooltip-compact"
+                    trigger={
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => onNavigateToOrder?.(linkedOrder.id)}
+                      >
+                        {linkedOrder.name}
+                      </button>
+                    }
                   >
-                    {linkedOrder.name}
-                  </button>
+                    {t.orderDetails}
+                  </HoverTooltip>
                 ) : orderMissing ? (
-                  <span className="tag danger" title={t.orderDeleted}>
-                    {t.orderDeletedTag}
-                  </span>
+                  <HoverTooltip
+                    className="hover-tooltip-compact"
+                    trigger={<span className="tag danger">{t.orderDeletedTag}</span>}
+                  >
+                    {t.orderDeleted}
+                  </HoverTooltip>
                 ) : null}
               </span>
             )}
@@ -1120,9 +1169,8 @@ const ShortageReportView: React.FC<Props> = ({
                 onClick={() => {
                   const ids = [...expiredDraft];
                   setExpiredIncludeIds(ids);
-                  void runCompute(focus.planId, ids, acceptedDepIds, depSubstitutions);
+                  void regenerateFocused(ids, acceptedDepIds, depSubstitutions);
                 }}
-                title={t.expiredReportRegenerate}
               >
                 {t.expiredReportRegenerate}
               </button>
@@ -1158,7 +1206,6 @@ const ShortageReportView: React.FC<Props> = ({
                 className="btn primary-filled"
                 disabled={busy || planMissing}
                 onClick={regenerateWithDepDecisions}
-                title={t.expiredReportRegenerate}
               >
                 {t.expiredReportRegenerate}
               </button>
@@ -1207,7 +1254,7 @@ const ShortageReportView: React.FC<Props> = ({
                     <button
                       className="btn btn-sm soft-edit"
                       onClick={() => setGroupPickerTarget(g)}
-                      title={g.supplierId ? t.changeSupplier : t.assignSupplier}
+                      disabled={reassigning}
                     >
                       <IconEdit size={13} />{' '}
                       {g.supplierId ? t.changeSupplier : t.assignSupplier}
@@ -1218,11 +1265,6 @@ const ShortageReportView: React.FC<Props> = ({
                       className={`btn btn-sm ${mailSent ? 'soft-danger' : 'soft-success'}`}
                       onClick={() => void toggleEmailSentForGroup(g)}
                       disabled={mailBusy}
-                      title={
-                        mailSent
-                          ? `${t.sentAtLabel}: ${new Date(emailMatch.email.sentAt!).toLocaleString()}`
-                          : t.markSent
-                      }
                     >
                       <IconCheck size={13} />{' '}
                       {mailSent ? t.unmarkSent : t.markSent}
@@ -1232,11 +1274,6 @@ const ShortageReportView: React.FC<Props> = ({
                     className={`btn btn-sm ${receipt ? 'soft-danger' : 'soft-success'}`}
                     onClick={() => void toggleReceiptForGroup(g)}
                     disabled={receiptBusy || !focus.entryId}
-                    title={
-                      receipt
-                        ? `${t.receivedAtLabel}: ${new Date(receipt.receivedAt).toLocaleString()}`
-                        : t.markReceived
-                    }
                   >
                     <IconCheck size={13} />{' '}
                     {receipt ? t.unmarkReceived : t.markReceived}
@@ -1306,7 +1343,7 @@ const ShortageReportView: React.FC<Props> = ({
                               value={line.preferredSupplierId ?? ''}
                               onChange={(val) => reassignSupplier(line, val)}
                               placeholder={t.selectSupplier}
-                              disabled={reassigningKey === key}
+                              disabled={reassigning}
                             />
                           ) : (
                             <span>
@@ -1460,16 +1497,14 @@ const ShortageReportView: React.FC<Props> = ({
         {history.length > 0 && (
           <span className="page-header-count">{history.length}</span>
         )}
-        <button
-          type="button"
-          className="btn btn-sm"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => setSettingsOpen(true)}
-          title={t.settings}
-          aria-label={t.settings}
-        >
-          <IconSettings size={14} />
-        </button>
+        <span style={{ marginLeft: 'auto' }}>
+          <IconButton
+            className="btn-sm"
+            icon={<IconSettings size={14} />}
+            label={t.settings}
+            onClick={() => setSettingsOpen(true)}
+          />
+        </span>
       </div>
       {taskBanner}
 
@@ -1532,9 +1567,8 @@ const ShortageReportView: React.FC<Props> = ({
             </div>
             <button
               className="btn btn-sm soft-danger"
-              onClick={() => setConfirmDeleteAll(true)}
-              disabled={busy}
-              title={t.deleteAll}
+              onClick={() => setConfirmDeleteAll(visibleHistory.map((e) => e.id))}
+              disabled={busy || visibleHistory.length === 0}
             >
               <IconTrash size={13} /> {t.deleteAll}
             </button>
@@ -1579,7 +1613,7 @@ const ShortageReportView: React.FC<Props> = ({
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span className="col-name-text">{e.reportName}</span>
                         {e.archived && (
-                          <span className="tag" title={t.archivedTag}>
+                          <span className="tag">
                             {t.archivedTag}
                           </span>
                         )}
@@ -1588,49 +1622,63 @@ const ShortageReportView: React.FC<Props> = ({
                     <td className="col-wrap">
                       <div className="cell-with-end-tag">
                         {planMissing && (
-                          <span
-                            className="tag danger"
-                            title={t.linkedPlanDeleted}
+                          <HoverTooltip
+                            className="hover-tooltip-compact"
+                            trigger={
+                              <span className="tag danger">{t.linkedPlanDeletedTag}</span>
+                            }
                           >
-                            {t.linkedPlanDeletedTag}
-                          </span>
+                            {t.linkedPlanDeleted}
+                          </HoverTooltip>
                         )}
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            openPlanModal(e.planId);
-                          }}
-                          title={planMissing ? t.linkedPlanDeleted : t.openPlan}
-                          disabled={planMissing}
+                        <HoverTooltip
+                          className="hover-tooltip-compact"
+                          trigger={
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                openPlanModal(e.planId);
+                              }}
+                              disabled={planMissing}
+                            >
+                              {livePlanName}
+                            </button>
+                          }
                         >
-                          {livePlanName}
-                        </button>
+                          {planMissing ? t.linkedPlanDeleted : t.openPlan}
+                        </HoverTooltip>
                       </div>
                     </td>
                     <td className="col-wrap" onClick={(ev) => ev.stopPropagation()}>
                       {linkedOrder ? (
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <button
-                            type="button"
-                            className="link-button"
-                            onClick={() => onNavigateToOrder?.(linkedOrder.id)}
-                            title={t.orderDetails}
+                          <HoverTooltip
+                            className="hover-tooltip-compact"
+                            trigger={
+                              <button
+                                type="button"
+                                className="link-button"
+                                onClick={() => onNavigateToOrder?.(linkedOrder.id)}
+                              >
+                                {linkedOrder.name}
+                              </button>
+                            }
                           >
-                            {linkedOrder.name}
-                          </button>
-                          <span
-                            className={`badge order-status-${linkedOrder.status}`}
-                            title={`${t.orderStatus}: ${orderStatusLabel}`}
-                          >
+                            {t.orderDetails}
+                          </HoverTooltip>
+                          <span className={`badge order-status-${linkedOrder.status}`}>
                             {orderStatusLabel}
                           </span>
                         </div>
                       ) : dataLoaded && e.orderId ? (
-                        <span className="tag danger" title={t.orderDeleted}>
-                          {t.orderDeletedTag}
-                        </span>
+                        <HoverTooltip
+                          className="hover-tooltip-compact"
+                          trigger={<span className="tag danger">{t.orderDeletedTag}</span>}
+                        >
+                          {t.orderDeleted}
+                        </HoverTooltip>
                       ) : (
                         <span className="hint">—</span>
                       )}
@@ -1730,9 +1778,9 @@ const ShortageReportView: React.FC<Props> = ({
 
       {confirmDeleteAll && (
         <ConfirmDialog
-          message={t.deleteAllConfirm.replace('{n}', String(history.length))}
+          message={t.deleteAllConfirm.replace('{n}', String(confirmDeleteAll.length))}
           onConfirm={onConfirmDeleteAll}
-          onCancel={() => setConfirmDeleteAll(false)}
+          onCancel={() => setConfirmDeleteAll(null)}
           danger
         />
       )}

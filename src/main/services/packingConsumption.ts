@@ -6,18 +6,24 @@
 // a component, not on a product tier — cascade through transitively (e.g.
 // carton consumes tape, barrel consumes bag).
 //
-// Two walks:
+// Which production type a tier binds to is decided by the component's
+// packagingKind ('product' → finished units, 'mass' → bulk kg), not by the
+// legacy tier-level scope.
+//
+// Two fractional walks (per-unit SHARES — cost drill-down, reverse bounds):
 //   walkSchemePerProduct(product, components)
-//     Returns units consumed per 1 finished product unit. For per_unit tiers
-//     this is `tier.consumption` (or auto-derived for kg/l). For per_bulk_mass
-//     tiers this scales by the per-product mass/volume in the component's
-//     capacity-unit. Used by cost calculator and the "items" branch of the
-//     shortage calculator.
+//     Capacity-units consumed per 1 finished product unit, 'product'-kind
+//     tiers only ('units' → 1 slot; kg/l auto-derived from the product's
+//     mass/volume unless overridden; 'm' → tier.consumption).
 //
 //   walkSchemePerBulkKg(product, components)
-//     Returns units consumed per 1 kg of bulk mass. Only per_bulk_mass tiers
-//     contribute; per_unit tiers return 0 here (cartons don't matter for bulk
-//     production). Used by the "bulkMass" branch of the shortage calculator.
+//     Capacity-units consumed per 1 kg of bulk mass, 'mass'-kind tiers only.
+//
+// Whole-piece demand (what a plan actually needs — shortage, cost total,
+// max-producible): schemeDemand(runs, components, overageFactor). Containers
+// (direct tiers in units/kg/l) are rounded per product with the overage inside
+// the ceil; consumables (direct 'm' tiers and every cascade dependency) are
+// derived from the whole containers, summed plan-wide and rounded once.
 
 import type {
   PackagingComponent,
@@ -125,7 +131,8 @@ function walk(
     // Cascade: 1 of this component pulls `dep.consumption` units of the
     // dependent (in the dependent's capacity-unit). Scale by how many pieces
     // of *this* component are consumed (units / capacity) — proportional,
-    // e.g. 1 carton × 0.3 m of tape → 0.3 m, not a whole roll.
+    // e.g. 1 carton × 0.3 m of tape → 0.3 m, not a whole roll. A parent
+    // without capacity cuts its cascade off here; schemeDemand reports it.
     if (!comp.capacity || comp.capacity <= 0) return;
     const piecesOfThisPerScopeUnit = unitsConsumedHere / comp.capacity;
     for (const dep of comp.dependencies ?? []) {
@@ -180,10 +187,8 @@ export function piecesPerProduct(
   return unitsConsumedPerProduct / comp.capacity;
 }
 
-// 'product'-kind shared packaging is consumed fractionally per product
-// (1/24 carton) and rounded up to whole pieces ONCE, on the plan total —
-// 3 cartons + 15/24 in the last one → 4. 'mass'-kind keeps the legacy
-// per-entry rounding until it gets its own model.
+// 'product'-kind packaging binds to finished-unit production, 'mass'-kind to
+// bulk-mass production (see tierConsumptionPerProduct / PerBulkKg).
 export function isProductKindPackaging(comp: PackagingComponent): boolean {
   return (comp.packagingKind ?? 'product') === 'product';
 }
@@ -193,6 +198,184 @@ export function isProductKindPackaging(comp: PackagingComponent): boolean {
 // that would ceil to a phantom extra piece.
 export function ceilPieces(pieces: number): number {
   return Math.ceil(pieces - 1e-9);
+}
+
+// ---- Whole-piece scheme demand ----
+//
+// One production run of a product inside a plan: finished units (items
+// branch) and/or kg of bulk mass (bulkMass branch). `product` must already
+// carry any per-run substitution (substituteProductScheme).
+export interface SchemeRun {
+  product: Product;
+  units: number;
+  bulkKg: number;
+}
+
+export interface SchemeNeed {
+  // Whole pieces to have in stock, the component's overage included.
+  pieces: number;
+  // Reached as a direct scheme tier / through another component's
+  // 'dependencies' ("zużywa") — both can be true.
+  direct: boolean;
+  cascade: boolean;
+}
+
+// Consumables are measured in metres (tape) — they are cut, not filled, so
+// several cartons (and several products) draw from the same roll. Everything
+// else (slots, kg, l) is a container a product fills on its own.
+function isConsumable(comp: PackagingComponent): boolean {
+  return comp.capacityUnit === 'm';
+}
+
+// Plan-level demand for packing-scheme components. Rules:
+//   - containers (direct tiers in units/kg/l): products never share a piece,
+//     so per (product, component) pieces = ceil(fraction × overage) — one
+//     rounding, overage inside the ceil;
+//   - consumables (direct 'm' tiers + every cascade dependency): capacity-
+//     units summed across the whole plan, then ceil(units / capacity ×
+//     overage) once;
+//   - cascade dependencies are derived from the WHOLE containers actually
+//     used (bare count, before the parent's overage — the spare cartons are
+//     not taped unless used, and the tape's own overage covers its waste);
+//     deeper levels scale proportionally.
+// Anything the math has to skip (no capacity, zero consumption, a capacity
+// unit a tier can't use, a missing component) is returned as a Polish warning
+// naming the component and the product.
+export function schemeDemand(
+  runs: SchemeRun[],
+  componentsById: Map<UUID, PackagingComponent>,
+  overageFactor: (comp: PackagingComponent) => number,
+): { needs: Map<UUID, SchemeNeed>; warnings: string[] } {
+  const warnings: string[] = [];
+  const warn = (msg: string) => {
+    if (!warnings.includes(msg)) warnings.push(msg);
+  };
+  const needs = new Map<UUID, SchemeNeed>();
+  const need = (componentId: UUID): SchemeNeed => {
+    let n = needs.get(componentId);
+    if (!n) {
+      n = { pieces: 0, direct: false, cascade: false };
+      needs.set(componentId, n);
+    }
+    return n;
+  };
+  // productId → componentId → fractional container pieces.
+  const containers = new Map<UUID, { product: Product; pieces: Map<UUID, number> }>();
+  // componentId → capacity-units of consumables, plan-wide.
+  const consumables = new Map<UUID, number>();
+  const addConsumable = (componentId: UUID, units: number) =>
+    consumables.set(componentId, (consumables.get(componentId) ?? 0) + units);
+
+  // Pull a parent's 'dependencies' in for `parentPieces` pieces of it.
+  const cascade = (
+    product: Product,
+    parent: PackagingComponent,
+    parentPieces: number,
+    seen: Set<UUID>,
+  ) => {
+    for (const dep of parent.dependencies ?? []) {
+      if (seen.has(dep.componentId)) continue;
+      const child = componentsById.get(dep.componentId);
+      if (!child) {
+        warn(
+          `Komponent „${parent.name}" zużywa nieistniejący komponent (${dep.componentId}) — pominięto w obliczeniach.`,
+        );
+        continue;
+      }
+      if (!(dep.consumption > 0)) {
+        warn(
+          `Zależność „${parent.name}" → „${child.name}" (produkt „${product.name}") ma zużycie 0 — pominięto w obliczeniach.`,
+        );
+        continue;
+      }
+      if (!child.capacity || child.capacity <= 0) {
+        warn(
+          `Komponent „${child.name}" (zużywany przez „${parent.name}", produkt „${product.name}") nie ma ustawionej pojemności — pominięto w obliczeniach.`,
+        );
+        continue;
+      }
+      const units = parentPieces * dep.consumption;
+      need(child.id).cascade = true;
+      addConsumable(child.id, units);
+      cascade(product, child, units / child.capacity, new Set(seen).add(child.id));
+    }
+  };
+
+  for (const run of runs) {
+    const { product } = run;
+    for (const tier of product.packingScheme?.tiers ?? []) {
+      const comp = componentsById.get(tier.componentId);
+      if (!comp) {
+        warn(
+          `Schemat produktu „${product.name}" wskazuje na nieistniejący komponent (${tier.componentId}) — pominięto w obliczeniach.`,
+        );
+        continue;
+      }
+      // The branch the component binds to — the other one is 0 by design.
+      const isMass = (comp.packagingKind ?? 'product') === 'mass';
+      const scopeQty = isMass ? run.bulkKg : run.units;
+      if (!(scopeQty > 0)) continue;
+      const unit = comp.capacityUnit ?? 'units';
+      const perScope = isMass
+        ? tierConsumptionPerBulkKg(product, tier, comp)
+        : tierConsumptionPerProduct(product, tier, comp);
+      if (!Number.isFinite(perScope) || perScope <= 0) {
+        if (isMass && unit !== 'kg' && unit !== 'l') {
+          warn(
+            `Opakowanie na masę „${comp.name}" (produkt „${product.name}") ma pojemność w jednostce „${unit}" — zużycia na kg masy nie da się policzyć (potrzebne kg lub l); pominięto w obliczeniach.`,
+          );
+        } else if (isMass && unit === 'l' && !(product.densityGPerMl > 0)) {
+          warn(
+            `Produkt „${product.name}" nie ma gęstości — nie da się przeliczyć masy na litry opakowania „${comp.name}"; pominięto w obliczeniach.`,
+          );
+        } else {
+          warn(
+            `Poziom schematu „${comp.name}" w produkcie „${product.name}" ma zużycie 0 — pominięto w obliczeniach.`,
+          );
+        }
+        continue;
+      }
+      if (!comp.capacity || comp.capacity <= 0) {
+        const deps = (comp.dependencies ?? [])
+          .map((d) => componentsById.get(d.componentId)?.name)
+          .filter((n): n is string => !!n);
+        warn(
+          `Opakowanie zbiorcze „${comp.name}" w schemacie produktu „${product.name}" nie ma ustawionej pojemności — pominięto je w obliczeniach${
+            deps.length ? ` (razem z tym, co zużywa: ${deps.map((n) => `„${n}"`).join(', ')})` : ''
+          }.`,
+        );
+        continue;
+      }
+      need(comp.id).direct = true;
+      const units = perScope * scopeQty;
+      if (isConsumable(comp)) {
+        addConsumable(comp.id, units);
+        cascade(product, comp, units / comp.capacity, new Set([comp.id]));
+        continue;
+      }
+      let entry = containers.get(product.id);
+      if (!entry) {
+        entry = { product, pieces: new Map() };
+        containers.set(product.id, entry);
+      }
+      entry.pieces.set(comp.id, (entry.pieces.get(comp.id) ?? 0) + units / comp.capacity);
+    }
+  }
+
+  for (const { product, pieces: perComp } of containers.values()) {
+    for (const [componentId, fraction] of perComp) {
+      const comp = componentsById.get(componentId)!;
+      need(componentId).pieces += ceilPieces(fraction * overageFactor(comp));
+      cascade(product, comp, ceilPieces(fraction), new Set([componentId]));
+    }
+  }
+  for (const [componentId, units] of consumables) {
+    const comp = componentsById.get(componentId)!;
+    // Capacity checked when the units were added.
+    need(componentId).pieces += ceilPieces((units / comp.capacity!) * overageFactor(comp));
+  }
+
+  return { needs, warnings };
 }
 
 // ---- Per-run packaging substitutions ("podmiana") ----

@@ -8,7 +8,12 @@ import type {
   Lang,
   Unit,
   ComponentType,
+  ComponentDependency,
+  PackagingKind,
+  PackingCapacityUnit,
 } from '../../shared/types';
+import { isSecondaryComponent } from '../../shared/types';
+import { localDateIso } from '../../shared/dates';
 import { toCsv, parseCsv, parseBool, parseNumber } from './csv';
 
 export interface ImportStats {
@@ -18,7 +23,59 @@ export interface ImportStats {
   unresolved: number; // references to suppliers/products/etc. that couldn't be resolved
 }
 
-const today = (): string => new Date().toISOString().slice(0, 10);
+// Thrown when the file parsed fine but writing it to the database failed
+// (network, permissions, validation in the main process). Views tell it apart
+// from a malformed file and reload, since part of the import may have landed.
+export class ImportSaveError extends Error {
+  constructor(
+    message: string,
+    readonly stats: ImportStats,
+  ) {
+    super(message);
+    this.name = 'ImportSaveError';
+  }
+}
+
+const runSave = async <R>(stats: ImportStats, save: () => Promise<R>): Promise<R> => {
+  try {
+    return await save();
+  } catch (err) {
+    throw new ImportSaveError(err instanceof Error ? err.message : String(err), stats);
+  }
+};
+
+// One bulk-save entry per catalog name: a row naming an existing item patches
+// it, a row naming a new item creates it, and a name repeated in the file
+// collapses into one entry where the later row wins — the same outcome (and
+// the same stats) as the old row-by-row import, in a single write.
+class UpsertBatch<P> {
+  private readonly byName = new Map<string, { id?: string; patch: P }>();
+
+  constructor(
+    private readonly existing: { id: string; name: string }[],
+    private readonly stats: ImportStats,
+  ) {}
+
+  add(name: string, patch: P): void {
+    const key = name.trim().toLowerCase();
+    const prev = this.byName.get(key);
+    if (prev) {
+      prev.patch = patch;
+      this.stats.updated++;
+      return;
+    }
+    const match = findByName(this.existing, name);
+    this.byName.set(key, { id: match?.id, patch });
+    if (match) this.stats.updated++;
+    else this.stats.created++;
+  }
+
+  get items(): { id?: string; patch: P }[] {
+    return Array.from(this.byName.values());
+  }
+}
+
+const today = (): string => localDateIso();
 
 const findByName = <T extends { name: string }>(
   list: T[],
@@ -68,6 +125,7 @@ export async function importSuppliersCsv(
 ): Promise<ImportStats> {
   const stats: ImportStats = { created: 0, updated: 0, skipped: 0, unresolved: 0 };
   const rows = parseCsv(csv);
+  const batch = new UpsertBatch<Partial<Omit<Supplier, 'id' | 'createdAt'>>>(existing, stats);
   for (const r of rows) {
     const name = (r.name ?? '').trim();
     if (!name) {
@@ -90,15 +148,10 @@ export async function importSuppliersCsv(
       preferredEmailLanguage:
         lang === 'pl' || lang === 'en' ? (lang as Lang) : undefined,
     };
-    const match = findByName(existing, name);
-    if (match) {
-      await window.electronAPI.updateSupplier(match.id, payload);
-      stats.updated++;
-    } else {
-      const created = await window.electronAPI.createSupplier(payload);
-      existing.push(created);
-      stats.created++;
-    }
+    batch.add(name, payload);
+  }
+  if (batch.items.length > 0) {
+    await runSave(stats, () => window.electronAPI.saveSuppliers(batch.items));
   }
   return stats;
 }
@@ -156,6 +209,7 @@ export async function importRawMaterialsCsv(
 ): Promise<ImportStats> {
   const stats: ImportStats = { created: 0, updated: 0, skipped: 0, unresolved: 0 };
   const rows = parseCsv(csv);
+  const batch = new UpsertBatch<Partial<Omit<RawMaterial, 'id' | 'createdAt'>>>(existing, stats);
   for (const r of rows) {
     const name = (r.name ?? '').trim();
     if (!name) {
@@ -202,33 +256,41 @@ export async function importRawMaterialsCsv(
       currency: r.currency?.trim() || undefined,
       notes: r.notes?.trim() || undefined,
     };
-    const match = findByName(existing, name);
-    if (match) {
-      await window.electronAPI.updateRawMaterial(match.id, payload, { priceSource: 'import' });
-      stats.updated++;
-    } else {
-      const created = await window.electronAPI.createRawMaterial(payload);
-      existing.push(created);
-      stats.created++;
-    }
+    batch.add(name, payload);
+  }
+  if (batch.items.length > 0) {
+    await runSave(stats, () =>
+      window.electronAPI.saveRawMaterials(batch.items, { priceSource: 'import' }),
+    );
   }
   return stats;
 }
 
 // ---------- Components ----------
 
-const COMPONENT_TYPES: ComponentType[] = [
-  'tube',
-  'bottle',
-  'jar',
-  'label',
-  'cap',
-  'pump',
-  'pipette',
-  'box',
-  'leaflet',
-  'other',
-];
+// Every ComponentType, primary and secondary. A Record over the union makes
+// the compiler flag this list whenever a type is added, so an exported file
+// never round-trips a valid type into 'other'.
+const COMPONENT_TYPE_SET: Record<ComponentType, true> = {
+  tube: true,
+  bottle: true,
+  jar: true,
+  label: true,
+  cap: true,
+  pump: true,
+  pipette: true,
+  box: true,
+  leaflet: true,
+  outer_carton: true,
+  tape: true,
+  barrel: true,
+  bag: true,
+  confection: true,
+  other: true,
+};
+const COMPONENT_TYPES = Object.keys(COMPONENT_TYPE_SET) as ComponentType[];
+
+const CAPACITY_UNITS: PackingCapacityUnit[] = ['units', 'kg', 'l', 'm'];
 
 const COMPONENT_COLUMNS = [
   'name',
@@ -241,32 +303,60 @@ const COMPONENT_COLUMNS = [
   'lastPurchasePriceNet',
   'currency',
   'notes',
+  // Secondary (shipping) packaging only — empty for primary components.
+  'packagingKind',
+  'capacity',
+  'capacityUnit',
+  // "Name:consumption" pairs joined by '|', by component name.
+  'dependencies',
 ];
 
 export function exportComponentsCsv(
   items: PackagingComponent[],
   suppliers: Supplier[],
+  // Full catalog, to name dependency targets that live outside `items`.
+  allComponents: PackagingComponent[] = items,
 ): { content: string; filename: string } {
   const supplierName = (id: string) =>
     suppliers.find((s) => s.id === id)?.name ?? '';
-  const rows = items.map((c) => ({
-    name: c.name,
-    type: c.type,
-    mpFirmaSymbol: c.mpFirmaSymbol ?? '',
-    suppliers: c.supplierIds.map(supplierName).filter(Boolean).join('|'),
-    preferredSupplier: c.preferredSupplierId ? supplierName(c.preferredSupplierId) : '',
-    moq: c.moq ?? '',
-    leadTimeDays: c.leadTimeDays ?? '',
-    lastPurchasePriceNet: c.lastPurchasePriceNet ?? '',
-    currency: c.currency ?? '',
-    notes: c.notes ?? '',
-  }));
+  const componentName = (id: string) =>
+    allComponents.find((c) => c.id === id)?.name ?? '';
+  const rows = items.map((c) => {
+    const secondary = isSecondaryComponent(c.type);
+    return {
+      name: c.name,
+      type: c.type,
+      mpFirmaSymbol: c.mpFirmaSymbol ?? '',
+      suppliers: c.supplierIds.map(supplierName).filter(Boolean).join('|'),
+      preferredSupplier: c.preferredSupplierId ? supplierName(c.preferredSupplierId) : '',
+      moq: c.moq ?? '',
+      leadTimeDays: c.leadTimeDays ?? '',
+      lastPurchasePriceNet: c.lastPurchasePriceNet ?? '',
+      currency: c.currency ?? '',
+      notes: c.notes ?? '',
+      packagingKind: secondary ? (c.packagingKind ?? 'product') : '',
+      capacity: secondary ? (c.capacity ?? '') : '',
+      capacityUnit: secondary ? (c.capacityUnit ?? 'units') : '',
+      dependencies: secondary
+        ? (c.dependencies ?? [])
+            .map((d) => {
+              const n = componentName(d.componentId);
+              return n ? `${n}:${d.consumption}` : '';
+            })
+            .filter(Boolean)
+            .join('|')
+        : '',
+    };
+  });
   return {
     content: toCsv(rows, COMPONENT_COLUMNS),
     filename: `cutis-components-${today()}.csv`,
   };
 }
 
+// `existing` must be the FULL component catalog (both primary and secondary)
+// — matching against one view's subset would duplicate items that live in the
+// other view, and dependency names could not resolve.
 export async function importComponentsCsv(
   csv: string,
   existing: PackagingComponent[],
@@ -274,6 +364,11 @@ export async function importComponentsCsv(
 ): Promise<ImportStats> {
   const stats: ImportStats = { created: 0, updated: 0, skipped: 0, unresolved: 0 };
   const rows = parseCsv(csv);
+  type Patch = Partial<Omit<PackagingComponent, 'id' | 'createdAt'>>;
+  const batch = new UpsertBatch<Patch>(existing, stats);
+  // Dependencies naming a component that this same file creates can only be
+  // resolved once it exists — keyed by the (lower-cased) owner name.
+  const pendingDeps = new Map<string, { name: string; consumption: number }[]>();
   for (const r of rows) {
     const name = (r.name ?? '').trim();
     if (!name) {
@@ -304,7 +399,7 @@ export async function importComponentsCsv(
     const type: ComponentType = (COMPONENT_TYPES as string[]).includes(typeRaw)
       ? (typeRaw as ComponentType)
       : 'other';
-    const payload = {
+    const payload: Patch = {
       name,
       type,
       mpFirmaSymbol: r.mpFirmaSymbol?.trim() || undefined,
@@ -316,14 +411,72 @@ export async function importComponentsCsv(
       currency: r.currency?.trim() || undefined,
       notes: r.notes?.trim() || undefined,
     };
-    const match = findByName(existing, name);
-    if (match) {
-      await window.electronAPI.updateComponent(match.id, payload, { priceSource: 'import' });
-      stats.updated++;
-    } else {
-      const created = await window.electronAPI.createComponent(payload);
-      existing.push(created);
-      stats.created++;
+    // Secondary-only fields are written only when the file has their columns,
+    // so an older export (without them) never wipes capacity/dependencies.
+    // Like the editor, a primary component gets them cleared.
+    const secondary = isSecondaryComponent(type);
+    if ('packagingKind' in r) {
+      const kind = r.packagingKind.trim().toLowerCase();
+      const packagingKind: PackagingKind = kind === 'mass' ? 'mass' : 'product';
+      payload.packagingKind = secondary ? packagingKind : undefined;
+    }
+    if ('capacity' in r) {
+      payload.capacity = secondary ? parseNumber(r.capacity) : undefined;
+    }
+    if ('capacityUnit' in r) {
+      const unit = r.capacityUnit.trim().toLowerCase() as PackingCapacityUnit;
+      payload.capacityUnit = secondary
+        ? CAPACITY_UNITS.includes(unit)
+          ? unit
+          : 'units'
+        : undefined;
+    }
+    if ('dependencies' in r) {
+      const deps: ComponentDependency[] = [];
+      const pending: { name: string; consumption: number }[] = [];
+      if (secondary) {
+        for (const part of r.dependencies.split('|').map((s) => s.trim()).filter(Boolean)) {
+          const sep = part.lastIndexOf(':');
+          const depName = (sep >= 0 ? part.slice(0, sep) : part).trim();
+          const consumption = sep >= 0 ? (parseNumber(part.slice(sep + 1).trim()) ?? 1) : 1;
+          const target = findByName(existing, depName);
+          if (target) deps.push({ componentId: target.id, consumption });
+          else pending.push({ name: depName, consumption });
+        }
+      }
+      payload.dependencies = secondary ? deps : undefined;
+      if (pending.length > 0) pendingDeps.set(name.toLowerCase(), pending);
+      else pendingDeps.delete(name.toLowerCase());
+    }
+    batch.add(name, payload);
+  }
+  if (batch.items.length === 0) return stats;
+  const saved = await runSave(stats, () =>
+    window.electronAPI.saveComponents(batch.items, { priceSource: 'import' }),
+  );
+  if (pendingDeps.size > 0) {
+    // Second pass: point the remaining dependencies at components the first
+    // write just created. Names still unknown are counted as unresolved.
+    const catalog = [...existing, ...saved];
+    const fixes: { id: string; patch: Patch }[] = [];
+    for (const [ownerKey, pending] of pendingDeps) {
+      const owner = saved.find((c) => c.name.trim().toLowerCase() === ownerKey);
+      if (!owner) continue;
+      const deps = [...(owner.dependencies ?? [])];
+      let changed = false;
+      for (const p of pending) {
+        const target = findByName(catalog, p.name);
+        if (target && target.id !== owner.id) {
+          deps.push({ componentId: target.id, consumption: p.consumption });
+          changed = true;
+        } else {
+          stats.unresolved++;
+        }
+      }
+      if (changed) fixes.push({ id: owner.id, patch: { dependencies: deps } });
+    }
+    if (fixes.length > 0) {
+      await runSave(stats, () => window.electronAPI.saveComponents(fixes));
     }
   }
   return stats;
@@ -406,6 +559,7 @@ export async function importProductsJson(
   const stats: ImportStats = { created: 0, updated: 0, skipped: 0, unresolved: 0 };
   const data = JSON.parse(json);
   if (!Array.isArray(data)) throw new Error('Expected JSON array');
+  const batch = new UpsertBatch<Partial<Omit<Product, 'id' | 'createdAt'>>>(existing, stats);
   for (const r of data as ProductExportRow[]) {
     const name = (r?.name ?? '').trim();
     if (!name) {
@@ -455,15 +609,10 @@ export async function importProductsJson(
       notes: r.notes?.trim() || undefined,
       archived: !!r.archived,
     };
-    const match = findByName(existing, name);
-    if (match) {
-      await window.electronAPI.updateProduct(match.id, payload);
-      stats.updated++;
-    } else {
-      const created = await window.electronAPI.createProduct(payload);
-      existing.push(created);
-      stats.created++;
-    }
+    batch.add(name, payload);
+  }
+  if (batch.items.length > 0) {
+    await runSave(stats, () => window.electronAPI.saveProducts(batch.items));
   }
   return stats;
 }
@@ -528,11 +677,13 @@ export async function importPlansJson(
       r.status === 'computed' || r.status === 'archived' ? r.status : 'draft';
     const payload = { name, items, bulkMass, status };
     const match = findByName(existing, name);
+    // No bulk plan save exists in the API yet, so plans still go one by one;
+    // a failure is still reported as a save error with the partial stats.
     if (match) {
-      await window.electronAPI.updatePlan(match.id, payload);
+      await runSave(stats, () => window.electronAPI.updatePlan(match.id, payload));
       stats.updated++;
     } else {
-      const created = await window.electronAPI.createPlan(payload);
+      const created = await runSave(stats, () => window.electronAPI.createPlan(payload));
       existing.push(created);
       stats.created++;
     }

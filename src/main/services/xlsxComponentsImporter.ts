@@ -42,7 +42,12 @@ import type {
   Supplier,
 } from '../../shared/types';
 import log from '../utils/logger';
-import { normalize as smartNormalize, suggestMatches } from './smartMatcher';
+import {
+  normalize as smartNormalize,
+  bracketlessKey,
+  findLikelyDuplicate,
+} from './smartMatcher';
+import { asString, cleanCell } from './xlsxCells';
 
 interface ColumnMap {
   name: number;
@@ -58,40 +63,9 @@ interface ColumnMap {
 }
 
 // ---------- normalization helpers ----------
-
-function asString(v: unknown): string | undefined {
-  if (v === null || v === undefined) return undefined;
-  if (typeof v === 'string') {
-    const t = v.trim();
-    return t.length === 0 ? undefined : t;
-  }
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'object' && v !== null) {
-    if ('text' in v) return asString((v as { text: unknown }).text);
-    if ('richText' in v) {
-      const parts = (v as { richText?: { text?: string }[] }).richText ?? [];
-      const joined = parts
-        .map((p) => p?.text ?? '')
-        .join('')
-        .trim();
-      const cleaned = joined.replace(/[<>]+$/, '').trim();
-      return cleaned.length === 0 ? undefined : cleaned;
-    }
-    if ('result' in v) return asString((v as { result: unknown }).result);
-    if ('hyperlink' in v) return asString((v as { hyperlink: unknown }).hyperlink);
-  }
-  return undefined;
-}
-
-// Cells that carry a placeholder ("-", "—", "Nieznane", "brak") should be
-// treated as empty. Used for every supplementary field (contact, lead time,
-// supplier name, …) so we don't persist junk like a "Nieznany" supplier.
-const PLACEHOLDERS = new Set(['-', '–', '—', 'nieznane', 'nieznany', 'brak', 'b/d', 'n/d']);
-function cleanCell(v: unknown): string | undefined {
-  const s = asString(v);
-  if (s === undefined) return undefined;
-  return PLACEHOLDERS.has(s.trim().toLowerCase()) ? undefined : s;
-}
+//
+// Cell readers (asString / cleanCell — placeholder values like "Nieznany" or
+// "-" read as empty) are shared: see ./xlsxCells.
 
 // Parse an "Ilość" cell into a numeric MOQ. Handles a leading "od " (minimum)
 // prefix and stray thousands separators. Returns undefined for ranges or other
@@ -131,15 +105,19 @@ function normalizeKey(s: string): string {
 // The components file has no type column. Map the leading words of the name to
 // a ComponentType. Order matters: the first matching rule wins. `section`
 // only decides the fallback when no keyword matches — the Magazyn stock
-// importer passes it along so a row from the "Opakowania zbiorcze" sheet
-// never falls back to a primary type, even for a name this table doesn't
-// recognize; callers with no section concept (the components-catalog import)
-// keep the historical 'other' fallback.
+// importer and the recipe importer ("Pozostałe komponenty") pass it along so
+// a secondary row never falls back to a primary type, even for a name this
+// table doesn't recognize; callers with no section concept (the
+// components-catalog import) keep the historical 'other' fallback. This is the
+// ONE copy — the recipe importer used to carry a diverged one.
+const INVISIBLE_CHARS = /[\u200B-\u200D\u2060\uFEFF\u00AD]/gu;
+
 export function inferComponentType(
   name: string,
   section: ComponentSection = 'primary',
 ): ComponentType {
-  const n = normalizeKey(name);
+  const n = normalizeKey(name.replace(INVISIBLE_CHARS, ''));
+  if (n === 'konfekcja') return 'confection';
   if (n.startsWith('atomizer') || n.startsWith('dozownik')) return 'pump';
   if (n.startsWith('beczka')) return 'barrel';
   if (n.startsWith('butelka')) return 'bottle';
@@ -412,8 +390,10 @@ export async function importComponentsXlsx(
   const compById = new Map<string, PackagingComponent>();
   for (const c of allComponents) compById.set(c.id, c);
 
-  // Smart-normalized index for fuzzy fallback matching (diacritics stripped,
-  // parenthetical suffixes dropped). Only a unique hit is trusted.
+  // Smart-normalized index for formatting-insensitive fallback matching
+  // (diacritics, punctuation and bracket characters dropped; bracket contents
+  // kept, so "Butelka (100 ml)" never lands on "Butelka (200 ml)"). Only a
+  // unique hit is trusted.
   const compBySmartKey = new Map<string, PackagingComponent[]>();
   for (const c of allComponents) {
     const k = smartNormalize(c.name);
@@ -435,8 +415,10 @@ export async function importComponentsXlsx(
       const smartHits = compBySmartKey.get(smartNormalize(p.name)) ?? [];
       if (smartHits.length === 1) aliasKeptIds.add(smartHits[0].id);
     }
+    const incomingLoose = new Set(parsed.map((p) => bracketlessKey(p.name)));
     for (const c of allComponents) {
       if (incomingNames.has(normalizeKey(c.name))) continue;
+      if (incomingLoose.has(bracketlessKey(c.name))) continue;
       if (aliasKeptIds.has(c.id)) continue;
       const res = await db.deleteComponent(c.id);
       if (res.ok) {
@@ -543,10 +525,7 @@ export async function importComponentsXlsx(
     } else {
       // Flag probable duplicates so the user can add an alias later.
       const candidates = suggestionCandidates();
-      const topMatch = suggestMatches({ name: row.name }, candidates, {
-        limit: 1,
-        threshold: 0.85,
-      })[0];
+      const topMatch = findLikelyDuplicate(row.name, candidates);
       if (topMatch) {
         summary.warnings.push(
           `Możliwy duplikat: "${row.name}" wygląda jak istniejący "${topMatch.name}" (${Math.round(topMatch.confidence * 100)}%). Jeśli to ta sama pozycja, dodaj alias przy następnym imporcie magazynu.`,

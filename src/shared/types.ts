@@ -526,6 +526,11 @@ export interface RawStockMatch {
   batchSum: number; // Σ column C across the batches
   reportedTotal?: number; // column D (the file's own total)
   sumMismatch: boolean; // |batchSum − reportedTotal| > ε
+  // The catalog stock was set by hand (stockSource 'manual') and the imported
+  // total (batchSum) differs from it — importing would silently overwrite a
+  // manual correction, so the user must decide (take / reject) like a
+  // sumMismatch. Absent/false otherwise.
+  manualConflict?: boolean;
 }
 
 // A file material (one or more rows grouped by name) with no catalog match —
@@ -543,6 +548,10 @@ export interface RawStockAnalysis {
   matches: RawStockMatch[];
   unmatched: RawStockUnmatched[]; // file materials with no catalog match — decidable
   ambiguousNames: string[]; // file names matching >1 catalog entry — auto-skipped
+  // Non-fatal parse problems (Polish, user-facing), e.g. a date cell that
+  // isn't a date ("Stan surowców", row 56, column F). The batch is still
+  // imported, just without that date.
+  warnings?: string[];
 }
 
 // One decision: `action: 'take'` imports the batches (stock ← batchSum);
@@ -763,6 +772,10 @@ export interface RecipeImportAnalysis {
   blockCount: number;
   unresolvedRaws: RecipeImportUnresolvedItem[];
   unresolvedComponents: RecipeImportUnresolvedItem[];
+  // Structural problems found while parsing (Polish, user-facing): rows
+  // skipped outside any product block, products without a single ingredient.
+  // Show them before the user commits.
+  warnings?: string[];
 }
 
 // User decision for a single unresolved item. Differs from stock import:
@@ -926,6 +939,31 @@ export interface CostReport {
   computedAt: ISODate;
   perProduct: CostBreakdownLine[];
   totalPlanCost: number;
+  // Problems that make the total incomplete or approximate (missing catalog
+  // entries, components without capacity, mixed currencies, …). Shown to the
+  // user; Polish, like the shortage report's warnings.
+  warnings: string[];
+  // The plan's bulk-mass ("masa luzem") positions, costed per kg. Included in
+  // totalPlanCost. Absent in reports computed before bulk mass was costed.
+  bulkMass?: CostBulkMassLine[];
+}
+
+// Cost of one bulk-mass position of a plan: the product's ingredients plus
+// its 'mass'-kind packaging (barrels, bags) — no finished-unit packaging and
+// no conversion labor. Per-kg figures carry the overage; whole-piece rounding
+// of the packaging lands in totalPlanCost only (as for finished units).
+export interface CostBulkMassLine {
+  productId: UUID;
+  productName: string;
+  massKg: number;
+  costPerKg: number;
+  ingredientsCostPerKg: number;
+  bulkPackagingCostPerKg: number;
+  // massKg × costPerKg.
+  totalCost: number;
+  missingPriceItems: { itemId: UUID; itemName: string; kind: 'raw' | 'component' }[];
+  // Drill-down; qtyPerUnit is per 1 kg of bulk mass.
+  items: CostItemLine[];
 }
 
 export interface RFQEmail {
@@ -984,6 +1022,12 @@ export interface MaxProducibleResult {
     // The component entered only via the "zużywa" cascade of another packaging
     // component (tape via carton) — its shortage can be accepted per run.
     viaDependency?: boolean;
+    // Raw materials kept in a volume unit (l/ml): the recipe needs mass and
+    // there is no density to convert with, so the stock can't be counted.
+    // `available` is then the stock in THIS unit (not kg), `needPerUnit` the
+    // mass in kg, and `maxUnits` is 0 — the material blocks the result until
+    // it is checked by hand (see `warnings`).
+    unconvertibleUnit?: Unit;
   }[];
   // Expired raw-material batches among this product's ingredients, with whether
   // each was counted as available for this computation.
@@ -991,6 +1035,10 @@ export interface MaxProducibleResult {
   // "Zużywa"-cascade components that cap production below every non-cascade
   // limit (see DependencyShortageRef) — drives the per-run accept prompt.
   dependencyShortages?: DependencyShortageRef[];
+  // Problems that make the result incomplete (missing catalog entries,
+  // scheme components without capacity, volume-unit raw materials, …).
+  // Polish, like the shortage report's warnings.
+  warnings?: string[];
 }
 
 // ============================ Orders / Workflows ============================

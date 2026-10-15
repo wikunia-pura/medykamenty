@@ -1,5 +1,5 @@
 import { FUZZY_MATCH_THRESHOLD } from '../../shared/constants';
-import { sameVariantNames } from './variantMatch';
+import { sameVariant, variantTokens } from './variantMatch';
 
 interface Candidate {
   id: string;
@@ -49,16 +49,17 @@ function levenshtein(a: string, b: string): number {
   return prev[b.length];
 }
 
-function similarity(a: string, b: string): number {
-  const aN = normalize(a);
-  const bN = normalize(b);
-  if (!aN.length && !bN.length) return 1;
-  const maxLen = Math.max(aN.length, bN.length);
+// The fuzzy score is computed on a formatting-insensitive form (variantTokens:
+// diacritics folded, punctuation dropped, digit/letter boundaries split) so
+// "Tuba 50 ml." and "Tuba 50ml" both become "tuba 50 ml" and only real
+// spelling differences lower the score.
+function similarity(aC: string, bC: string): number {
+  if (!aC.length && !bC.length) return 1;
+  const maxLen = Math.max(aC.length, bC.length);
   if (maxLen === 0) return 1;
-  const dist = levenshtein(aN, bN);
+  const dist = levenshtein(aC, bC);
   return 1 - dist / maxLen;
 }
-
 
 export function matchOne(
   source: { name: string; mpFirmaSymbol?: string },
@@ -94,31 +95,49 @@ export function matchOne(
     };
   }
 
+  const sourceTokens = variantTokens(source.name.replace(INVISIBLE_CHARS, ''));
+  const sourceC = sourceTokens.join(' ');
   const scored = candidates
-    .map((c) => ({ id: c.id, name: c.name, confidence: similarity(source.name, c.name) }))
+    .map((c) => {
+      const tokens = variantTokens(c.name.replace(INVISIBLE_CHARS, ''));
+      return {
+        id: c.id,
+        name: c.name,
+        confidence: similarity(sourceC, tokens.join(' ')),
+        // A high fuzzy score is not enough on its own: "Butelka 100 ml" scores
+        // 0.96 against "Butelka 200 ml", "Metyloparaben" 0.92 against
+        // "Etyloparaben". A candidate whose numbers / line-codes / words
+        // differ (see ./variantMatch) is a different item, never a match.
+        sameVariant: sameVariant(sourceTokens, tokens),
+      };
+    })
     .sort((a, b) => b.confidence - a.confidence);
 
-  const top = scored[0];
+  const best = scored[0];
+  if (!best || best.confidence < FUZZY_MATCH_THRESHOLD) {
+    return { confidence: best?.confidence ?? 0, ambiguous: false };
+  }
+
+  // Skip different-variant candidates and take the best SAME-variant one —
+  // "Tuba 50ml" vs ["Tuba 60ml", "Tuba 50 ml."] must land on the second.
+  // Different variants are not competitors for the ambiguity check either.
+  const sameVariants = scored.filter((c) => c.sameVariant);
+  const top = sameVariants[0];
   if (!top || top.confidence < FUZZY_MATCH_THRESHOLD) {
+    // Nothing usable above the threshold: leave the row unmatched so the
+    // user links it once (an alias then makes it permanent).
     return { confidence: top?.confidence ?? 0, ambiguous: false };
   }
 
-  // A high fuzzy score is not enough on its own: "Butelka 100 ml" scores 0.96
-  // against "Butelka 200 ml" and "Cutis P" scores 0.97 against "Cutis Ł". If the
-  // best candidate is a *different variant* (its numbers / line-codes / colours
-  // differ), it's a different item — refuse the auto-match and leave the row
-  // unmatched so the user links it once (an alias then makes it permanent).
-  if (!sameVariantNames(source.name, top.name)) {
-    return { confidence: top.confidence, ambiguous: false };
-  }
-
-  const second = scored[1];
+  const second = sameVariants[1];
   const ambiguous = !!second && top.confidence - second.confidence < 0.05;
 
   return {
     id: top.id,
     confidence: top.confidence,
     ambiguous,
-    alternatives: ambiguous ? scored.slice(0, 3) : undefined,
+    alternatives: ambiguous
+      ? sameVariants.slice(0, 3).map((c) => ({ id: c.id, confidence: c.confidence }))
+      : undefined,
   };
 }

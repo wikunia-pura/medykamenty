@@ -11,6 +11,7 @@ import type {
   RecipeImportSummary,
 } from '../../shared/types';
 import ConfirmDialog from '../components/ConfirmDialog';
+import BlockedByDialog from '../components/BlockedByDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
 import SkeletonRows from '../components/SkeletonRows';
 import { useMinimumLoading } from '../utils/useMinimumLoading';
@@ -39,7 +40,11 @@ import {
   saveFile,
   openFile,
   formatStats,
+  ImportSaveError,
 } from '../utils/exportImport';
+
+const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
 const Products: React.FC = () => {
   const t = useT();
@@ -54,6 +59,12 @@ const Products: React.FC = () => {
   const [initialLoading, setInitialLoading] = useState(true);
   const showSkeleton = useMinimumLoading(initialLoading);
   const [error, setError] = useState<string | null>(null);
+  // A failed first load — shown in the table instead of "no data".
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Save error of the editor, shown inside the modal.
+  const [editError, setEditError] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [blockedBy, setBlockedBy] = useState<string[] | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
@@ -65,13 +76,17 @@ const Products: React.FC = () => {
   // The two-phase recipe import keeps the analysis output here between the
   // user picking the file (analyze) and resolving unmatched items (commit).
   const [recipeAnalysis, setRecipeAnalysis] = useState<RecipeImportAnalysis | null>(null);
+  // Analysis whose parse warnings the user reviews before anything is written.
+  const [recipeWarnings, setRecipeWarnings] = useState<RecipeImportAnalysis | null>(null);
 
   const closeEditor = () => {
     setEditing(null);
     setEditingReadOnly(false);
+    setEditError(null);
   };
 
   const openPreview = (p: Product) => {
+    setEditError(null);
     setEditing(p);
     setEditingReadOnly(true);
   };
@@ -205,7 +220,10 @@ const Products: React.FC = () => {
                       {componentName(pp.componentId)}
                     </span>
                     <span className="list-tooltip-amount">
-                      {(pp.qtyPerUnit ?? 0).toLocaleString()} szt./op.
+                      {t.qtyPerPackUnit.replace(
+                        '{qty}',
+                        (pp.qtyPerUnit ?? 0).toLocaleString(),
+                      )}
                     </span>
                   </li>
                 ))}
@@ -253,9 +271,15 @@ const Products: React.FC = () => {
                         {/* Mass packaging binds to bulk (per kg); product
                             packaging binds to finished units — 'units'
                             capacity is always exactly 1 slot per product. */}
-                        {isMass
-                          ? `${(tt.consumption ?? 0).toLocaleString()} ${unitLabel}/kg masy`
-                          : `${(unit === 'units' ? 1 : (tt.consumption ?? 0)).toLocaleString()} ${unitLabel}/szt.`}
+                        {(isMass ? t.consumptionPerKgMass : t.consumptionPerPiece)
+                          .replace(
+                            '{qty}',
+                            (isMass || unit !== 'units'
+                              ? (tt.consumption ?? 0)
+                              : 1
+                            ).toLocaleString(),
+                          )
+                          .replace('{unit}', unitLabel)}
                       </span>
                     </li>
                   );
@@ -323,8 +347,11 @@ const Products: React.FC = () => {
       // First load shows skeleton rows in the table (see SkeletonRows), not a
       // blocking overlay.
       setInitialLoading(true);
+      setLoadError(null);
       try {
         await reload();
+      } catch (err) {
+        setLoadError(`${t.loadFailed}: ${errorMessage(err)}`);
       } finally {
         setInitialLoading(false);
       }
@@ -333,6 +360,7 @@ const Products: React.FC = () => {
 
   const onAdd = () => {
     setEditingReadOnly(false);
+    setEditError(null);
     setEditing({
       name: '',
       capacityMl: 100,
@@ -343,15 +371,16 @@ const Products: React.FC = () => {
     });
   };
 
+  // Double submit is guarded inside ProductEditorModal (saving flag).
   const onSave = async () => {
     if (!editing || !editing.name?.trim()) return;
-    setError(null);
+    setEditError(null);
     const sumPercent = (editing.ingredients ?? []).reduce(
       (acc, i) => acc + (i.percentage || 0),
       0,
     );
     if (sumPercent > 100.0001) {
-      setError(t.recipeSumError);
+      setEditError(t.recipeSumError);
       return;
     }
     const payload = {
@@ -378,7 +407,7 @@ const Products: React.FC = () => {
       closeEditor();
       await reload();
     } catch (err) {
-      setError((err as Error).message);
+      setEditError(errorMessage(err));
     }
   };
 
@@ -418,7 +447,13 @@ const Products: React.FC = () => {
         setInfo(formatStats(stats));
         await reload();
       } catch (err) {
-        setError(`${t.importInvalidFile}: ${(err as Error).message}`);
+        if (err instanceof ImportSaveError) {
+          setError(`${t.importSaveFailed}: ${err.message}`);
+          // Part of the file may already be saved — show what landed.
+          await reload().catch(() => undefined);
+        } else {
+          setError(`${t.importInvalidFile}: ${errorMessage(err)}`);
+        }
       }
     } finally {
       setBusy(false);
@@ -428,8 +463,18 @@ const Products: React.FC = () => {
 
   const onDelete = async (p: Product) => {
     setConfirmDelete(null);
-    await window.electronAPI.deleteProduct(p.id);
-    await reload();
+    setError(null);
+    try {
+      // A product used by a production plan is not deleted.
+      const result = await window.electronAPI.deleteProduct(p.id);
+      if (!result.ok) {
+        setBlockedBy(result.blockedBy ?? []);
+      } else {
+        setItems((prev) => prev.filter((x) => x.id !== p.id));
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    }
   };
 
   const onDeleteAll = async () => {
@@ -440,14 +485,26 @@ const Products: React.FC = () => {
     setLoaderMessage(t.deleteAllInProgress);
     const total = items.length;
     try {
-      for (const p of items) {
-        await window.electronAPI.deleteProduct(p.id);
+      // One call; products used by a production plan are skipped and reported.
+      const res = await window.electronAPI.deleteCatalogItems(
+        'product',
+        items.map((p) => p.id),
+      );
+      if (res.blocked.length === 0) {
+        setInfo(t.deleteAllSuccess.replace('{n}', String(res.deleted)));
+      } else {
+        setInfo(
+          t.deleteAllPartial
+            .replace('{n}', String(res.deleted))
+            .replace('{total}', String(total))
+            .replace('{blocked}', String(res.blocked.length)),
+        );
+        setBlockedBy(Array.from(new Set(res.blocked.flatMap((b) => b.blockedBy))));
       }
-      setInfo(t.deleteAllSuccess.replace('{n}', String(total)));
       await reload();
     } catch (err) {
-      setError((err as Error).message);
-      await reload();
+      setError(errorMessage(err));
+      await reload().catch(() => undefined);
     } finally {
       setBusy(false);
       setLoaderMessage(null);
@@ -455,10 +512,20 @@ const Products: React.FC = () => {
   };
 
   const onDuplicate = async (p: Product) => {
-    const copy = await window.electronAPI.duplicateProduct(p.id);
-    setEditingReadOnly(false);
-    setEditing(copy);
-    await reload();
+    if (duplicatingId) return;
+    setDuplicatingId(p.id);
+    setError(null);
+    try {
+      const copy = await window.electronAPI.duplicateProduct(p.id);
+      setEditingReadOnly(false);
+      setEditError(null);
+      setEditing(copy);
+      await reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setDuplicatingId(null);
+    }
   };
 
   // Phase 2 of the recipe import — given the user's per-item resolutions,
@@ -511,15 +578,14 @@ const Products: React.FC = () => {
         return;
       }
       const analysis = res.analysis;
-      if (
-        analysis.unresolvedRaws.length === 0 &&
-        analysis.unresolvedComponents.length === 0
-      ) {
-        await commitRecipeImport(analysis, { rawMaterials: [], components: [] });
+      setRecipeImportMode(null);
+      // Structural problems in the file (skipped rows, products without
+      // ingredients) are shown before the commit — the user may cancel.
+      if ((analysis.warnings ?? []).length > 0) {
+        setRecipeWarnings(analysis);
         return;
       }
-      setRecipeAnalysis(analysis);
-      setRecipeImportMode(null);
+      await continueRecipeImport(analysis);
     } catch (err) {
       setError(`${t.recipesImportFailed}: ${(err as Error).message}`);
       setRecipeImportMode(null);
@@ -527,6 +593,19 @@ const Products: React.FC = () => {
       setBusy(false);
       setLoaderMessage(null);
     }
+  };
+
+  // After the warnings (if any): commit straight away when every referenced
+  // name resolves, otherwise let the user resolve the rest first.
+  const continueRecipeImport = async (analysis: RecipeImportAnalysis) => {
+    if (
+      analysis.unresolvedRaws.length === 0 &&
+      analysis.unresolvedComponents.length === 0
+    ) {
+      await commitRecipeImport(analysis, { rawMaterials: [], components: [] });
+      return;
+    }
+    setRecipeAnalysis(analysis);
   };
 
   const onConfirmRecipeImport = async () => {
@@ -575,35 +654,23 @@ const Products: React.FC = () => {
       <div className="card card-fill">
         <div className="toolbar">
           <div className="toolbar-actions">
-            <button
-              className="btn btn-export"
-              onClick={onExport}
-              disabled={busy}
-              title={t.exportLabel}
-            >
+            <button className="btn btn-export" onClick={onExport} disabled={busy}>
               <IconExport size={13} /> {t.exportLabel}
             </button>
             <button
               className="btn btn-export"
               onClick={onExportRecipes}
               disabled={busy || items.length === 0}
-              title={t.recipesExportXlsx}
             >
               <IconExport size={13} /> {t.recipesExportXlsx}
             </button>
-            <button
-              className="btn btn-import"
-              onClick={onImport}
-              disabled={busy}
-              title={t.importLabel}
-            >
+            <button className="btn btn-import" onClick={onImport} disabled={busy}>
               <IconImport size={13} /> {t.importLabel}
             </button>
             <button
               className="btn btn-import"
               onClick={onClickRecipeImport}
               disabled={busy}
-              title={t.recipesImportXlsx}
             >
               <IconImport size={13} /> {t.recipesImportXlsx}
             </button>
@@ -620,7 +687,6 @@ const Products: React.FC = () => {
               className="btn danger"
               onClick={() => setConfirmDeleteAll(true)}
               disabled={busy || items.length === 0}
-              title={t.deleteAll}
             >
               <IconTrash size={13} /> {t.deleteAll}
             </button>
@@ -652,8 +718,11 @@ const Products: React.FC = () => {
               ) : (
                 sorted.length === 0 && (
                   <tr>
-                    <td colSpan={orderedVisibleIds.length + 2} className="hint">
-                      {query ? '—' : t.noData}
+                    <td
+                      colSpan={orderedVisibleIds.length + 2}
+                      className={loadError ? 'error-text' : 'hint'}
+                    >
+                      {loadError ?? (query ? '—' : t.noData)}
                     </td>
                   </tr>
                 )
@@ -663,7 +732,6 @@ const Products: React.FC = () => {
                   key={p.id}
                   className="row-clickable"
                   onClick={() => openPreview(p)}
-                  title={t.preview}
                 >
                   {orderedVisibleIds.map((id) => cellFor(id, p))}
                   <td className="col-filler" />
@@ -684,6 +752,7 @@ const Products: React.FC = () => {
                         label={t.edit}
                         onClick={() => {
                           setEditingReadOnly(false);
+                          setEditError(null);
                           setEditing(p);
                         }}
                       />
@@ -691,7 +760,8 @@ const Products: React.FC = () => {
                         className="btn-sm soft-success"
                         icon={<IconDuplicate size={14} />}
                         label={t.duplicate}
-                        onClick={() => onDuplicate(p)}
+                        disabled={duplicatingId !== null}
+                        onClick={() => void onDuplicate(p)}
                       />
                     </div>
                   </td>
@@ -710,7 +780,7 @@ const Products: React.FC = () => {
           setEditing={setEditing}
           onCancel={closeEditor}
           onSave={onSave}
-          error={error}
+          error={editError}
           readOnly={editingReadOnly}
           onEnterEdit={() => setEditingReadOnly(false)}
         />
@@ -734,6 +804,8 @@ const Products: React.FC = () => {
         />
       )}
 
+      {blockedBy && <BlockedByDialog blockedBy={blockedBy} onClose={() => setBlockedBy(null)} />}
+
       {recipeImportMode !== null && (
         <RecipeImportModeDialog
           mode={recipeImportMode}
@@ -741,6 +813,18 @@ const Products: React.FC = () => {
           onCancel={() => setRecipeImportMode(null)}
           onConfirm={onConfirmRecipeImport}
           busy={busy}
+        />
+      )}
+
+      {recipeWarnings && (
+        <RecipeImportWarningsModal
+          warnings={recipeWarnings.warnings ?? []}
+          onCancel={() => setRecipeWarnings(null)}
+          onContinue={() => {
+            const analysis = recipeWarnings;
+            setRecipeWarnings(null);
+            void continueRecipeImport(analysis);
+          }}
         />
       )}
 
@@ -851,6 +935,55 @@ const RecipeImportModeDialog: React.FC<ModeDialogProps> = ({
   );
 };
 
+// ---------- Recipe import: parse warnings before the commit ----------
+
+interface WarningsModalProps {
+  warnings: string[];
+  onCancel: () => void;
+  onContinue: () => void;
+}
+
+const RecipeImportWarningsModal: React.FC<WarningsModalProps> = ({
+  warnings,
+  onCancel,
+  onContinue,
+}) => {
+  const t = useT();
+  useEscapeKey(onCancel);
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
+        <ModalHeader
+          icon={<IconImport size={18} />}
+          tone="edit"
+          title={t.recipesImportWarnings}
+          onClose={onCancel}
+        />
+        <div className="modal-body">
+          <div className="hint" style={{ marginBottom: 12 }}>
+            {t.recipeImportWarningsIntro}
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+            {warnings.map((w, i) => (
+              <li key={i} className="hint">
+                {w}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="modal-footer">
+          <button className="btn" onClick={onCancel}>
+            {t.cancel}
+          </button>
+          <button className="btn primary-filled" onClick={onContinue}>
+            {t.recipeImportContinue}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ---------- Recipe import summary ----------
 
 interface SummaryModalProps {
@@ -926,7 +1059,8 @@ const RecipeImportSummaryModal: React.FC<SummaryModalProps> = ({ summary, onClos
                         <td>
                           {p.schemeCapacityReviewNeeded.length > 0 && (
                             <div className="hint" style={{ marginBottom: 4 }}>
-                              capacity=1: {p.schemeCapacityReviewNeeded.join(', ')}
+                              {t.recipesImportCapacityReview}:{' '}
+                              {p.schemeCapacityReviewNeeded.join(', ')}
                             </div>
                           )}
                           {p.warnings.map((w, j) => (

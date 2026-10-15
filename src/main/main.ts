@@ -1,10 +1,12 @@
 import { app, BrowserWindow } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'path';
+import Store from 'electron-store';
 import log from './utils/logger';
 import Database from './database';
 import { registerIpcHandlers } from './ipc';
-import { runAutoBackup } from './backupService';
+import { runAutoBackup, getBackupsDir } from './backupService';
+import { archiveMigratedLegacyData } from './migrationService';
 import { IPC } from '../shared/ipcChannels';
 
 const DEV_SERVER_PORT = 5183;
@@ -133,7 +135,8 @@ function setupAutoUpdater(): void {
   // Allow installing builds without an Apple-notarized signature.
   process.env.ELECTRON_UPDATER_ALLOW_UNVERIFIED = '1';
   (autoUpdater as any).forceDevUpdateConfig = true;
-  (autoUpdater as any).allowDowngrade = true;
+  // No allowDowngrade: an older release published as "latest" (by mistake or
+  // by someone with access to the repo) must not roll every install back.
 
   autoUpdater.on('update-available', (info) => {
     if (mainWindow) mainWindow.webContents.send(IPC.EVT_UPDATE_AVAILABLE, info);
@@ -167,9 +170,18 @@ function setupAutoUpdater(): void {
   }
 }
 
+// Start at login is switched on once, on the first packaged launch. Doing it on
+// every start (as before) silently re-enabled it after the user turned it off
+// in the system settings.
 function ensureAutoLaunch(): void {
   if (!app.isPackaged) return;
+  const state = new Store<{ autoLaunchConfigured: boolean }>({
+    name: 'app-state',
+    defaults: { autoLaunchConfigured: false },
+  });
+  if (state.get('autoLaunchConfigured')) return;
   try {
+    state.set('autoLaunchConfigured', true);
     app.setLoginItemSettings({
       openAtLogin: true,
       openAsHidden: false,
@@ -208,6 +220,7 @@ app.whenReady().then(() => {
   }
   ensureAutoLaunch();
   database = new Database();
+  archiveMigratedLegacyData(getBackupsDir());
   registerIpcHandlers(database, () => mainWindow);
   setupAutoUpdater();
   createWindow();

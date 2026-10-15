@@ -22,7 +22,6 @@ import ExcelJS from 'exceljs';
 import path from 'path';
 import Database from '../database';
 import type {
-  ComponentType,
   PackagingComponent,
   PackingCapacityUnit,
   PackingTier,
@@ -38,7 +37,14 @@ import type {
 } from '../../shared/types';
 import { isSecondaryComponent } from '../../shared/types';
 import log from '../utils/logger';
-import { normalize as smartNormalize, suggestMatches } from './smartMatcher';
+import {
+  normalize as smartNormalize,
+  suggestMatches,
+  bracketlessKey,
+  findLikelyDuplicate,
+} from './smartMatcher';
+import { asNumber, asString } from './xlsxCells';
+import { inferComponentType } from './xlsxComponentsImporter';
 
 // Index of the catalog passed around when resolving ingredients/components.
 // Bundles the trivially-normalized lookup, smart-normalized fallback, alias
@@ -147,39 +153,6 @@ function normalize(s: string): string {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
-}
-
-function asString(v: unknown): string | undefined {
-  if (v === null || v === undefined) return undefined;
-  if (typeof v === 'string') {
-    const t = v.trim();
-    return t.length === 0 ? undefined : t;
-  }
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'object' && v !== null) {
-    if ('text' in v) return asString((v as { text: unknown }).text);
-    if ('richText' in v) {
-      const parts = (v as { richText?: { text?: string }[] }).richText ?? [];
-      const joined = parts.map((p) => p?.text ?? '').join('').trim();
-      return joined.length === 0 ? undefined : joined;
-    }
-    if ('result' in v) return asString((v as { result: unknown }).result);
-  }
-  return undefined;
-}
-
-function asNumber(v: unknown): number | undefined {
-  if (v === null || v === undefined || v === '') return undefined;
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string') {
-    const cleaned = v.replace(/\s/g, '').replace(',', '.');
-    const n = parseFloat(cleaned);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  if (typeof v === 'object' && v !== null && 'result' in v) {
-    return asNumber((v as { result: unknown }).result);
-  }
-  return undefined;
 }
 
 // ---------- section/row classification ----------
@@ -307,32 +280,11 @@ function classifyRow(cells: unknown[]): RowClass {
 }
 
 // ---------- component type inference ----------
-
-function inferComponentType(rawName: string, sectionHint: 'primary' | 'secondary'): ComponentType {
-  const n = normalize(rawName);
-
-  // Always-secondary patterns (override section hint).
-  if (n === 'konfekcja') return 'confection';
-  if (n.startsWith('karton zbiorczy')) return 'outer_carton';
-  if (n.startsWith('taśma') || n.startsWith('tasma')) return 'tape';
-  if (n.startsWith('beczka')) return 'barrel';
-  if (n.startsWith('worek')) return 'bag';
-
-  // Primary patterns.
-  if (n.startsWith('tuba')) return 'tube';
-  if (n.startsWith('butelka')) return 'bottle';
-  if (n.startsWith('słoik') || n.startsWith('sloik')) return 'jar';
-  if (n.startsWith('etykieta')) return 'label';
-  if (n.startsWith('kartonik')) return 'box';
-  if (n.startsWith('ulotka')) return 'leaflet';
-  if (n.startsWith('dozownik') || n.startsWith('atomizer')) return 'pump';
-  if (n.startsWith('nakrętka') || n.startsWith('nakretka') || n.startsWith('zamknięcie') || n.startsWith('zamkniecie')) {
-    return 'cap';
-  }
-  if (n.startsWith('pipeta') || n.startsWith('pipetka')) return 'pipette';
-
-  return sectionHint === 'secondary' ? 'other' : 'other';
-}
+//
+// Shared with the components-catalog and Magazyn imports — see
+// inferComponentType in ./xlsxComponentsImporter. An unrecognised name in the
+// "Pozostałe komponenty" section falls back to a secondary type there, never
+// to a primary one.
 
 // ---------- block extraction ----------
 
@@ -370,8 +322,32 @@ export interface RecipeBlock {
   warnings: string[];
 }
 
-function extractBlocks(ws: ExcelJS.Worksheet): RecipeBlock[] {
+// A product values row: name in A, a capacity in B (a number, also "100 ml"),
+// and nothing in C…H. Ingredient rows always fill C…H (przelicznik, ilość,
+// ceny, MY/RETTER), so this never mistakes an ingredient for a product — MOQ
+// (column I) is deliberately NOT required: one blank MOQ cell used to make the
+// real product vanish and promote its first ingredient to a fake product.
+function looksLikeProductRow(cells: unknown[]): boolean {
+  if (!asString(cells[0]) || asNumber(cells[1]) === undefined) return false;
+  for (let c = 2; c <= 7; c++) {
+    if (asString(cells[c]) !== undefined) return false;
+  }
+  return true;
+}
+
+const NO_INGREDIENTS_WARNING =
+  'Blok produktu nie zawiera żadnych surowców — sprawdź w pliku wiersz z nazwą produktu i nagłówek „Surowce".';
+
+export interface ParsedRecipeFile {
+  blocks: RecipeBlock[];
+  // File-level problems not tied to one product (rows skipped outside any
+  // block, products that couldn't start). Block-level ones live on the block.
+  warnings: string[];
+}
+
+function extractBlocks(ws: ExcelJS.Worksheet): ParsedRecipeFile {
   const blocks: RecipeBlock[] = [];
+  const fileWarnings: string[] = [];
   let current: RecipeBlock | null = null;
   // Parser state — tells us what we expect from the next non-blank row.
   type State =
@@ -382,61 +358,111 @@ function extractBlocks(ws: ExcelJS.Worksheet): RecipeBlock[] {
     | 'reading_primary_components'
     | 'reading_secondary_components';
   let state: State = 'idle';
+  let sawBlankInComponents = false;
+  // After a blank among the packaging rows, the block is over unless the
+  // table carries on: a "Suma" line or a section header follows before the
+  // next blank / end of sheet.
+  const blankEndsBlock = (from: number): boolean => {
+    for (let j = from; j < rows.length; j++) {
+      const k = rows[j].cls.kind;
+      if (k === 'blank') return true;
+      if (
+        k === 'sum' ||
+        k === 'ingredients_header' ||
+        k === 'components_marker' ||
+        k === 'others_marker' ||
+        k === 'konfekcja'
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // Classify every row up front so the block-start check can look ahead.
+  const rows: { cells: unknown[]; cls: RowClass }[] = [];
+  for (let i = 1; i <= ws.rowCount; i++) {
+    const row = ws.getRow(i);
+    const cells: unknown[] = [];
+    for (let c = 1; c <= 10; c++) cells.push(row.getCell(c).value);
+    rows.push({ cells, cls: classifyRow(cells) });
+  }
+  // Is the next non-blank row (after 0-based index `idx`) the "Surowce" header?
+  const nextIsIngredientsHeader = (idx: number): boolean => {
+    for (let j = idx + 1; j < rows.length; j++) {
+      const k = rows[j].cls.kind;
+      if (k === 'blank') continue;
+      return k === 'ingredients_header';
+    }
+    return false;
+  };
+
+  // Rows outside any block (e.g. ingredients whose product row is missing)
+  // are reported as one warning per contiguous run instead of vanishing.
+  let orphan: { first: number; last: number; count: number } | null = null;
+  const flushOrphans = () => {
+    if (!orphan) return;
+    const range = orphan.first === orphan.last ? `${orphan.first}` : `${orphan.first}–${orphan.last}`;
+    fileWarnings.push(
+      `Pominięto ${orphan.count} wiersz(y) poza blokiem produktu (wiersze ${range}) — brak wiersza z nazwą produktu przed nimi.`,
+    );
+    orphan = null;
+  };
+
+  const newBlock = (cells: unknown[], name: string): RecipeBlock => ({
+    name,
+    capacityMl: asNumber(cells[1]),
+    moqUnits: asNumber(cells[8]),
+    sachetMassKg: asNumber(cells[9]),
+    ingredients: [],
+    packaging: [],
+    warnings: [],
+  });
 
   const finishBlock = () => {
     if (current) {
+      if (current.ingredients.length === 0) current.warnings.push(NO_INGREDIENTS_WARNING);
       blocks.push(current);
       current = null;
     }
     state = 'idle';
   };
 
-  for (let i = 1; i <= ws.rowCount; i++) {
-    const row = ws.getRow(i);
-    const cells: unknown[] = [];
-    for (let c = 1; c <= 10; c++) cells.push(row.getCell(c).value);
-    const cls = classifyRow(cells);
+  for (let idx = 0; idx < rows.length; idx++) {
+    const rowNo = idx + 1;
+    const { cells, cls } = rows[idx];
 
     if (cls.kind === 'sum') {
       // End of block — a "Suma" line.
+      flushOrphans();
       finishBlock();
       continue;
     }
 
     if (cls.kind === 'blank') {
-      // Blank line: if we were reading components, that's the end of block.
-      if (state !== 'idle') finishBlock();
+      // A blank row inside the ingredient list doesn't end the block (it used
+      // to cut the recipe short silently). Among the packaging rows it does,
+      // as a fallback for a last block without its "Suma" line — otherwise a
+      // footer below the table would be read as a component.
+      if (state === 'reading_primary_components' || state === 'reading_secondary_components') {
+        sawBlankInComponents = true;
+      }
       continue;
     }
+    if (sawBlankInComponents && current !== null && blankEndsBlock(idx)) {
+      (current as RecipeBlock).warnings.push(
+        `Blok nie kończy się wierszem „Suma" — zamknięto go na pustym wierszu przed wierszem ${rowNo}.`,
+      );
+      flushOrphans();
+      finishBlock();
+    }
+    sawBlankInComponents = false;
 
     if (cls.kind === 'product_header') {
+      flushOrphans();
       finishBlock();
       state = 'expect_product_values';
       continue;
-    }
-
-    // In the source file the "Nazwa produktu" header strip appears only ONCE
-    // (above the first block). Every subsequent product starts straight with
-    // its values row. Heuristic: when idle and a row has both a non-empty
-    // name in col A and a numeric MOQ in col I (the dedicated MOQ column),
-    // treat it as the start of a new product block.
-    if (state === 'idle' && current === null) {
-      const a = asString(cells[0]);
-      const moq = asNumber(cells[8]);
-      const cap = asNumber(cells[1]);
-      if (a && moq !== undefined && cap !== undefined) {
-        current = {
-          name: a,
-          capacityMl: cap,
-          moqUnits: moq,
-          sachetMassKg: asNumber(cells[9]),
-          ingredients: [],
-          packaging: [],
-          warnings: [],
-        };
-        state = 'expect_ingredients_header';
-        continue;
-      }
     }
 
     if (state === 'expect_product_values') {
@@ -445,43 +471,81 @@ function extractBlocks(ws: ExcelJS.Worksheet): RecipeBlock[] {
       const name = asString(cells[0]);
       if (!name) {
         // Bad/empty header — abort this block.
+        fileWarnings.push(`Wiersz ${rowNo}: brak nazwy produktu pod nagłówkiem „Nazwa produktu" — pominięto.`);
         state = 'idle';
         continue;
       }
-      current = {
-        name,
-        capacityMl: asNumber(cells[1]),
-        moqUnits: asNumber(cells[8]),
-        sachetMassKg: asNumber(cells[9]),
-        ingredients: [],
-        packaging: [],
-        warnings: [],
-      };
+      current = newBlock(cells, name);
       state = 'expect_ingredients_header';
       continue;
     }
 
+    // In the source file the "Nazwa produktu" header strip appears only ONCE
+    // (above the first block); every later product starts straight with its
+    // values row. A product row is recognised by its shape (see
+    // looksLikeProductRow) and only where a block can start: no block open
+    // (sheet start, after "Suma", after blank separators). The one exception
+    // is a name row directly followed by the "Surowce" header — that is a new
+    // product even when the previous block lacks its "Suma" line.
+    const a = asString(cells[0]);
+    const productLike = looksLikeProductRow(cells);
+    // Not while reading ingredients: a repeated "Surowce" header inside a
+    // block must not turn the previous ingredient into a product.
+    const opensIngredients =
+      state !== 'reading_ingredients' &&
+      !!a &&
+      (cls.kind === 'ingredient' || cls.kind === 'packaging' || cls.kind === 'unknown') &&
+      nextIsIngredientsHeader(idx);
+    if (opensIngredients || (current === null && state === 'idle' && productLike)) {
+      flushOrphans();
+      if (current !== null) {
+        (current as RecipeBlock).warnings.push(
+          `Blok nie kończy się wierszem „Suma" — zamknięto go przed produktem „${a}" (wiersz ${rowNo}).`,
+        );
+        finishBlock();
+      }
+      current = newBlock(cells, a!);
+      if (!productLike) {
+        current.warnings.push(
+          `Wiersz ${rowNo}: nietypowy wiersz produktu (brak pojemności w kolumnie B lub wartości w kolumnach C–H) — sprawdź dane.`,
+        );
+      }
+      state = 'expect_ingredients_header';
+      continue;
+    }
+
+    if (current === null) {
+      // Outside any block. Group the skipped rows into one warning per run.
+      if (orphan) {
+        orphan.last = rowNo;
+        orphan.count++;
+      } else {
+        orphan = { first: rowNo, last: rowNo, count: 1 };
+      }
+      continue;
+    }
+
     if (cls.kind === 'ingredients_header') {
-      if (current) state = 'reading_ingredients';
+      state = 'reading_ingredients';
       continue;
     }
 
     if (cls.kind === 'components_marker') {
-      if (current) state = 'reading_primary_components';
+      state = 'reading_primary_components';
       continue;
     }
 
     if (cls.kind === 'others_marker') {
-      if (current) state = 'reading_secondary_components';
+      state = 'reading_secondary_components';
       continue;
     }
 
-    if (cls.kind === 'water' && current && state === 'reading_ingredients') {
+    if (cls.kind === 'water' && state === 'reading_ingredients') {
       // Per product spec we don't model "Woda / do 100%" in the recipe.
       continue;
     }
 
-    if (cls.kind === 'ingredient' && current && state === 'reading_ingredients') {
+    if (cls.kind === 'ingredient' && state === 'reading_ingredients') {
       // Capture Przelicznik from column C (index 2) of the first ingredient row.
       if (current.przelicznikG === undefined) {
         const przel = asNumber(cells[2]);
@@ -496,7 +560,7 @@ function extractBlocks(ws: ExcelJS.Worksheet): RecipeBlock[] {
       continue;
     }
 
-    if (cls.kind === 'packaging' && current) {
+    if (cls.kind === 'packaging') {
       if (state === 'reading_primary_components') {
         current.packaging.push({ name: cls.name, section: 'primary' });
       } else if (state === 'reading_secondary_components') {
@@ -513,7 +577,7 @@ function extractBlocks(ws: ExcelJS.Worksheet): RecipeBlock[] {
       continue;
     }
 
-    if (cls.kind === 'konfekcja' && current) {
+    if (cls.kind === 'konfekcja') {
       // Last block's first konfekcja line wins. If the file has multiple
       // (shouldn't), the user's intent is the first one; subsequent ones
       // are ignored with a warning so the user notices the data oddity.
@@ -527,17 +591,27 @@ function extractBlocks(ws: ExcelJS.Worksheet): RecipeBlock[] {
       continue;
     }
 
-    // Unknown / unexpected row — only warn while a block is open. We already
-    // consumed expect_product_values above, so any unknown row here is past
-    // the header strip.
-    if (current && cls.kind === 'unknown') {
-      const text = cells.map(asString).filter(Boolean).join(' | ');
-      if (text) current.warnings.push(`Nieznany wiersz pominięty: ${text}`);
+    // Anything else inside an open block is skipped — but never silently.
+    if (productLike) {
+      current.warnings.push(
+        `Pominięto wiersz ${rowNo} („${a}") — wygląda jak nowy produkt, ale poprzedni blok nie został zamknięty wierszem „Suma".`,
+      );
+      continue;
     }
+    if (cls.kind === 'ingredient' || cls.kind === 'water') {
+      const name = cls.kind === 'ingredient' ? cls.name : cls.nameRaw;
+      current.warnings.push(
+        `Pominięto wiersz ${rowNo} („${name}") — surowiec poza sekcją „Surowce".`,
+      );
+      continue;
+    }
+    const text = cells.map(asString).filter(Boolean).join(' | ');
+    if (text) current.warnings.push(`Nieznany wiersz pominięty: ${text}`);
   }
 
+  flushOrphans();
   finishBlock();
-  return blocks;
+  return { blocks, warnings: fileWarnings };
 }
 
 // ---------- catalog resolution (analyze + commit phases) ----------
@@ -679,12 +753,16 @@ function lookupWithResolutions<T extends { id: string; name: string }>(
 
 // ---------- main import ----------
 
-export async function parseRecipesXlsx(filePath: string): Promise<RecipeBlock[]> {
+export async function parseRecipesXlsxWithWarnings(filePath: string): Promise<ParsedRecipeFile> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(filePath);
   const ws = wb.worksheets[0];
   if (!ws) throw new Error(`No worksheet in ${filePath}`);
   return extractBlocks(ws);
+}
+
+export async function parseRecipesXlsx(filePath: string): Promise<RecipeBlock[]> {
+  return (await parseRecipesXlsxWithWarnings(filePath)).blocks;
 }
 
 // Two-phase import. Phase 1 (`analyzeRecipesXlsx`) parses the file and reports
@@ -726,12 +804,20 @@ export async function analyzeRecipesXlsx(
   mode: RecipeImportMode,
   db: Database,
 ): Promise<RecipeImportAnalysis> {
-  const blocks = await parseRecipesXlsx(filePath);
+  const { blocks, warnings: fileWarnings } = await parseRecipesXlsxWithWarnings(filePath);
   log.info(
     `[recipes-analyze] parsed ${blocks.length} recipe blocks from ${path.basename(filePath)}`,
   );
   const { rawIdx, compIdx } = await buildIndexes(db);
   const { raws, comps } = collectUnresolved(blocks, rawIdx, compIdx);
+  // Structural problems the user should see BEFORE committing: rows the
+  // parser skipped and products that came out without a single ingredient.
+  const warnings = [
+    ...fileWarnings,
+    ...blocks
+      .filter((b) => b.ingredients.length === 0)
+      .map((b) => `„${b.name}": ${NO_INGREDIENTS_WARNING}`),
+  ];
   return {
     fileName: path.basename(filePath),
     filePath,
@@ -739,6 +825,7 @@ export async function analyzeRecipesXlsx(
     blockCount: blocks.length,
     unresolvedRaws: Array.from(raws.values()).map((r) => r.item),
     unresolvedComponents: Array.from(comps.values()).map((c) => c.item),
+    warnings,
   };
 }
 
@@ -748,7 +835,7 @@ export async function commitRecipesXlsx(
   resolutions: RecipeImportResolutions,
   db: Database,
 ): Promise<RecipeImportSummary> {
-  const blocks = await parseRecipesXlsx(filePath);
+  const { blocks, warnings: fileWarnings } = await parseRecipesXlsxWithWarnings(filePath);
   log.info(
     `[recipes-commit] parsed ${blocks.length} recipe blocks from ${path.basename(filePath)}`,
   );
@@ -762,7 +849,7 @@ export async function commitRecipesXlsx(
     rawMaterialsCreated: 0,
     componentsCreated: 0,
     perProduct: [],
-    globalWarnings: [],
+    globalWarnings: [...fileWarnings],
   };
 
   const { rawIdx, compIdx, productIdx, products } = await buildIndexes(db);
@@ -858,10 +945,19 @@ export async function commitRecipesXlsx(
       const smartHits = productIdx.smartByKey.get(smartNormalize(b.name)) ?? [];
       if (smartHits.length === 1) aliasKeptIds.add(smartHits[0].id);
     }
+    const incomingLoose = new Set(blocks.map((b) => bracketlessKey(b.name)));
     for (const p of products) {
       if (incomingNames.has(normalize(p.name))) continue;
+      if (incomingLoose.has(bracketlessKey(p.name))) continue;
       if (aliasKeptIds.has(p.id)) continue;
-      await db.deleteProduct(p.id);
+      // A product used by a production plan is not deleted — report it and
+      // carry on with the rest of the import.
+      const res = await db.deleteProduct(p.id);
+      if (!res.ok) {
+        summary.globalWarnings.push(
+          `Nie usunięto produktu "${p.name}" — używany przez: ${(res.blockedBy ?? []).join(', ') || 'nieznane miejsca'}.`,
+        );
+      }
     }
   }
 
@@ -1037,10 +1133,7 @@ export async function commitRecipesXlsx(
       summary.productsUpdated++;
     } else {
       // Fuzzy near-duplicate check before create.
-      const top = suggestMatches({ name: block.name }, Array.from(productIdx.byId.values()), {
-        limit: 1,
-        threshold: 0.85,
-      })[0];
+      const top = findLikelyDuplicate(block.name, Array.from(productIdx.byId.values()));
       if (top) {
         summary.globalWarnings.push(
           `Możliwy duplikat produktu: "${block.name}" wygląda jak istniejący "${top.name}" (${Math.round(top.confidence * 100)}%).`,

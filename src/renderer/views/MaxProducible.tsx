@@ -18,6 +18,10 @@ import DependencyShortageModal, {
   buildSubstituteCandidates,
 } from '../components/DependencyShortageModal';
 import { IconRefresh, IconChevronDown } from '../components/Icons';
+import HoverTooltip from '../components/HoverTooltip';
+
+const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
 type Bottleneck = MaxProducibleResult['bottlenecks'][number];
 
@@ -80,8 +84,14 @@ const fmtComp = (n: number): string => {
   return n.toFixed(2);
 };
 
-const fmtAmount = (b: Bottleneck, unitsShort: string): string =>
-  b.kind === 'raw' ? fmtRaw(b.available) : `${fmtComp(b.available)} ${unitsShort}`;
+// A raw material kept in l/ml with no density reports `available` in its own
+// unit (see `unconvertibleUnit`) — formatting it as kg would turn 1000 l into
+// "1000.00 kg".
+const fmtAmount = (b: Bottleneck, unitsShort: string): string => {
+  if (b.kind !== 'raw') return `${fmtComp(b.available)} ${unitsShort}`;
+  if (b.unconvertibleUnit) return `${fmtComp(b.available)} ${b.unconvertibleUnit}`;
+  return fmtRaw(b.available);
+};
 
 const fmtPerUnit = (b: Bottleneck, unitsShort: string): string =>
   b.kind === 'raw' ? fmtRaw(b.needPerUnit) : `${fmtComp(b.needPerUnit)} ${unitsShort}`;
@@ -98,6 +108,9 @@ const MaxProducibleView: React.FC = () => {
   const [expandedIds, setExpandedIds] = useState<string[]>(() => loadState().expandedIds);
   const [busy, setBusy] = useState(false);
   const [loaderMessage, setLoaderMessage] = useState<string | null>(null);
+  // Compute / load failures, shown in the banner; the product modal keeps its own.
+  const [error, setError] = useState<string | null>(null);
+  const [productEditError, setProductEditError] = useState<string | null>(null);
   // Set while the entry refresh runs, so it computes without the overlay.
   const quietRef = useRef(false);
   // Expired-stock gate for the production calculator: after the first
@@ -164,10 +177,16 @@ const MaxProducibleView: React.FC = () => {
       // selection quietly — previous results stay on screen and the banner's
       // refresh icon spins; no blocking overlay.
       quietRef.current = true;
+      // The catalog load and the recompute of the remembered selection run in
+      // parallel; a product deleted meanwhile just drops out of the results.
+      const remembered = productIds;
       try {
-        const filteredIds = await reload();
-        if (filteredIds.length > 0) {
-          await compute(filteredIds);
+        const [listed] = await Promise.allSettled([
+          reload(),
+          remembered.length > 0 ? compute(remembered, { skipFailed: true }) : Promise.resolve(),
+        ]);
+        if (listed.status === 'rejected') {
+          setError(`${t.loadFailed}: ${errorMessage(listed.reason)}`);
         }
       } finally {
         quietRef.current = false;
@@ -178,6 +197,7 @@ const MaxProducibleView: React.FC = () => {
   const openProductPreview = (productId: string) => {
     const p = products.find((x) => x.id === productId);
     if (!p) return;
+    setProductEditError(null);
     setEditingProduct({ ...p });
     setProductModalReadOnly(true);
   };
@@ -187,20 +207,25 @@ const MaxProducibleView: React.FC = () => {
   };
   const saveProduct = async () => {
     if (!editingProduct?.id || !editingProduct.name?.trim()) return;
-    await window.electronAPI.updateProduct(editingProduct.id, {
-      name: editingProduct.name.trim(),
-      sku: editingProduct.sku?.trim() || undefined,
-      capacityMl: editingProduct.capacityMl ?? 0,
-      densityGPerMl: editingProduct.densityGPerMl ?? 1,
-      conversionLaborCost: editingProduct.conversionLaborCost,
-      ingredients: editingProduct.ingredients ?? [],
-      packaging: editingProduct.packaging ?? [],
-      packingScheme: editingProduct.packingScheme,
-      notes: editingProduct.notes?.trim() || undefined,
-      archived: !!editingProduct.archived,
-    });
-    closeProductModal();
-    await reload();
+    setProductEditError(null);
+    try {
+      await window.electronAPI.updateProduct(editingProduct.id, {
+        name: editingProduct.name.trim(),
+        sku: editingProduct.sku?.trim() || undefined,
+        capacityMl: editingProduct.capacityMl ?? 0,
+        densityGPerMl: editingProduct.densityGPerMl ?? 1,
+        conversionLaborCost: editingProduct.conversionLaborCost,
+        ingredients: editingProduct.ingredients ?? [],
+        packaging: editingProduct.packaging ?? [],
+        packingScheme: editingProduct.packingScheme,
+        notes: editingProduct.notes?.trim() || undefined,
+        archived: !!editingProduct.archived,
+      });
+      closeProductModal();
+      await reload();
+    } catch (err) {
+      setProductEditError(errorMessage(err));
+    }
   };
 
   useEffect(() => {
@@ -213,25 +238,32 @@ const MaxProducibleView: React.FC = () => {
     );
   };
 
+  // `skipFailed`: keep the products that did compute instead of failing the
+  // whole batch (the entry refresh runs before the product list is back, so a
+  // remembered product may no longer exist).
   const runCompute = async (
     targetIds: string[],
     includeExpiredBatchIds: string[],
     acceptedDependencyIds: string[] = [],
     substitutions: Record<string, string> = {},
+    skipFailed = false,
   ): Promise<MaxProducibleResult[]> => {
     setBusy(true);
+    setError(null);
     if (!quietRef.current) setLoaderMessage(t.loaderComputing);
-    try {
-      return await Promise.all(
-        targetIds.map((id) =>
-          window.electronAPI.maxProducible(
-            id,
-            includeExpiredBatchIds,
-            acceptedDependencyIds,
-            substitutions,
-          ),
-        ),
+    const one = (id: string) =>
+      window.electronAPI.maxProducible(
+        id,
+        includeExpiredBatchIds,
+        acceptedDependencyIds,
+        substitutions,
       );
+    try {
+      if (!skipFailed) return await Promise.all(targetIds.map(one));
+      const settled = await Promise.allSettled(targetIds.map(one));
+      return settled
+        .filter((r): r is PromiseFulfilledResult<MaxProducibleResult> => r.status === 'fulfilled')
+        .map((r) => r.value);
     } finally {
       setBusy(false);
       setLoaderMessage(null);
@@ -260,15 +292,31 @@ const MaxProducibleView: React.FC = () => {
     setResults(computed);
   };
 
-  const compute = async (ids?: string[]) => {
-    const targetIds = ids ?? productIds;
+  // Runs a recompute that feeds the results; a failure goes to the banner.
+  const runInto = (
+    run: Promise<MaxProducibleResult[]>,
+    then: (r: MaxProducibleResult[]) => void,
+  ) => {
+    void run.then(then).catch((err) => setError(errorMessage(err)));
+  };
+
+  const compute = async (ids?: string[], opts?: { skipFailed?: boolean }) => {
+    let targetIds = ids ?? productIds;
     if (targetIds.length === 0) return;
     // Fresh run — every per-run decision is asked again.
     setAcceptedDepIds([]);
     setDepSubstitutions({});
     // First pass excludes all expired stock. If any expired batch is
     // relevant, gate on the per-run decision before showing results.
-    const base = await runCompute(targetIds, []);
+    let base: MaxProducibleResult[];
+    try {
+      base = await runCompute(targetIds, [], [], {}, !!opts?.skipFailed);
+    } catch (err) {
+      setError(errorMessage(err));
+      return;
+    }
+    // Only products that computed can be the active set from here on.
+    targetIds = base.map((r) => r.productId);
     const byId = new Map<string, ExpiredBatchRef>();
     for (const r of base) for (const b of r.expiredBatches ?? []) byId.set(b.batchId, b);
     const expired = Array.from(byId.values());
@@ -322,6 +370,7 @@ const MaxProducibleView: React.FC = () => {
               {busy ? t.loading : t.compute} →
             </button>
           </div>
+          {error && <div className="compute-hero-error">{error}</div>}
         </div>
       </div>
 
@@ -396,11 +445,11 @@ const MaxProducibleView: React.FC = () => {
               className="btn primary-filled"
               disabled={busy || productIds.length === 0}
               onClick={() =>
-                void runCompute(productIds, [...expiredDraft], acceptedDepIds, depSubstitutions).then(
+                runInto(
+                  runCompute(productIds, [...expiredDraft], acceptedDepIds, depSubstitutions),
                   setResults,
                 )
               }
-              title={t.expiredReportRegenerate}
             >
               {t.expiredReportRegenerate}
             </button>
@@ -410,6 +459,7 @@ const MaxProducibleView: React.FC = () => {
 
       {results.map((result) => {
         const noBottlenecks = result.bottlenecks.length === 0;
+        const warnings = result.warnings ?? [];
         const limiters = result.bottlenecks.filter((b) => b.maxUnits === result.units);
         const isZero = result.units === 0;
         const isExpanded = expandedIds.includes(result.productId);
@@ -436,17 +486,23 @@ const MaxProducibleView: React.FC = () => {
             }
           >
             <div className="maxprod-product-row">
-              <button
-                type="button"
-                className="link-button maxprod-product"
-                onClick={(ev) => {
-                  ev.stopPropagation();
-                  openProductPreview(result.productId);
-                }}
-                title={t.preview}
+              <HoverTooltip
+                className="hover-tooltip-compact"
+                trigger={
+                  <button
+                    type="button"
+                    className="link-button maxprod-product"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      openProductPreview(result.productId);
+                    }}
+                  >
+                    {result.productName}
+                  </button>
+                }
               >
-                {result.productName}
-              </button>
+                {t.preview}
+              </HoverTooltip>
               {hasDetails && (
                 <span className="maxprod-expand-affordance">
                   <span className="maxprod-expand-label">
@@ -514,6 +570,21 @@ const MaxProducibleView: React.FC = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {warnings.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div className="warn-text" style={{ fontWeight: 600, marginBottom: 4 }}>
+                  {t.calcWarningsTitle}
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+                  {warnings.map((w, i) => (
+                    <li key={i} className="hint">
+                      {w}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 
@@ -596,6 +667,7 @@ const MaxProducibleView: React.FC = () => {
           setEditing={setEditingProduct}
           onCancel={closeProductModal}
           onSave={saveProduct}
+          error={productEditError}
           readOnly={productModalReadOnly}
           onEnterEdit={() => setProductModalReadOnly(false)}
         />
@@ -614,7 +686,7 @@ const MaxProducibleView: React.FC = () => {
             setPendingExpired(null);
             if (ids.length === 0) finishWithDepGate(targetIds, [], base);
             else
-              void runCompute(targetIds, ids).then((next) =>
+              runInto(runCompute(targetIds, ids), (next) =>
                 finishWithDepGate(targetIds, ids, next),
               );
           }}
@@ -645,7 +717,7 @@ const MaxProducibleView: React.FC = () => {
             if (acceptedIds.length === 0 && Object.keys(substitutions).length === 0) {
               setResults(computed);
             } else {
-              void runCompute(targetIds, expiredIds, acceptedIds, substitutions).then(setResults);
+              runInto(runCompute(targetIds, expiredIds, acceptedIds, substitutions), setResults);
             }
           }}
         />

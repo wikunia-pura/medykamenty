@@ -49,13 +49,15 @@ const BlockedByDialog: React.FC<Props> = ({ blockedBy, onClose }) => {
         return t.deleteBlockedByComponents;
       case 'product':
         return t.deleteBlockedByProducts;
+      case 'plan':
+        return t.deleteBlockedByPlans;
       default:
         return kind;
     }
   };
 
-  // Order: products first (top-level), then components, then raw materials.
-  const KIND_ORDER = ['product', 'component', 'raw'];
+  // Order: plans first (top-level), then products, components, raw materials.
+  const KIND_ORDER = ['plan', 'product', 'component', 'raw'];
   const kinds = Object.keys(groups).sort((a, b) => {
     const ai = KIND_ORDER.indexOf(a);
     const bi = KIND_ORDER.indexOf(b);

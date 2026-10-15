@@ -1,6 +1,6 @@
 import type Database from '../database';
 import type {
-  ProductionPlan,
+  Product,
   ShortageReport,
   ShortageLine,
   ShortageGroup,
@@ -10,18 +10,17 @@ import type {
   ExpiredBatchRef,
   DependencyShortageRef,
 } from '../../shared/types';
-import { ceilToMoq, toGrams } from '../utils/units';
+import { ceilToMoq, gramsTo, isMassUnit, toGrams } from '../utils/units';
 import { nowIso } from '../utils/id';
 import { effectiveOverageFactor } from '../../shared/overage';
 import { availableStockQty, collectExpiredRefs } from '../../shared/expiry';
 import {
-  walkSchemePerProduct,
-  walkSchemePerBulkKg,
-  piecesPerProduct,
+  schemeDemand,
   ceilPieces,
   substituteProductScheme,
   substituteComponentDependencies,
   type PackingSubstitutions,
+  type SchemeRun,
 } from './packingConsumption';
 
 export async function computeShortages(
@@ -37,126 +36,97 @@ export async function computeShortages(
   // Applied to scheme tiers and 'dependencies' before any math runs.
   substitutions: PackingSubstitutions = {},
 ): Promise<ShortageReport> {
-  const plan = await db.getPlan(planId);
+  // Independent reads — each a round trip, so run them together.
+  const [plan, productList, rawList, componentList, supplierList] = await Promise.all([
+    db.getPlan(planId),
+    db.listProducts(),
+    db.listRawMaterials(),
+    db.listComponents(),
+    db.listSuppliers(),
+  ]);
   if (!plan) throw new Error(`Plan ${planId} not found`);
 
   const settings = db.getSettings();
   const asOf = new Date();
   const includeSet = new Set(includeExpiredBatchIds);
-  // Overage ("naddatek") is now per-item: the bare requirement is accumulated
+  // Overage ("naddatek") is per-item: the bare requirement is accumulated
   // here factor-free, then each raw material / component's effective overage is
-  // applied once when its shortage line is built (see below).
-  const products = new Map((await db.listProducts()).map((p) => [p.id, p]));
-  const rawMaterials = new Map((await db.listRawMaterials()).map((r) => [r.id, r]));
-  const baseComponents = new Map((await db.listComponents()).map((c) => [c.id, c]));
-  const suppliers = new Map((await db.listSuppliers()).map((s) => [s.id, s]));
+  // applied once when its shortage line is built (see below). Packing-scheme
+  // pieces are the exception — schemeDemand applies the overage inside its
+  // own whole-piece rounding.
+  const products = new Map(productList.map((p) => [p.id, p]));
+  const rawMaterials = new Map(rawList.map((r) => [r.id, r]));
+  const baseComponents = new Map(componentList.map((c) => [c.id, c]));
+  const suppliers = new Map(supplierList.map((s) => [s.id, s]));
   // Per-run substitutions rewrite the 'dependencies' edges here and the scheme
   // tiers per product below — downstream everything is the substitute.
   const components = substituteComponentDependencies(baseComponents, substitutions);
+  const compOverage = (comp: PackagingComponent) =>
+    effectiveOverageFactor(comp.overagePct, settings.defaultOveragePctComponent);
 
   // Stock is now sourced from the catalog itself (raw_materials.stockQty /
   // components.stockQty), kept up to date by stock imports + manual edits via
   // services/stockReconciler.ts — so manual corrections feed straight into
   // shortage planning.
   const rawNeedG = new Map<string, number>();
+  // Primary packaging, bare (overage applied at the line).
   const compNeedUnits = new Map<string, number>();
   const warnings: string[] = [];
-  // Which components were consumed as direct scheme tiers vs ONLY through the
-  // "zużywa" cascade (tape via carton) — both surface in the per-run shortage
-  // prompt; the sets record the origin shown to the user.
-  const directComps = new Set<string>();
-  const cascadeComps = new Set<string>();
   const acceptedSet = new Set(acceptedDependencyIds);
-  // Shared-packaging pieces accumulate fractionally PER PRODUCT — different
-  // products never share a piece (no mixing products in one barrel/carton),
-  // so whole-piece rounding happens per (product, component), not on the
-  // plan total. productId → componentId → fractional pieces.
-  const schemePieces = new Map<string, Map<string, number>>();
-  const addSchemePieces = (productId: string, componentId: string, pieces: number) => {
-    let perComp = schemePieces.get(productId);
-    if (!perComp) {
-      perComp = new Map();
-      schemePieces.set(productId, perComp);
-    }
-    perComp.set(componentId, (perComp.get(componentId) ?? 0) + pieces);
-  };
+  // Packing-scheme runs (finished units and bulk mass), resolved to whole
+  // pieces by schemeDemand after the loop.
+  const schemeRuns: SchemeRun[] = [];
 
-  const accumulate = (plan: ProductionPlan) => {
-    for (const item of plan.items) {
-      const product = products.get(item.productId);
-      if (!product) {
-        warnings.push(`Plan item references missing product ${item.productId}`);
-        continue;
-      }
-      const massPerUnitG = product.capacityMl * product.densityGPerMl;
-      const totalMassG = massPerUnitG * item.qtyUnits;
-      for (const ing of product.ingredients) {
-        rawNeedG.set(
-          ing.rawMaterialId,
-          (rawNeedG.get(ing.rawMaterialId) ?? 0) + totalMassG * (ing.percentage / 100),
-        );
-      }
-      for (const pkg of product.packaging) {
-        compNeedUnits.set(
-          pkg.componentId,
-          (compNeedUnits.get(pkg.componentId) ?? 0) + pkg.qtyPerUnit * item.qtyUnits,
-        );
-      }
-      // Scheme tiers + cascaded dependencies (carton → tape). Finished-unit
-      // production consumes ONLY 'product'-kind packaging (the walk zeroes
-      // 'mass'-kind seeds); cascade dependencies follow their parent.
-      const schemed = substituteProductScheme(product, substitutions);
-      for (const entry of walkSchemePerProduct(schemed, components)) {
-        const comp = components.get(entry.componentId);
-        if (!comp || !comp.capacity || comp.capacity <= 0) continue;
-        const piecesPerUnit = piecesPerProduct(comp, entry.unitsConsumedPerProduct);
-        if (!Number.isFinite(piecesPerUnit) || piecesPerUnit <= 0) continue;
-        (entry.viaDependency ? cascadeComps : directComps).add(entry.componentId);
-        addSchemePieces(product.id, entry.componentId, piecesPerUnit * item.qtyUnits);
-      }
-    }
-    for (const bm of plan.bulkMass) {
-      const product = products.get(bm.productId);
-      if (!product) {
-        warnings.push(`Bulk mass references missing product ${bm.productId}`);
-        continue;
-      }
-      const totalMassG = bm.massKg * 1000;
-      for (const ing of product.ingredients) {
-        rawNeedG.set(
-          ing.rawMaterialId,
-          (rawNeedG.get(ing.rawMaterialId) ?? 0) + totalMassG * (ing.percentage / 100),
-        );
-      }
-      // Bulk-mass production consumes ONLY 'mass'-kind packaging (the walk
-      // zeroes 'product'-kind seeds) — a barrel holds the bulk even if it
-      // never becomes finished units. Cartons etc. contribute 0 here.
-      const schemed = substituteProductScheme(product, substitutions);
-      for (const entry of walkSchemePerBulkKg(schemed, components)) {
-        const comp = components.get(entry.componentId);
-        if (!comp || !comp.capacity || comp.capacity <= 0) continue;
-        const piecesPerKg = piecesPerProduct(comp, entry.unitsConsumedPerProduct);
-        if (!Number.isFinite(piecesPerKg) || piecesPerKg <= 0) continue;
-        (entry.viaDependency ? cascadeComps : directComps).add(entry.componentId);
-        addSchemePieces(product.id, entry.componentId, piecesPerKg * bm.massKg);
-      }
-    }
-  };
-
-  accumulate(plan);
-
-  // Roll the per-product fractional pieces up to whole pieces per (product,
-  // component) — 100 kg of A in a 120 l barrel = 1 barrel, 20 kg of B needs
-  // its OWN barrel (products don't mix), so the same barrel component totals
-  // 2 pieces, not ceil(1.0).
-  for (const perComp of schemePieces.values()) {
-    for (const [componentId, pieces] of perComp) {
-      compNeedUnits.set(
-        componentId,
-        (compNeedUnits.get(componentId) ?? 0) + ceilPieces(pieces),
+  const addIngredients = (product: Product, totalMassG: number) => {
+    for (const ing of product.ingredients) {
+      rawNeedG.set(
+        ing.rawMaterialId,
+        (rawNeedG.get(ing.rawMaterialId) ?? 0) + totalMassG * (ing.percentage / 100),
       );
     }
+  };
+
+  for (const item of plan.items) {
+    const product = products.get(item.productId);
+    if (!product) {
+      warnings.push(`Pozycja planu wskazuje na nieistniejący produkt (${item.productId}) — pominięto.`);
+      continue;
+    }
+    addIngredients(product, product.capacityMl * product.densityGPerMl * item.qtyUnits);
+    for (const pkg of product.packaging) {
+      compNeedUnits.set(
+        pkg.componentId,
+        (compNeedUnits.get(pkg.componentId) ?? 0) + pkg.qtyPerUnit * item.qtyUnits,
+      );
+    }
+    // Finished-unit production consumes ONLY 'product'-kind scheme packaging.
+    schemeRuns.push({
+      product: substituteProductScheme(product, substitutions),
+      units: item.qtyUnits,
+      bulkKg: 0,
+    });
   }
+  for (const bm of plan.bulkMass) {
+    const product = products.get(bm.productId);
+    if (!product) {
+      warnings.push(`Masa luzem wskazuje na nieistniejący produkt (${bm.productId}) — pominięto.`);
+      continue;
+    }
+    addIngredients(product, bm.massKg * 1000);
+    // Bulk-mass production consumes ONLY 'mass'-kind packaging — a barrel
+    // holds the bulk even if it never becomes finished units.
+    schemeRuns.push({
+      product: substituteProductScheme(product, substitutions),
+      units: 0,
+      bulkKg: bm.massKg,
+    });
+  }
+
+  // Whole pieces per scheme component: containers rounded per product (no
+  // mixing products in one barrel/carton), tape & other cascades summed over
+  // the plan and rounded once — overage already inside.
+  const scheme = schemeDemand(schemeRuns, components, compOverage);
+  warnings.push(...scheme.warnings);
 
   for (const [fromId, toId] of Object.entries(substitutions)) {
     const from = baseComponents.get(fromId);
@@ -170,51 +140,72 @@ export async function computeShortages(
   for (const [id, neededG] of rawNeedG.entries()) {
     const rm = rawMaterials.get(id);
     if (!rm) {
-      warnings.push(`Recipe references missing raw material ${id}`);
+      warnings.push(`Receptura wskazuje na nieistniejący surowiec (${id}) — pominięto.`);
       continue;
     }
     if (rm.factorySupplied) continue;
 
+    // Recipes are mass-based. A material kept in a volume unit (l/ml) has no
+    // density to convert with — leave it out of the math instead of treating
+    // its stock as 0, and say so.
     // Apply this raw material's effective overage ("naddatek") to the bare
     // requirement accumulated above.
     const neededWithOverageG =
       neededG * effectiveOverageFactor(rm.overagePct, settings.defaultOveragePctRaw);
 
-    let availableG: number;
-    try {
-      // Expiry-aware: expired batches are excluded unless the user opted to
-      // count them for this run. Batch-less materials use their flat stockQty.
-      const stockQty = availableStockQty(rm, asOf, includeSet);
-      availableG = toGrams(stockQty, rm.unit);
-    } catch (err) {
+    // Recipes are mass-based. A material kept in a volume unit (l/ml) has no
+    // density to compare its stock with: report the whole requirement (in kg)
+    // as short so it still reaches the RFQ and the warehouse mail — the same
+    // answer max-producible gives (0 units) — and say why.
+    if (!isMassUnit(rm.unit)) {
       warnings.push(
-        `Cannot compute available stock for ${rm.name} (unit ${rm.unit}): ${(err as Error).message}`,
+        `Surowiec „${rm.name}" ma jednostkę „${rm.unit}" — bez gęstości nie da się porównać zapotrzebowania ze stanem; całe zapotrzebowanie pokazano jako brak (w kg), sprawdź ręcznie.`,
       );
-      availableG = 0;
+      const neededKg = neededWithOverageG / 1000;
+      rawLines.push({
+        itemId: id,
+        itemName: rm.name,
+        itemKind: 'raw',
+        unit: 'kg',
+        required: neededKg,
+        available: 0,
+        shortage: neededKg,
+        moq: rm.moq,
+        suggestedOrder: ceilToMoq(neededKg, rm.moq),
+        preferredSupplierId: rm.preferredSupplierId,
+      });
+      continue;
     }
-
+    // Expiry-aware: expired batches are excluded unless the user opted to
+    // count them for this run. Batch-less materials use their flat stockQty.
+    const availableG = toGrams(availableStockQty(rm, asOf, includeSet), rm.unit);
     const shortageG = Math.max(0, neededWithOverageG - availableG);
-    const suggestedOrder = ceilToMoq(shortageG / 1000, rm.moq); // expressed in same unit as MOQ (kg)
 
+    // Everything reported is in the material's own unit. MOQ is kept in kg
+    // (the catalog import fills it from the package size in kg), so convert it.
+    const moqInUnit = rm.moq ? gramsTo(rm.moq * 1000, rm.unit) : rm.moq;
     rawLines.push({
       itemId: id,
       itemName: rm.name,
       itemKind: 'raw',
-      unit: 'kg',
-      required: neededWithOverageG / 1000,
-      available: availableG / 1000,
-      shortage: shortageG / 1000,
-      moq: rm.moq,
-      suggestedOrder,
+      unit: rm.unit,
+      required: gramsTo(neededWithOverageG, rm.unit),
+      available: gramsTo(availableG, rm.unit),
+      shortage: gramsTo(shortageG, rm.unit),
+      moq: moqInUnit,
+      suggestedOrder: ceilToMoq(gramsTo(shortageG, rm.unit), moqInUnit),
       preferredSupplierId: rm.preferredSupplierId,
     });
   }
+
+  // Every component the plan touches: primary packaging + scheme demand.
+  const allCompIds = new Set<string>([...compNeedUnits.keys(), ...scheme.needs.keys()]);
 
   // Names of the plan-involved parents that pull a cascade component in via
   // their 'dependencies' — context shown in the accept prompt.
   const consumedByNames = (depId: string): string[] => {
     const names: string[] = [];
-    for (const parentId of compNeedUnits.keys()) {
+    for (const parentId of allCompIds) {
       const parent = components.get(parentId);
       if (parent?.dependencies?.some((d) => d.componentId === depId)) {
         names.push(parent.name);
@@ -225,32 +216,33 @@ export async function computeShortages(
 
   const componentLines: ShortageLine[] = [];
   const dependencyShortages: DependencyShortageRef[] = [];
-  for (const [id, neededUnits] of compNeedUnits.entries()) {
+  for (const id of allCompIds) {
     const comp = components.get(id);
     if (!comp) {
-      warnings.push(`Recipe references missing component ${id}`);
+      warnings.push(`Receptura wskazuje na nieistniejący komponent (${id}) — pominięto.`);
       continue;
     }
-    // Apply this component's effective overage ("naddatek"), then round up —
-    // components are whole pieces. This is also where the fractional
-    // 'product'-kind packing accumulation (3 cartons + 15/24) becomes a full
-    // final piece (4); ceilPieces guards against float drift on exact
-    // multiples.
-    const neededWithOverage = ceilPieces(
-      neededUnits * effectiveOverageFactor(comp.overagePct, settings.defaultOveragePctComponent),
-    );
+    const schemeNeed = scheme.needs.get(id);
+    // Primary packaging: apply this component's effective overage
+    // ("naddatek"), then round up — components are whole pieces (ceilPieces
+    // guards against float drift on exact multiples). Scheme pieces come
+    // already whole, overage included.
+    const neededWithOverage =
+      ceilPieces((compNeedUnits.get(id) ?? 0) * compOverage(comp)) + (schemeNeed?.pieces ?? 0);
+    const isDirect = !!schemeNeed?.direct;
+    const isCascade = !!schemeNeed?.cascade;
     const available = comp.stockQty ?? 0;
     const shortage = Math.max(0, neededWithOverage - available);
     // Shared-packaging component (direct tier or "zużywa" cascade) that is
     // short: surface it for the per-run prompt (accept / substitute); when
     // the user accepted the shortage, leave the line out of the report
     // entirely (a substitute will be used — nothing to order).
-    if (shortage > 0 && (directComps.has(id) || cascadeComps.has(id))) {
+    if (shortage > 0 && (isDirect || isCascade)) {
       const accepted = acceptedSet.has(id);
       dependencyShortages.push({
         componentId: id,
         componentName: comp.name,
-        origin: directComps.has(id) ? 'tier' : 'cascade',
+        origin: isDirect ? 'tier' : 'cascade',
         consumedBy: consumedByNames(id),
         available,
         required: neededWithOverage,
@@ -298,7 +290,7 @@ export async function computeShortages(
         ...(base ?? {
           componentId: fromId,
           componentName: from.name,
-          origin: directComps.has(toId) ? 'tier' : 'cascade',
+          origin: scheme.needs.get(toId)?.direct ? 'tier' : 'cascade',
           consumedBy: [],
           available: from.stockQty ?? 0,
         }),
@@ -344,10 +336,14 @@ export async function previewExpiredForPlan(
   planId: string,
   db: Database,
 ): Promise<ExpiredBatchRef[]> {
-  const plan = await db.getPlan(planId);
+  const [plan, productList, rawList] = await Promise.all([
+    db.getPlan(planId),
+    db.listProducts(),
+    db.listRawMaterials(),
+  ]);
   if (!plan) throw new Error(`Plan ${planId} not found`);
-  const products = new Map((await db.listProducts()).map((p) => [p.id, p]));
-  const rawMaterials = new Map((await db.listRawMaterials()).map((r) => [r.id, r]));
+  const products = new Map(productList.map((p) => [p.id, p]));
+  const rawMaterials = new Map(rawList.map((r) => [r.id, r]));
   const asOf = new Date();
   const seen = new Set<string>();
   const refs: ExpiredBatchRef[] = [];

@@ -10,8 +10,9 @@
 //   * a number ("100", "10") must appear verbatim — 100 is never a typo of 200,
 //     nor 1 of 10;
 //   * a short code (≤2 chars, e.g. line letter "p"/"l") must appear verbatim;
-//   * a longer word may match a near-twin (typo / inflection / diacritics) or be
-//     absorbed by a join/split spelling ("tego"+"care" ⇄ "tegocare").
+//   * a longer word may match a near-twin (one typo / inflection edit, never
+//     on the first letter, never a prefix like "nie"/"bez") or be absorbed by
+//     a join/split spelling ("tego"+"care" ⇄ "tegocare", exact only).
 //
 // Any leftover token on either side means the names are *different* variants.
 // Fully generic — no colour / keyword list — so "Dozownik biały" vs "Dozownik
@@ -35,25 +36,67 @@ function levenshtein(a: string, b: string): number {
   return prev[b.length];
 }
 
-function wordSimilar(a: string, b: string): boolean {
-  const maxLen = Math.max(a.length, b.length);
-  if (maxLen === 0) return true;
-  return 1 - levenshtein(a, b) / maxLen >= 0.7;
+// Two longer words count as the same word only when they are a typo /
+// inflection apart: at most ONE edit, not touching the first letter, and
+// neither word is the other with something glued in front. A looser rule
+// (≥0.7 similarity) used to equate chemically different materials:
+// "metyloparaben"/"etyloparaben" (leading letter), "nierafinowane"/
+// "rafinowane", "bezzapachowy"/"zapachowy" (negation prefix),
+// "niskoczasteczkowy"/"wysokoczasteczkowy" (several edits).
+//
+// `loose` is for ranking suggestions the user picks from (never for an
+// automatic link): it keeps the first-letter and glued-prefix rules but
+// tolerates more edits (≥0.7 similarity), so a truncated or misspelt name
+// ("Spirual" → "Spirualit") still shows up in the list.
+function wordSimilar(a: string, b: string, loose: boolean): boolean {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4) return false;
+  if (a[0] !== b[0]) return false;
+  if (a.endsWith(b) || b.endsWith(a)) return false;
+  const dist = levenshtein(a, b);
+  if (loose) return 1 - dist / Math.max(a.length, b.length) >= 0.7;
+  return dist <= 1;
+}
+
+// Join/split tolerance: "tegocare" vs "tego care". A token is absorbed only
+// when it EQUALS a run of ≥2 consecutive tokens of the other side, or is one
+// piece of a run of its own side that equals a token of the other side.
+// (Plain substring containment used to absorb "rafinowane" into
+// "nierafinowane" and "zapachowy" into "bezzapachowy".)
+function joinsTo(token: string, tokens: string[]): boolean {
+  for (let i = 0; i < tokens.length; i++) {
+    let acc = tokens[i];
+    for (let j = i + 1; j < tokens.length && acc.length < token.length; j++) {
+      acc += tokens[j];
+      if (acc === token) return true;
+    }
+  }
+  return false;
+}
+
+function splitOf(index: number, from: string[], to: string[]): boolean {
+  for (let i = 0; i <= index; i++) {
+    for (let j = Math.max(index, i + 1); j < from.length; j++) {
+      const run = from.slice(i, j + 1).join('');
+      if (to.includes(run)) return true;
+    }
+  }
+  return false;
 }
 
 // Is every token of `from` explained by some token of `to`?
-function covers(from: string[], to: string[]): boolean {
-  const joined = to.join('');
-  return from.every((t) => {
+function covers(from: string[], to: string[], loose: boolean): boolean {
+  return from.every((t, idx) => {
     if (/^\d+$/.test(t) || t.length <= 2) return to.includes(t);
-    if (to.some((u) => u.length > 2 && wordSimilar(t, u))) return true;
-    // join/split tolerance: "tegocare" vs "tego care"
-    return joined.includes(t) || t.includes(joined);
+    if (to.some((u) => u.length > 2 && wordSimilar(t, u, loose))) return true;
+    return joinsTo(t, to) || splitOf(idx, from, to);
   });
 }
 
-export function sameVariant(a: string[], b: string[]): boolean {
-  return covers(a, b) && covers(b, a);
+// `opts.loose` — suggestion ranking only, see wordSimilar.
+export function sameVariant(a: string[], b: string[], opts: { loose?: boolean } = {}): boolean {
+  const loose = opts.loose ?? false;
+  return covers(a, b, loose) && covers(b, a, loose);
 }
 
 // Split a name into comparable tokens. Folds diacritics (incl. Polish ł, which

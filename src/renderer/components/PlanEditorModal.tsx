@@ -10,6 +10,7 @@ import ModalHeader from './ModalHeader';
 import SearchableSelect from './SearchableSelect';
 import NumberInput from './NumberInput';
 import { IconPlus, IconClose, IconEdit, IconEye } from './Icons';
+import IconButton from './IconButton';
 import { useEscapeKey } from '../utils/useEscapeKey';
 
 interface Props {
@@ -18,6 +19,8 @@ interface Props {
   setEditing: (next: Partial<ProductionPlan>) => void;
   onCancel: () => void;
   onSave: () => void | Promise<void>;
+  // Save failure, shown inside the modal (a page banner would sit under it).
+  error?: string | null;
   readOnly?: boolean;
   onEnterEdit?: () => void;
 }
@@ -30,6 +33,7 @@ const PlanEditorModal: React.FC<Props> = ({
   setEditing,
   onCancel,
   onSave,
+  error,
   readOnly = false,
   onEnterEdit,
 }) => {
@@ -43,6 +47,17 @@ const PlanEditorModal: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<Tab>(
     items.length === 0 && bulkMass.length > 0 ? 'bulk' : 'items',
   );
+  // In-flight guard: a double click must not create the plan twice.
+  const [saving, setSaving] = useState(false);
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave();
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const updateItem = (idx: number, patch: Partial<ProductionPlanItem>) => {
     const next = items.slice();
@@ -127,7 +142,7 @@ const PlanEditorModal: React.FC<Props> = ({
           subtitle={
             editing.id
               ? undefined
-              : 'Zaplanuj produkcję: dodaj produkty pakowane oraz, opcjonalnie, masę luzem.'
+              : t.planEditorSubtitle
           }
           onClose={onCancel}
         />
@@ -187,7 +202,7 @@ const PlanEditorModal: React.FC<Props> = ({
                   <>
                     {items.length > 0 && (
                       <span className="tag">
-                        Σ {totalUnits.toLocaleString()} szt.
+                        Σ {totalUnits.toLocaleString()} {t.unitsShort}
                       </span>
                     )}
                     {!readOnly && (
@@ -228,7 +243,7 @@ const PlanEditorModal: React.FC<Props> = ({
                   <div className="plan-empty-state-text">
                     {readOnly
                       ? t.noData
-                      : 'Brak produktów. Dodaj pierwszy, aby zaplanować pakowanie.'}
+                      : t.planNoItemsHint}
                   </div>
                 </div>
               ) : (
@@ -268,16 +283,15 @@ const PlanEditorModal: React.FC<Props> = ({
                                 onChange={(v) => updateItem(idx, { qtyUnits: v ?? 0 })}
                                 disabled={readOnly}
                               />
-                              <span className="plan-row-unit">szt.</span>
+                              <span className="plan-row-unit">{t.unitsShort}</span>
                             </div>
                             {!readOnly && (
-                              <button
-                                className="btn btn-sm soft-danger btn-icon-only"
+                              <IconButton
+                                className="btn-sm soft-danger"
+                                icon={<IconClose size={12} />}
+                                label={t.delete}
                                 onClick={() => removeItem(idx)}
-                                title={t.delete}
-                              >
-                                <IconClose size={12} />
-                              </button>
+                              />
                             )}
                           </div>
                           {belowMoq && (
@@ -305,7 +319,7 @@ const PlanEditorModal: React.FC<Props> = ({
                 <div className="plan-empty-state-text">
                   {readOnly
                     ? t.noData
-                    : 'Brak masy luzem. Dodaj jeśli planujesz hurt lub saszetki.'}
+                    : t.planNoBulkHint}
                 </div>
               </div>
             ) : (
@@ -347,13 +361,12 @@ const PlanEditorModal: React.FC<Props> = ({
                         <span className="plan-row-unit">kg</span>
                       </div>
                       {!readOnly && (
-                        <button
-                          className="btn btn-sm soft-danger btn-icon-only"
+                        <IconButton
+                          className="btn-sm soft-danger"
+                          icon={<IconClose size={12} />}
+                          label={t.delete}
                           onClick={() => removeBulk(idx)}
-                          title={t.delete}
-                        >
-                          <IconClose size={12} />
-                        </button>
+                        />
                       )}
                     </div>
                   ))}
@@ -361,6 +374,7 @@ const PlanEditorModal: React.FC<Props> = ({
               </>
             )}
           </div>
+          {error && <div className="error-text">{error}</div>}
         </div>
 
         <div className="modal-footer">
@@ -382,8 +396,8 @@ const PlanEditorModal: React.FC<Props> = ({
               </button>
               <button
                 className="btn primary-filled"
-                onClick={() => void onSave()}
-                disabled={!editing.name?.trim()}
+                onClick={() => void handleSave()}
+                disabled={saving || !editing.name?.trim()}
               >
                 {t.save}
               </button>

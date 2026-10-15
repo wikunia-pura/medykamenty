@@ -8,6 +8,7 @@ import type {
   RawMaterialsImportSummary,
   RawStockAnalysis,
   RawStockDecision,
+  RawStockMatch,
   Supplier,
   Unit,
 } from '../../shared/types';
@@ -53,9 +54,21 @@ import {
   saveFile,
   openFile,
   formatStats,
+  ImportSaveError,
 } from '../utils/exportImport';
 
 const UNITS: Unit[] = ['kg', 'g', 'l', 'ml'];
+
+// Stock set by hand that the warehouse file would change.
+const isManualConflict = (m: RawStockMatch): boolean => !!m.manualConflict;
+
+// Matches the commit needs an explicit take/reject decision for — the main
+// process rejects any of them that arrives without one.
+const needsRawStockDecision = (m: RawStockMatch): boolean =>
+  m.sumMismatch || isManualConflict(m);
+
+const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
 // Stable id for a new stock batch. crypto.randomUUID needs a secure context,
 // which the production file:// renderer isn't — fall back to a random string.
@@ -83,6 +96,13 @@ const RawMaterials: React.FC = () => {
   const [initialLoading, setInitialLoading] = useState(true);
   const showSkeleton = useMinimumLoading(initialLoading);
   const [error, setError] = useState<string | null>(null);
+  // A failed first load — shown in the table instead of "no data".
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Save error of the edit modal, shown inside it (the page banner sits under
+  // the modal overlay).
+  const [editError, setEditError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
@@ -329,23 +349,34 @@ const RawMaterials: React.FC = () => {
     setDefaultOveragePct(s.defaultOveragePctRaw);
   };
 
+  // Swap one saved item into the list — inline edits return the updated
+  // entity, so there is no need to re-fetch the whole catalog.
+  const patchItem = (updated: RawMaterial) =>
+    setItems((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+
   const onChangeDefaultOverage = async (v: number | undefined) => {
     const next = v ?? 0;
+    const previous = defaultOveragePct;
     setDefaultOveragePct(next);
-    const updated: AppSettings = await window.electronAPI.updateSettings({
-      defaultOveragePctRaw: next,
-    });
-    setDefaultOveragePct(updated.defaultOveragePctRaw);
+    setError(null);
+    try {
+      const updated: AppSettings = await window.electronAPI.updateSettings({
+        defaultOveragePctRaw: next,
+      });
+      setDefaultOveragePct(updated.defaultOveragePctRaw);
+    } catch (err) {
+      setDefaultOveragePct(previous);
+      setError(errorMessage(err));
+    }
   };
 
   // Per-item overage edit from the grid. `undefined` clears it → inherit default.
   const onSetOverage = async (id: string, pct: number | undefined) => {
     setError(null);
     try {
-      await window.electronAPI.updateRawMaterial(id, { overagePct: pct });
-      await reload();
+      patchItem(await window.electronAPI.updateRawMaterial(id, { overagePct: pct }));
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -354,10 +385,11 @@ const RawMaterials: React.FC = () => {
   const onSetPrice = async (id: string, price: number | undefined) => {
     setError(null);
     try {
-      await window.electronAPI.updateRawMaterial(id, { lastPurchasePriceNet: price });
-      await reload();
+      patchItem(
+        await window.electronAPI.updateRawMaterial(id, { lastPurchasePriceNet: price }),
+      );
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -393,8 +425,11 @@ const RawMaterials: React.FC = () => {
       // First load shows skeleton rows in the table (see SkeletonRows), not a
       // blocking overlay.
       setInitialLoading(true);
+      setLoadError(null);
       try {
         await reload();
+      } catch (err) {
+        setLoadError(`${t.loadFailed}: ${errorMessage(err)}`);
       } finally {
         setInitialLoading(false);
       }
@@ -484,6 +519,7 @@ const RawMaterials: React.FC = () => {
 
   const onAdd = () => {
     setStockDirty(false);
+    setEditError(null);
     setEditing({
       name: '',
       unit: 'kg',
@@ -494,6 +530,7 @@ const RawMaterials: React.FC = () => {
 
   const startEdit = (rm: RawMaterial) => {
     setStockDirty(false);
+    setEditError(null);
     setEditing(rm);
   };
 
@@ -533,8 +570,8 @@ const RawMaterials: React.FC = () => {
   };
 
   const onSave = async () => {
-    if (!editing || !editing.name?.trim()) return;
-    setError(null);
+    if (!editing || !editing.name?.trim() || saving) return;
+    setEditError(null);
     const payload: Partial<RawMaterial> = {
       name: editing.name.trim(),
       mpFirmaSymbol: editing.mpFirmaSymbol?.trim() || undefined,
@@ -565,8 +602,11 @@ const RawMaterials: React.FC = () => {
           ? batches.reduce((s, b) => s + (b.qty ?? 0), 0)
           : editing.stockQty ?? 0;
       payload.stockSource = 'manual';
+      // The old import file no longer describes this stock.
+      payload.stockSourceFile = undefined;
       payload.stockUpdatedAt = new Date().toISOString();
     }
+    setSaving(true);
     try {
       if (editing.id) {
         await window.electronAPI.updateRawMaterial(editing.id, payload);
@@ -578,24 +618,23 @@ const RawMaterials: React.FC = () => {
       setEditing(null);
       await reload();
     } catch (err) {
-      setError((err as Error).message);
+      setEditError(errorMessage(err));
+    } finally {
+      setSaving(false);
     }
   };
 
   const onSetStock = async (id: string, qty: number) => {
     setError(null);
     try {
-      // A manual edit overrides the batch breakdown: drop the batches and keep
-      // a single flat value so the displayed total and the calculators agree.
-      await window.electronAPI.updateRawMaterial(id, {
-        stockQty: qty,
-        stockSource: 'manual',
-        stockUpdatedAt: new Date().toISOString(),
-        stockBatches: [],
-      });
-      await reload();
+      // Same path as the component list: flags the stock 'manual', clears the
+      // import file label and stamps the date in the main process. A flat
+      // value replaces the batch breakdown (updateRawMaterial drops batches
+      // when stockQty comes without them), so total and calculators agree.
+      const updated = await window.electronAPI.setManualStock('raw', id, qty);
+      patchItem(updated as RawMaterial);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -630,7 +669,13 @@ const RawMaterials: React.FC = () => {
         setInfo(formatStats(stats));
         await reload();
       } catch (err) {
-        setError(`${t.importInvalidFile}: ${(err as Error).message}`);
+        if (err instanceof ImportSaveError) {
+          setError(`${t.importSaveFailed}: ${err.message}`);
+          // Part of the file may already be saved — show what landed.
+          await reload().catch(() => undefined);
+        } else {
+          setError(`${t.importInvalidFile}: ${errorMessage(err)}`);
+        }
       }
     } finally {
       setBusy(false);
@@ -738,9 +783,16 @@ const RawMaterials: React.FC = () => {
       setInfo(t.magazynStockNoMatches);
       return;
     }
-    // A decision is needed for Σ(C)≠D mismatches or unmatched (create/ignore)
-    // rows; otherwise import all matched materials straight away.
-    if (analysis.matches.some((m) => m.sumMismatch) || analysis.unmatched.length > 0) {
+    // A decision is needed for Σ(C)≠D mismatches, for hand-set stock the file
+    // would change, or for unmatched (create/ignore) rows; otherwise import all
+    // matched materials straight away.
+    // Parse warnings (unreadable dates, …) also open the modal so they are
+    // seen before anything is written.
+    if (
+      analysis.matches.some(needsRawStockDecision) ||
+      analysis.unmatched.length > 0 ||
+      (analysis.warnings ?? []).length > 0
+    ) {
       setRawStockAnalysis(analysis);
     } else {
       await commitRawStock(analysis, [], new Set());
@@ -755,18 +807,37 @@ const RawMaterials: React.FC = () => {
     if (!analysis) return;
     setRawStockAnalysis(null);
     const decisions: RawStockDecision[] = analysis.matches
-      .filter((m) => m.sumMismatch)
+      .filter(needsRawStockDecision)
       .map((m) => ({ itemId: m.itemId, action: actions.get(m.itemId) ?? 'reject' }));
     await commitRawStock(analysis, decisions, createNames);
   };
 
   const onDelete = async (rm: RawMaterial) => {
     setConfirmDelete(null);
-    const result = await window.electronAPI.deleteRawMaterial(rm.id);
-    if (!result.ok) {
-      setBlockedBy(result.blockedBy ?? []);
-    } else {
+    setError(null);
+    try {
+      const result = await window.electronAPI.deleteRawMaterial(rm.id);
+      if (!result.ok) {
+        setBlockedBy(result.blockedBy ?? []);
+      } else {
+        setItems((prev) => prev.filter((x) => x.id !== rm.id));
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const onDuplicate = async (rm: RawMaterial) => {
+    if (duplicatingId) return;
+    setDuplicatingId(rm.id);
+    setError(null);
+    try {
+      await window.electronAPI.duplicateRawMaterial(rm.id);
       await reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setDuplicatingId(null);
     }
   };
 
@@ -777,18 +848,15 @@ const RawMaterials: React.FC = () => {
     setBusy(true);
     setLoaderMessage(t.deleteAllInProgress);
     const total = items.length;
-    let deleted = 0;
-    let blocked = 0;
-    const blockers: string[] = [];
     try {
-      for (const rm of items) {
-        const result = await window.electronAPI.deleteRawMaterial(rm.id);
-        if (result.ok) deleted++;
-        else {
-          blocked++;
-          if (result.blockedBy) blockers.push(...result.blockedBy);
-        }
-      }
+      // One call; items still used by a product are skipped and reported.
+      const res = await window.electronAPI.deleteCatalogItems(
+        'raw',
+        items.map((rm) => rm.id),
+      );
+      const deleted = res.deleted;
+      const blocked = res.blocked.length;
+      const blockers = res.blocked.flatMap((b) => b.blockedBy);
       if (blocked === 0) {
         setInfo(t.deleteAllSuccess.replace('{n}', String(deleted)));
       } else {
@@ -801,6 +869,9 @@ const RawMaterials: React.FC = () => {
         setBlockedBy(Array.from(new Set(blockers)));
       }
       await reload();
+    } catch (err) {
+      setError(errorMessage(err));
+      await reload().catch(() => undefined);
     } finally {
       setBusy(false);
       setLoaderMessage(null);
@@ -821,12 +892,8 @@ const RawMaterials: React.FC = () => {
       <span className="supplier-chips">
         {ordered.map((id) => {
           const isPreferred = id === rm.preferredSupplierId;
-          return (
-            <span
-              key={id}
-              className={`supplier-chip ${isPreferred ? 'preferred' : ''}`}
-              title={isPreferred ? t.preferredSupplier : undefined}
-            >
+          const chip = (
+            <span key={id} className={`supplier-chip ${isPreferred ? 'preferred' : ''}`}>
               {isPreferred && (
                 <span className="supplier-chip-star">
                   <IconStar size={11} />
@@ -834,6 +901,13 @@ const RawMaterials: React.FC = () => {
               )}
               {supplierName(id)}
             </span>
+          );
+          return isPreferred ? (
+            <HoverTooltip key={id} className="hover-tooltip-compact" trigger={chip}>
+              {t.preferredSupplier}
+            </HoverTooltip>
+          ) : (
+            chip
           );
         })}
       </span>
@@ -846,38 +920,40 @@ const RawMaterials: React.FC = () => {
         <HeaderNav />
         <h1>{t.rawMaterials}</h1>
         <span className="page-header-count">{items.length}</span>
-        <button
-          type="button"
-          className="btn btn-sm"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => setSettingsOpen(true)}
-          title={t.settings}
-          aria-label={t.settings}
-        >
-          <IconSettings size={14} />
-        </button>
+        <div style={{ marginLeft: 'auto' }}>
+          <IconButton
+            className="btn-sm"
+            icon={<IconSettings size={14} />}
+            label={t.settings}
+            onClick={() => setSettingsOpen(true)}
+          />
+        </div>
       </div>
 
       <div className="card card-fill">
         <div className="toolbar">
           <div className="toolbar-actions">
             <ExportImportButtons format="csv" onExport={onExport} onImport={onImport} busy={busy} />
-            <button
-              className="btn btn-import"
-              onClick={onClickImportXlsx}
-              disabled={busy}
-              title={t.rawMaterialsImportXlsxHint}
+            <HoverTooltip
+              triggerClassName="icon-button-trigger"
+              trigger={
+                <button className="btn btn-import" onClick={onClickImportXlsx} disabled={busy}>
+                  <IconImport size={13} /> {t.rawMaterialsImportXlsx}
+                </button>
+              }
             >
-              <IconImport size={13} /> {t.rawMaterialsImportXlsx}
-            </button>
-            <button
-              className="btn btn-import"
-              onClick={onClickImportMagazyn}
-              disabled={busy}
-              title={t.rawStockImportHint}
+              {t.rawMaterialsImportXlsxHint}
+            </HoverTooltip>
+            <HoverTooltip
+              triggerClassName="icon-button-trigger"
+              trigger={
+                <button className="btn btn-import" onClick={onClickImportMagazyn} disabled={busy}>
+                  <IconImport size={13} /> {t.magazynStockImport}
+                </button>
+              }
             >
-              <IconImport size={13} /> {t.magazynStockImport}
-            </button>
+              {t.rawStockImportHint}
+            </HoverTooltip>
             <ColumnPicker
               columns={orderedColumns}
               isVisible={isVisible}
@@ -891,7 +967,6 @@ const RawMaterials: React.FC = () => {
               className="btn danger"
               onClick={() => setConfirmDeleteAll(true)}
               disabled={busy || items.length === 0}
-              title={t.deleteAll}
             >
               <IconTrash size={13} /> {t.deleteAll}
             </button>
@@ -968,8 +1043,11 @@ const RawMaterials: React.FC = () => {
               ) : (
                 sorted.length === 0 && (
                   <tr>
-                    <td colSpan={orderedVisibleIds.length + 2} className="hint">
-                      {query ? '—' : t.noData}
+                    <td
+                      colSpan={orderedVisibleIds.length + 2}
+                      className={loadError ? 'error-text' : 'hint'}
+                    >
+                      {loadError ?? (query ? '—' : t.noData)}
                     </td>
                   </tr>
                 )
@@ -996,10 +1074,8 @@ const RawMaterials: React.FC = () => {
                         className="btn-sm soft-success"
                         icon={<IconDuplicate size={14} />}
                         label={t.duplicate}
-                        onClick={async () => {
-                          await window.electronAPI.duplicateRawMaterial(rm.id);
-                          await reload();
-                        }}
+                        disabled={duplicatingId !== null}
+                        onClick={() => void onDuplicate(rm)}
                       />
                     </div>
                   </td>
@@ -1221,14 +1297,12 @@ const RawMaterials: React.FC = () => {
                                 />
                               </td>
                               <td className="actions">
-                                <button
-                                  type="button"
-                                  className="btn btn-sm soft-danger btn-icon-only"
+                                <IconButton
+                                  className="btn-sm soft-danger"
+                                  icon={<IconClose size={12} />}
+                                  label={t.delete}
                                   onClick={() => removeBatch(idx)}
-                                  title={t.delete}
-                                >
-                                  <IconClose size={12} />
-                                </button>
+                                />
                               </td>
                             </tr>
                           );
@@ -1255,12 +1329,17 @@ const RawMaterials: React.FC = () => {
                   </div>
                 </div>
               </div>
+              {editError && <div className="error-text">{editError}</div>}
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setEditing(null)}>
                 {t.cancel}
               </button>
-              <button className="btn primary-filled" onClick={onSave}>
+              <button
+                className="btn primary-filled"
+                onClick={() => void onSave()}
+                disabled={saving || !editing.name?.trim()}
+              >
                 {t.save}
               </button>
             </div>
@@ -1600,11 +1679,22 @@ const BatchTooltip: React.FC<{
 const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCancel, onApply }) => {
   const t = useT();
   useEscapeKey(onCancel);
-  const mismatches = useMemo(() => analysis.matches.filter((m) => m.sumMismatch), [analysis]);
+  const mismatches = useMemo(
+    () => analysis.matches.filter(needsRawStockDecision),
+    [analysis],
+  );
+  const hasSumMismatch = mismatches.some((m) => m.sumMismatch);
+  const hasManualConflict = mismatches.some(isManualConflict);
   const unmatched = analysis.unmatched;
-  // Default to taking the import — the file is the fresh source of truth.
+  // A plain Σ mismatch defaults to taking the import — the file is the fresh
+  // source of truth. Stock someone set by hand defaults to keeping it (the
+  // same default the main process applies), so a correction is never lost by
+  // just clicking through.
   const [actions, setActions] = useState<Map<string, 'take' | 'reject'>>(
-    () => new Map(mismatches.map((m) => [m.itemId, 'take' as const])),
+    () =>
+      new Map(
+        mismatches.map((m) => [m.itemId, isManualConflict(m) ? 'reject' : 'take'] as const),
+      ),
   );
   // Unmatched materials default to ignore; the user opts them in to create.
   const [createSet, setCreateSet] = useState<Set<string>>(new Set());
@@ -1631,15 +1721,38 @@ const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCance
         <ModalHeader
           icon={<IconImport size={18} />}
           tone="add"
-          title={t.rawStockDiffTitle}
+          title={
+            hasSumMismatch && !hasManualConflict ? t.rawStockDiffTitle : t.rawStockDecisionTitle
+          }
           onClose={onCancel}
         />
         <div className="modal-body">
+          {(analysis.warnings ?? []).length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div className="warn-text" style={{ fontWeight: 600, marginBottom: 4 }}>
+                {t.rawStockParseWarnings} ({(analysis.warnings ?? []).length})
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+                {(analysis.warnings ?? []).map((w, i) => (
+                  <li key={i} className="hint">
+                    {w}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {mismatches.length > 0 && (
             <>
-              <div className="hint" style={{ marginBottom: 12 }}>
-                {t.rawStockDiffIntro}
-              </div>
+              {hasSumMismatch && (
+                <div className="hint" style={{ marginBottom: 12 }}>
+                  {t.rawStockDiffIntro}
+                </div>
+              )}
+              {hasManualConflict && (
+                <div className="warn-text" style={{ marginBottom: 12, fontSize: 12 }}>
+                  {t.rawStockManualConflictIntro}
+                </div>
+              )}
               {unmatched.length > 0 && (
                 <div className="warn-text" style={{ marginBottom: 12, fontSize: 12 }}>
                   {t.magazynStockUnmatchedNotice.replace('{n}', String(unmatched.length))}
@@ -1659,6 +1772,8 @@ const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCance
                   <thead>
                     <tr>
                       <th>{t.name}</th>
+                      <th>{t.rawStockReasonCol}</th>
+                      <th className="num">{t.magazynStockColCurrent}</th>
                       <th className="num">{t.rawStockBatchSum}</th>
                       <th className="num">{t.rawStockReportedTotal}</th>
                       <th>{t.magazynStockColDecision}</th>
@@ -1672,6 +1787,17 @@ const RawStockDiffModal: React.FC<RawStockDiffModalProps> = ({ analysis, onCance
                           <td className="col-wrap">
                             {m.name}
                             <BatchTooltip batches={m.batches} unit={m.unit} />
+                          </td>
+                          <td>
+                            {isManualConflict(m) && (
+                              <span className="tag warn">{t.rawStockReasonManual}</span>
+                            )}{' '}
+                            {m.sumMismatch && (
+                              <span className="tag">{t.rawStockReasonSumMismatch}</span>
+                            )}
+                          </td>
+                          <td className="num">
+                            {fmt(m.currentQty)} {m.unit}
                           </td>
                           <td className="num">
                             {fmt(m.batchSum)} {m.unit}

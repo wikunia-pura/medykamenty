@@ -32,7 +32,12 @@ import type {
   Unit,
 } from '../../shared/types';
 import log from '../utils/logger';
-import { normalize as smartNormalize, suggestMatches } from './smartMatcher';
+import {
+  normalize as smartNormalize,
+  bracketlessKey,
+  findLikelyDuplicate,
+} from './smartMatcher';
+import { asNumber, asString, cleanCell } from './xlsxCells';
 
 interface ColumnMap {
   name: number;
@@ -49,46 +54,6 @@ interface ColumnMap {
 }
 
 // ---------- normalization helpers ----------
-
-function asString(v: unknown): string | undefined {
-  if (v === null || v === undefined) return undefined;
-  if (typeof v === 'string') {
-    const t = v.trim();
-    return t.length === 0 ? undefined : t;
-  }
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'object' && v !== null) {
-    if ('text' in v) return asString((v as { text: unknown }).text);
-    if ('richText' in v) {
-      const parts = (v as { richText?: { text?: string }[] }).richText ?? [];
-      const joined = parts
-        .map((p) => p?.text ?? '')
-        .join('')
-        .trim();
-      // The richText payload sometimes carries trailing markup characters
-      // (e.g. ">") from broken spreadsheet edits — strip them.
-      const cleaned = joined.replace(/[<>]+$/, '').trim();
-      return cleaned.length === 0 ? undefined : cleaned;
-    }
-    if ('result' in v) return asString((v as { result: unknown }).result);
-    if ('hyperlink' in v) return asString((v as { hyperlink: unknown }).hyperlink);
-  }
-  return undefined;
-}
-
-function asNumber(v: unknown): number | undefined {
-  if (v === null || v === undefined || v === '') return undefined;
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string') {
-    const cleaned = v.replace(/\s/g, '').replace(',', '.');
-    const n = parseFloat(cleaned);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  if (typeof v === 'object' && v !== null && 'result' in v) {
-    return asNumber((v as { result: unknown }).result);
-  }
-  return undefined;
-}
 
 function normalizeKey(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -202,7 +167,9 @@ export async function importRawMaterialsXlsx(
   // ---------- collect rows ----------
   interface ParsedRow {
     name: string;
-    supplierName: string;
+    // Undefined when the file names a placeholder ("Nieznany", "-") — the
+    // row is still imported, just without a supplier link.
+    supplierName?: string;
     contactPerson?: string;
     email?: string;
     phone?: string;
@@ -219,17 +186,24 @@ export async function importRawMaterialsXlsx(
     const r = ws.getRow(i);
     const name = asString(r.getCell(columns.name).value);
     if (!name) continue;
-    const supplierName = columns.supplier
-      ? asString(r.getCell(columns.supplier).value)
-      : undefined;
-    if (!supplierName) {
+    const supplierCell = columns.supplier ? r.getCell(columns.supplier).value : undefined;
+    if (!asString(supplierCell)) {
       summary.rawSkipped++;
       summary.warnings.push(`Wiersz ${i} ("${name}") nie ma dostawcy — pomijam.`);
       continue;
     }
+    // Placeholder cells ("Nieznany", "-", "brak", …) read as empty, so no
+    // "Nieznany" supplier is ever created: the material is imported without
+    // a supplier link instead.
+    const supplierName = cleanCell(supplierCell);
+    if (!supplierName) {
+      summary.warnings.push(
+        `Wiersz ${i} ("${name}"): dostawca nieznany ("${asString(supplierCell)}") — surowiec zaimportowano bez dostawcy.`,
+      );
+    }
 
     const packageRaw = columns.packageSize
-      ? asString(r.getCell(columns.packageSize).value)
+      ? cleanCell(r.getCell(columns.packageSize).value)
       : undefined;
     // A package size like "0,5-25" or "0.5 - 60" is a range, not a single
     // value. parseFloat would silently return the first number (0.5), which
@@ -237,7 +211,7 @@ export async function importRawMaterialsXlsx(
     // text only — moq stays empty for ranges.
     const looksLikeRange = !!packageRaw && /\d[\s,.\d]*-\s*\d/.test(packageRaw);
     const packageNum =
-      columns.packageSize && !looksLikeRange
+      packageRaw !== undefined && columns.packageSize && !looksLikeRange
         ? asNumber(r.getCell(columns.packageSize).value)
         : undefined;
 
@@ -245,16 +219,16 @@ export async function importRawMaterialsXlsx(
       name,
       supplierName,
       contactPerson: columns.contactPerson
-        ? asString(r.getCell(columns.contactPerson).value)
+        ? cleanCell(r.getCell(columns.contactPerson).value)
         : undefined,
-      email: columns.email ? asString(r.getCell(columns.email).value) : undefined,
-      phone: columns.phone ? asString(r.getCell(columns.phone).value) : undefined,
+      email: columns.email ? cleanCell(r.getCell(columns.email).value) : undefined,
+      phone: columns.phone ? cleanCell(r.getCell(columns.phone).value) : undefined,
       paymentTerms: columns.paymentTerms
-        ? asString(r.getCell(columns.paymentTerms).value)
+        ? cleanCell(r.getCell(columns.paymentTerms).value)
         : undefined,
-      supplierNotes: columns.notes ? asString(r.getCell(columns.notes).value) : undefined,
+      supplierNotes: columns.notes ? cleanCell(r.getCell(columns.notes).value) : undefined,
       purchaseNet: columns.oNet ? asNumber(r.getCell(columns.oNet).value) : undefined,
-      currency: columns.currency ? asString(r.getCell(columns.currency).value) : undefined,
+      currency: columns.currency ? cleanCell(r.getCell(columns.currency).value) : undefined,
       packageSizeKg: packageNum,
       // Keep the raw cell text only when it would not round-trip to a number
       // (e.g. "0,5-25"). Otherwise it'd duplicate moq.
@@ -263,7 +237,8 @@ export async function importRawMaterialsXlsx(
   }
 
   // ---------- pass 1: suppliers ----------
-  // Filter to skip placeholder rows like "Nieznany" supplier with no contact data.
+  // Placeholder supplier names ("Nieznany", "-") were already dropped by
+  // cleanCell above, so every name here is a real supplier.
   const allSuppliers = await db.listSuppliers();
   const supplierByKey = new Map<string, Supplier>();
   for (const s of allSuppliers) supplierByKey.set(normalizeKey(s.name), s);
@@ -283,6 +258,7 @@ export async function importRawMaterialsXlsx(
     }
   >();
   for (const row of parsed) {
+    if (!row.supplierName) continue;
     const key = normalizeKey(row.supplierName);
     const cur = supplierAgg.get(key) ?? { name: row.supplierName.trim() };
     cur.contactPerson = cur.contactPerson ?? row.contactPerson;
@@ -317,6 +293,10 @@ export async function importRawMaterialsXlsx(
     } else {
       const created = await db.createSupplier({
         name: agg.name,
+        // New suppliers from the raw-materials file are raw suppliers, so
+        // they show up in the raw supplier picker (mirrors the components
+        // importer, which sets 'component').
+        type: 'raw',
         email: agg.email ?? '',
         phone: agg.phone,
         contactPerson: agg.contactPerson,
@@ -344,11 +324,13 @@ export async function importRawMaterialsXlsx(
   const rawById = new Map<string, RawMaterial>();
   for (const rm of allRaw) rawById.set(rm.id, rm);
 
-  // Smart-normalized index: maps an aggressively-normalized name (diacritics
-  // stripped, parenthetical suffixes removed, units dropped) to the catalog
-  // entries that hit it. Used as a fallback when exact normalizeKey lookup
-  // misses but the names are obviously the same item — e.g. catalog has
-  // "Allantoina (BASF)" and the file has "Allantoina". A smart-key collision
+  // Smart-normalized index: maps a normalized name (diacritics, punctuation
+  // and bracket characters dropped, digit/letter boundaries split) to the
+  // catalog entries that hit it. Used as a fallback when exact normalizeKey
+  // lookup misses but the names differ only in formatting — e.g. "Kwas
+  // mlekowy 80%" vs "kwas mlekowy (80 %)". Bracket CONTENTS count, so
+  // "Allantoina" no longer silently lands on "Allantoina (BASF)" (that pair
+  // gets the "Możliwy duplikat" warning on create instead). A smart-key collision
   // (>1 entries) means we don't know which to target, so we leave the lookup
   // empty and let the user resolve manually via a warning.
   const rawBySmartKey = new Map<string, RawMaterial[]>();
@@ -377,8 +359,10 @@ export async function importRawMaterialsXlsx(
       const smartHits = rawBySmartKey.get(smartNormalize(p.name)) ?? [];
       if (smartHits.length === 1) aliasKeptIds.add(smartHits[0].id);
     }
+    const incomingLoose = new Set(parsed.map((p) => bracketlessKey(p.name)));
     for (const rm of allRaw) {
       if (incomingNames.has(normalizeKey(rm.name))) continue;
+      if (incomingLoose.has(bracketlessKey(rm.name))) continue;
       if (aliasKeptIds.has(rm.id)) continue;
       const res = await db.deleteRawMaterial(rm.id);
       if (res.ok) {
@@ -416,8 +400,10 @@ export async function importRawMaterialsXlsx(
     }));
 
   for (const row of parsed) {
-    const supplier = supplierByKey.get(normalizeKey(row.supplierName));
-    if (!supplier) {
+    const supplier = row.supplierName
+      ? supplierByKey.get(normalizeKey(row.supplierName))
+      : undefined;
+    if (row.supplierName && !supplier) {
       summary.warnings.push(
         `Wewnętrzny błąd: dostawca "${row.supplierName}" nie został upsertowany — pomijam "${row.name}".`,
       );
@@ -455,14 +441,15 @@ export async function importRawMaterialsXlsx(
         // Conservative merge — preserve manually edited values, but always
         // refresh the "freshest from file" fields (price/currency/moq/preferred
         // supplier).
-        const supplierIds = existing.supplierIds.includes(supplier.id)
-          ? existing.supplierIds
-          : [...existing.supplierIds, supplier.id];
+        const supplierIds =
+          !supplier || existing.supplierIds.includes(supplier.id)
+            ? existing.supplierIds
+            : [...existing.supplierIds, supplier.id];
         patch = {
           supplierIds,
-          preferredSupplierId: supplier.id,
           notes: mergeNotes(existing.notes, packageNote),
         };
+        if (supplier) patch.preferredSupplierId = supplier.id;
         if (row.purchaseNet !== undefined && row.purchaseNet > 0) {
           patch.lastPurchasePriceNet = row.purchaseNet;
         }
@@ -475,8 +462,8 @@ export async function importRawMaterialsXlsx(
         // only fields the file doesn't carry (unit, factorySupplied,
         // leadTimeDays, shelfLifeMonths, mpFirmaSymbol) are preserved.
         patch = {
-          supplierIds: [supplier.id],
-          preferredSupplierId: supplier.id,
+          supplierIds: supplier ? [supplier.id] : [],
+          preferredSupplierId: supplier?.id,
           notes: packageNote,
           lastPurchasePriceNet:
             row.purchaseNet !== undefined && row.purchaseNet > 0 ? row.purchaseNet : undefined,
@@ -510,10 +497,7 @@ export async function importRawMaterialsXlsx(
       // similar — this catches probable duplicates the user can clean up later
       // by adding an alias in Stock Import.
       const candidates = suggestionCandidates();
-      const topMatch = suggestMatches({ name: row.name }, candidates, {
-        limit: 1,
-        threshold: 0.85,
-      })[0];
+      const topMatch = findLikelyDuplicate(row.name, candidates);
       if (topMatch) {
         summary.warnings.push(
           `Możliwy duplikat: "${row.name}" wygląda jak istniejący "${topMatch.name}" (${Math.round(topMatch.confidence * 100)}%). Jeśli to ta sama pozycja, dodaj alias przy następnym imporcie magazynu.`,
@@ -523,8 +507,8 @@ export async function importRawMaterialsXlsx(
       const created = await db.createRawMaterial({
         name: row.name,
         unit: 'kg' as Unit,
-        supplierIds: [supplier.id],
-        preferredSupplierId: supplier.id,
+        supplierIds: supplier ? [supplier.id] : [],
+        preferredSupplierId: supplier?.id,
         factorySupplied: false,
         moq:
           row.packageSizeKg !== undefined && row.packageSizeKg > 0

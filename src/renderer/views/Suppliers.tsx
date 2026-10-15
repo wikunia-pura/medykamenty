@@ -24,7 +24,11 @@ import {
   saveFile,
   openFile,
   formatStats,
+  ImportSaveError,
 } from '../utils/exportImport';
+
+const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
 const Suppliers: React.FC = () => {
   const t = useT();
@@ -36,6 +40,13 @@ const Suppliers: React.FC = () => {
   const [initialLoading, setInitialLoading] = useState(true);
   const showSkeleton = useMinimumLoading(initialLoading);
   const [error, setError] = useState<string | null>(null);
+  // A failed first load — shown in the table instead of "no data".
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Save error of the edit modal, shown inside it (the page banner sits under
+  // the modal overlay).
+  const [editError, setEditError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
@@ -132,8 +143,11 @@ const Suppliers: React.FC = () => {
       // First load shows skeleton rows in the table (see SkeletonRows), not a
       // blocking overlay.
       setInitialLoading(true);
+      setLoadError(null);
       try {
         await reload();
+      } catch (err) {
+        setLoadError(`${t.loadFailed}: ${errorMessage(err)}`);
       } finally {
         setInitialLoading(false);
       }
@@ -170,8 +184,13 @@ const Suppliers: React.FC = () => {
   };
   const sorted = useMemo(() => sortRows(filtered, sort, sortValueFor), [filtered, sort, t]);
 
+  const openEditor = (s: Partial<Supplier>) => {
+    setEditError(null);
+    setEditing(s);
+  };
+
   const onAdd = () =>
-    setEditing({
+    openEditor({
       name: '',
       email: '',
       phone: '',
@@ -181,8 +200,8 @@ const Suppliers: React.FC = () => {
     });
 
   const onSave = async () => {
-    if (!editing || !editing.name?.trim()) return;
-    setError(null);
+    if (!editing || !editing.name?.trim() || saving) return;
+    setEditError(null);
     const payload = {
       name: editing.name.trim(),
       email: editing.email?.trim() ?? '',
@@ -193,6 +212,7 @@ const Suppliers: React.FC = () => {
       notes: editing.notes?.trim() || undefined,
       preferredEmailLanguage: editing.preferredEmailLanguage as Lang | undefined,
     };
+    setSaving(true);
     try {
       if (editing.id) {
         await window.electronAPI.updateSupplier(editing.id, payload);
@@ -202,7 +222,9 @@ const Suppliers: React.FC = () => {
       setEditing(null);
       await reload();
     } catch (err) {
-      setError((err as Error).message);
+      setEditError(errorMessage(err));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -237,7 +259,13 @@ const Suppliers: React.FC = () => {
         setInfo(formatStats(stats));
         await reload();
       } catch (err) {
-        setError(`${t.importInvalidFile}: ${(err as Error).message}`);
+        if (err instanceof ImportSaveError) {
+          setError(`${t.importSaveFailed}: ${err.message}`);
+          // Part of the file may already be saved — show what landed.
+          await reload().catch(() => undefined);
+        } else {
+          setError(`${t.importInvalidFile}: ${errorMessage(err)}`);
+        }
       }
     } finally {
       setBusy(false);
@@ -247,11 +275,30 @@ const Suppliers: React.FC = () => {
 
   const onDelete = async (s: Supplier) => {
     setConfirmDelete(null);
-    const result = await window.electronAPI.deleteSupplier(s.id);
-    if (!result.ok) {
-      setBlockedBy(result.blockedBy ?? []);
-    } else {
+    setError(null);
+    try {
+      const result = await window.electronAPI.deleteSupplier(s.id);
+      if (!result.ok) {
+        setBlockedBy(result.blockedBy ?? []);
+      } else {
+        setItems((prev) => prev.filter((x) => x.id !== s.id));
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const onDuplicate = async (s: Supplier) => {
+    if (duplicatingId) return;
+    setDuplicatingId(s.id);
+    setError(null);
+    try {
+      await window.electronAPI.duplicateSupplier(s.id);
       await reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setDuplicatingId(null);
     }
   };
 
@@ -262,18 +309,16 @@ const Suppliers: React.FC = () => {
     setBusy(true);
     setLoaderMessage(t.deleteAllInProgress);
     const total = items.length;
-    let deleted = 0;
-    let blocked = 0;
-    const blockers: string[] = [];
     try {
-      for (const s of items) {
-        const result = await window.electronAPI.deleteSupplier(s.id);
-        if (result.ok) deleted++;
-        else {
-          blocked++;
-          if (result.blockedBy) blockers.push(...result.blockedBy);
-        }
-      }
+      // One call; suppliers still referenced by catalog items are skipped and
+      // reported.
+      const res = await window.electronAPI.deleteCatalogItems(
+        'supplier',
+        items.map((s) => s.id),
+      );
+      const deleted = res.deleted;
+      const blocked = res.blocked.length;
+      const blockers = res.blocked.flatMap((b) => b.blockedBy);
       if (blocked === 0) {
         setInfo(t.deleteAllSuccess.replace('{n}', String(deleted)));
       } else {
@@ -286,6 +331,9 @@ const Suppliers: React.FC = () => {
         setBlockedBy(Array.from(new Set(blockers)));
       }
       await reload();
+    } catch (err) {
+      setError(errorMessage(err));
+      await reload().catch(() => undefined);
     } finally {
       setBusy(false);
       setLoaderMessage(null);
@@ -322,7 +370,6 @@ const Suppliers: React.FC = () => {
               className="btn danger"
               onClick={() => setConfirmDeleteAll(true)}
               disabled={busy || items.length === 0}
-              title={t.deleteAll}
             >
               <IconTrash size={13} /> {t.deleteAll}
             </button>
@@ -354,8 +401,11 @@ const Suppliers: React.FC = () => {
               ) : (
                 sorted.length === 0 && (
                   <tr>
-                    <td colSpan={orderedVisibleIds.length + 2} className="hint">
-                      {query ? '—' : t.noData}
+                    <td
+                      colSpan={orderedVisibleIds.length + 2}
+                      className={loadError ? 'error-text' : 'hint'}
+                    >
+                      {loadError ?? (query ? '—' : t.noData)}
                     </td>
                   </tr>
                 )
@@ -376,16 +426,14 @@ const Suppliers: React.FC = () => {
                         className="btn-sm soft-edit"
                         icon={<IconEdit size={14} />}
                         label={t.edit}
-                        onClick={() => setEditing(s)}
+                        onClick={() => openEditor(s)}
                       />
                       <IconButton
                         className="btn-sm soft-success"
                         icon={<IconDuplicate size={14} />}
                         label={t.duplicate}
-                        onClick={async () => {
-                          await window.electronAPI.duplicateSupplier(s.id);
-                          await reload();
-                        }}
+                        disabled={duplicatingId !== null}
+                        onClick={() => void onDuplicate(s)}
                       />
                     </div>
                   </td>
@@ -490,12 +538,17 @@ const Suppliers: React.FC = () => {
                   onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
                 />
               </div>
+              {editError && <div className="error-text">{editError}</div>}
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setEditing(null)}>
                 {t.cancel}
               </button>
-              <button className="btn primary-filled" onClick={onSave}>
+              <button
+                className="btn primary-filled"
+                onClick={() => void onSave()}
+                disabled={saving || !editing.name?.trim()}
+              >
                 {t.save}
               </button>
             </div>

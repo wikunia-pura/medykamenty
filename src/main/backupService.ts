@@ -6,6 +6,7 @@ import yaml from 'js-yaml';
 import log from './utils/logger';
 import type { StoreSchema } from '../shared/types';
 import type Database from './database';
+import { localDateIso } from '../shared/dates';
 
 // Daily safety net: on every launch the app snapshots all shared data into
 // userData/backups (one file per day, newest AUTO_BACKUP_KEEP kept). Manual
@@ -28,6 +29,22 @@ export function validateBackup(parsed: unknown): StoreSchema {
   for (const key of ['suppliers', 'rawMaterials', 'components', 'products'] as const) {
     if (!Array.isArray(b[key])) {
       throw new Error(`Uszkodzona kopia zapasowa: brak sekcji "${key}".`);
+    }
+  }
+  // Optional sections (absent in backups older than the feature) must still be
+  // lists when present — a replace restore clears every table it carries.
+  for (const key of [
+    'stockSnapshots',
+    'productionPlans',
+    'shortageReports',
+    'emailBatches',
+    'orders',
+    'workflowTemplates',
+    'rawMaterialAliases',
+    'componentAliases',
+  ] as const) {
+    if (b[key] !== undefined && !Array.isArray(b[key])) {
+      throw new Error(`Uszkodzona kopia zapasowa: sekcja "${key}" ma zły format.`);
     }
   }
   return b as StoreSchema;
@@ -89,7 +106,7 @@ export async function runAutoBackup(
 ): Promise<AutoBackupResult | null> {
   try {
     const dir = getBackupsDir();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateIso();
     const target = path.join(dir, `${AUTO_BACKUP_PREFIX}${today}.json`);
     if (!opts.force && fs.existsSync(target)) return null;
 
